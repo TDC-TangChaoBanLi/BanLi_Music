@@ -17,33 +17,55 @@
 - **设置**：主题（跟随系统/浅色/深色）、动态取色、音质偏好、来源启用、移动网络播放/下载策略、获取地址失败时切换来源、请求状态、缓存清理。
 - **测试**：去重算法、限流器、LRC 解析、来源 URI 编解码、GD 响应解析与 MockWebServer 集成测试，共 34 个 JVM 单元测试。
 
-## 构建环境
+## 开发环境
+
+### 已验证环境
 
 | 项目 | 版本 / 路径 |
 | --- | --- |
-| 构建工具 | Kotlin Toolchain CLI 0.13.0（`./kotlin`） |
-| 模块 | `androidApp/`（`product: android/app`） |
-| Android SDK | `~/Softwares/AndroidSDK`（本工作区 `local.properties` 已配置） |
-| SDK Platform / Build Tools | `android-37.0` / `37.0.0` |
-| Kotlin | 2.4.21，JVM target 17 |
-| Java 运行时 | 系统 Java 25（`.vscode/settings.json` 注入 `JAVA_HOME`） |
+| 操作系统 | Fedora Linux 44（Workstation Edition），x86_64 |
+| JDK | OpenJDK 25.0.4.1（Red Hat build） |
+| `JAVA_HOME` | `/usr/lib/jvm/java-25-openjdk` |
+| Android SDK | `~/Softwares/AndroidSDK` |
+| SDK Platform | `android-37.0` |
+| SDK Build Tools | `37.0.0` |
+| 构建工具 | Kotlin Toolchain CLI 0.13.0（`abc7a5f`，2026-10-01） |
+| Kotlin | 2.4.21 |
+| KSP | 2.3.12（Kotlin Toolchain 默认） |
+| Compose BOM | 2026.09.00 |
+| Room | 2.8.5 |
+| Media3 | 1.11.1 |
+| JVM target | 17 |
 | compileSdk / targetSdk / minSdk | 37 / 37 / 26 |
 | applicationId / namespace | `com.banlimusic.app` |
+| 推荐 IDE | VS Code + Kotlin 插件 |
 
-> Kotlin Toolchain 的 Android 打包阶段会在内部生成临时 Gradle 工程，通过 Gradle 9.5.0 + AGP 9.3.1 完成 APK/AAB。项目仓库不维护 Gradle 文件，日常只需使用 `./kotlin` 命令；Gradle 发行版首次构建后会被缓存。
+### 环境变量与本地配置
 
-`module.yaml` 已将默认 Google Maven 仓库覆盖为 `https://dl.google.com/dl/android/maven2`，避免本机无法访问 `maven.google.com` 时反复超时。
+- `JAVA_HOME`：指向 JDK 25（本机为 `/usr/lib/jvm/java-25-openjdk`）。
+- `ANDROID_HOME` / `ANDROID_SDK_ROOT`：指向 Android SDK（本机为 `~/Softwares/AndroidSDK`）。
+- `local.properties`：保存 `sdk.dir`，不提交 Git；Kotlin Toolchain 的 Android 构建会读取它。
+- `.vscode/settings.json`：把上述路径注入 VS Code 终端，避免每次手动 export。
+- 项目自带 `./kotlin`（Linux/macOS）和 `kotlin.bat`（Windows）wrapper；首次运行会下载并校验 Kotlin Toolchain 0.13.0。
+
+### 首次构建与网络说明
+
+- `androidApp/module.yaml` 已将默认 Google Maven 仓库覆盖为 `https://dl.google.com/dl/android/maven2`，避免本机无法访问 `maven.google.com` 时反复超时。
+- Kotlin Toolchain 的 Android 打包阶段会在内部生成临时 Gradle 工程，通过 Gradle 9.5.0 + AGP 9.3.1 完成 APK/AAB。项目仓库不维护 Gradle 文件，日常只需使用 `./kotlin` 命令。
+- 首次 Android 打包会下载 Gradle 9.5.0；如果 `services.gradle.org` 较慢，可预先从腾讯镜像 `https://mirrors.cloud.tencent.com/gradle/gradle-9.5.0-bin.zip` 下载并放入 `~/.gradle/wrapper/dists/gradle-9.5.0-bin/` 对应缓存目录。缓存完成后可离线构建。
 
 ### 构建与测试
 
 ```bash
-./kotlin build                 # 编译并生成 APK（路径以命令输出为准）
+./kotlin build                 # 编译并生成 APK
 ./kotlin test                  # 运行 JVM 单元测试
 ./kotlin package -m androidApp # 生成发布 AAB（可选）
 ./kotlin run -m androidApp     # 安装并运行到已连接的设备/模拟器
 ```
 
-首次构建需要下载依赖与工具链组件。Android SDK 路径来自 `local.properties` 或 `ANDROID_HOME`。
+当前 APK 输出路径为 `build/tasks/_androidApp_buildAndroidDebug/gradle-project-debug.apk`（该路径可能随 Toolchain 版本调整，以命令输出为准）。
+
+首次构建需要下载依赖与工具链组件。Android SDK 路径来自 `local.properties` 或 `ANDROID_HOME`。新增 `shared/`、`desktopApp/` 等模块时，需要把目录名加入 `project.yaml` 的 `modules` 列表。
 
 ## 架构
 

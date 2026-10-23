@@ -1,0 +1,270 @@
+package com.banlimusic.app.feature.search
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.banlimusic.app.core.datastore.SUPPORTED_SOURCES
+import com.banlimusic.app.core.model.Track
+import com.banlimusic.app.feature.common.AppViewModelProvider
+import com.banlimusic.app.ui.components.EmptyState
+import com.banlimusic.app.ui.components.ErrorCard
+import com.banlimusic.app.ui.components.SectionHeader
+import com.banlimusic.app.ui.components.TrackRow
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SearchScreen(
+    onPlayQueue: (List<Track>, Int) -> Unit,
+    viewModel: SearchViewModel = viewModel(factory = AppViewModelProvider.Factory),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val history by viewModel.history.collectAsStateWithLifecycle()
+    val enabledSources by viewModel.enabledSources.collectAsStateWithLifecycle()
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = state.query,
+            onValueChange = viewModel::onQueryChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            placeholder = { Text("搜索歌曲、歌手或专辑") },
+            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+            trailingIcon = {
+                if (state.query.isNotEmpty()) {
+                    IconButton(onClick = { viewModel.onQueryChange("") }) {
+                        Icon(Icons.Rounded.Close, contentDescription = "清空")
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(18.dp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    viewModel.submit()
+                    keyboard?.hide()
+                },
+            ),
+        )
+
+        if (state.query.isBlank()) {
+            SearchLanding(
+                history = history,
+                enabledSources = enabledSources,
+                onQueryClick = viewModel::useHistory,
+                onClearHistory = viewModel::clearHistory,
+            )
+            return@Column
+        }
+
+        if (state.isSearching && state.results.isNotEmpty()) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp),
+            )
+        }
+
+        Box(modifier = Modifier.weight(1f)) {
+            when {
+                state.isSearching && state.results.isEmpty() -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .align(Alignment.Center),
+                        strokeWidth = 3.dp,
+                    )
+                }
+
+                state.error != null && state.results.isEmpty() -> {
+                    ErrorCard(
+                        message = state.error.orEmpty(),
+                        onRetry = viewModel::retry,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+
+                state.results.isEmpty() -> {
+                    EmptyState(
+                        title = "没有找到相关歌曲",
+                        description = "换个关键词试试，或在设置中启用更多音乐源。",
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                }
+
+                else -> {
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "找到 ${state.results.size} 首",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.weight(1f))
+                                if (state.error != null) {
+                                    Text(
+                                        text = "部分来源加载失败",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            }
+                        }
+                        itemsIndexed(
+                            items = state.results,
+                            key = { _, track -> track.id },
+                        ) { index, track ->
+                            TrackRow(
+                                track = track,
+                                onClick = {
+                                    keyboard?.hide()
+                                    onPlayQueue(state.results, index)
+                                },
+                                isFavorite = track.id in state.favoriteIds,
+                                onToggleFavorite = { viewModel.toggleFavorite(track) },
+                            )
+                        }
+                        item {
+                            if (state.hasMore) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (state.isLoadingMore) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            strokeWidth = 2.dp,
+                                        )
+                                    } else {
+                                        TextButton(onClick = viewModel::loadMore) {
+                                            Text("加载更多")
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "已经到底了",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SearchLanding(
+    history: List<String>,
+    enabledSources: Set<String>,
+    onQueryClick: (String) -> Unit,
+    onClearHistory: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp),
+    ) {
+        if (history.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "搜索历史",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onClearHistory) { Text("清空") }
+            }
+            Spacer(Modifier.height(4.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                history.forEach { query ->
+                    AssistChip(
+                        onClick = { onQueryClick(query) },
+                        label = { Text(query) },
+                    )
+                }
+            }
+        } else {
+            EmptyState(
+                title = "搜索音乐",
+                description = "输入歌名、歌手或专辑，结果会自动合并并去重。",
+                icon = Icons.Rounded.Search,
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+        val names = SUPPORTED_SOURCES.filter { it.id in enabledSources }.joinToString("、") { it.label }
+        if (names.isNotBlank()) {
+            Text(
+                text = "已启用音源：$names",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "GD 音乐台限制每 5 分钟 50 次请求，搜索已做 300ms 防抖。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            )
+        }
+    }
+}
