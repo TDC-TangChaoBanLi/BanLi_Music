@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -26,16 +27,22 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -51,6 +58,8 @@ import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.ErrorCard
 import com.banlimusic.app.ui.components.SectionHeader
 import com.banlimusic.app.ui.components.TrackRow
+import com.banlimusic.app.ui.components.dragSelect
+import com.banlimusic.app.ui.components.qualityLabel
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -61,9 +70,23 @@ fun SearchScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.history.collectAsStateWithLifecycle()
     val enabledSources by viewModel.enabledSources.collectAsStateWithLifecycle()
+    val favoriteCategories by viewModel.favoriteCategories.collectAsStateWithLifecycle()
+    val defaultCategory by viewModel.defaultFavoriteCategory.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
+    val listState = rememberLazyListState()
+    val validIds = remember(state.results) { state.results.map { it.id }.toSet() }
+    var chosenCategory by remember(defaultCategory) { mutableStateOf(defaultCategory) }
+    var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var chosenQuality by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(state.selectedIds) {
+        qualities = viewModel.downloadQualities()
+    }
+    LaunchedEffect(qualities) {
+        if (chosenQuality !in qualities) chosenQuality = qualities.firstOrNull()
+    }
 
     LaunchedEffect(message) {
         message?.let {
@@ -168,6 +191,7 @@ fun SearchScreen(
 
                 else -> {
                     LazyColumn(
+                        state = listState,
                         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
@@ -216,11 +240,33 @@ fun SearchScreen(
                                     }
                                 },
                                 isFavorite = track.id in state.favoriteIds,
-                                onToggleFavorite = { viewModel.toggleFavorite(track) },
+                                onToggleFavorite = if (state.selectionMode) {
+                                    null
+                                } else {
+                                    { viewModel.toggleFavorite(track) }
+                                },
                                 selected = if (state.selectionMode) {
                                     track.id in state.selectedIds
                                 } else {
                                     null
+                                },
+                                onLongClick = if (state.selectionMode) {
+                                    null
+                                } else {
+                                    {
+                                        viewModel.setSelectionMode(true)
+                                        viewModel.toggleSelection(track.id)
+                                    }
+                                },
+                                selectionDragModifier = if (state.selectionMode) {
+                                    Modifier.dragSelect(
+                                        enabled = true,
+                                        listState = listState,
+                                        validKeys = validIds,
+                                        onSelect = viewModel::toggleSelection,
+                                    )
+                                } else {
+                                    Modifier
                                 },
                             )
                         }
@@ -262,8 +308,14 @@ fun SearchScreen(
         if (state.selectionMode) {
             SelectionActionBar(
                 count = state.selectedIds.size,
-                onFavorite = viewModel::batchFavorite,
-                onDownload = viewModel::batchDownload,
+                categories = (favoriteCategories + defaultCategory).distinct(),
+                chosenCategory = chosenCategory,
+                onCategoryChange = { chosenCategory = it },
+                qualities = qualities,
+                chosenQuality = chosenQuality,
+                onQualityChange = { chosenQuality = it },
+                onFavorite = { viewModel.batchFavorite(chosenCategory) },
+                onDownload = { viewModel.batchDownload(chosenQuality) },
                 onCancel = viewModel::clearSelection,
             )
         }
@@ -284,28 +336,88 @@ private fun SearchPrompt(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SelectionActionBar(
     count: Int,
+    categories: List<String>,
+    chosenCategory: String,
+    onCategoryChange: (String) -> Unit,
+    qualities: List<Int>,
+    chosenQuality: Int?,
+    onQualityChange: (Int) -> Unit,
     onFavorite: () -> Unit,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "已选 $count 首",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = onFavorite, enabled = count > 0) { Text("收藏") }
-        TextButton(onClick = onDownload, enabled = count > 0) { Text("下载") }
-        TextButton(onClick = onCancel) { Text("取消") }
+    var categoryMenu by remember { mutableStateOf(false) }
+    var qualityMenu by remember { mutableStateOf(false) }
+    Surface(tonalElevation = 6.dp, shadowElevation = 6.dp) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "已选 $count 首",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onCancel) { Text("取消") }
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Box {
+                    TextButton(onClick = { categoryMenu = true }) {
+                        Text("收藏夹: $chosenCategory", maxLines = 1)
+                    }
+                    DropdownMenu(
+                        expanded = categoryMenu,
+                        onDismissRequest = { categoryMenu = false },
+                    ) {
+                        categories.forEach { category ->
+                            DropdownMenuItem(
+                                text = { Text(category) },
+                                onClick = {
+                                    categoryMenu = false
+                                    onCategoryChange(category)
+                                },
+                            )
+                        }
+                    }
+                }
+                TextButton(onClick = onFavorite, enabled = count > 0) { Text("收藏") }
+                if (qualities.isNotEmpty()) {
+                    Box {
+                        TextButton(onClick = { qualityMenu = true }) {
+                            Text(
+                                "音质: ${chosenQuality?.let(::qualityLabel) ?: "默认"}",
+                                maxLines = 1,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = qualityMenu,
+                            onDismissRequest = { qualityMenu = false },
+                        ) {
+                            qualities.forEach { quality ->
+                                DropdownMenuItem(
+                                    text = { Text(qualityLabel(quality)) },
+                                    onClick = {
+                                        qualityMenu = false
+                                        onQualityChange(quality)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                TextButton(onClick = onDownload, enabled = count > 0) { Text("下载") }
+            }
+        }
     }
 }
 

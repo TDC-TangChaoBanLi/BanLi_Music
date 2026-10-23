@@ -1,11 +1,13 @@
 package com.banlimusic.app.core.limiter
 
 import com.banlimusic.app.core.common.MusicException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class SlidingWindowRateLimiterTest {
 
     private class FakeTime(var now: Long = 0L) : TimeSource {

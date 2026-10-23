@@ -29,17 +29,16 @@ const val MIN_GD_REQUEST_INTERVAL_MS = 1_000L
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
-    val qualityKbps: Int = 320,
+    val qualityKbps: Int = 128,
     val enabledSources: Set<String> = setOf("netease"),
     val allowMobileNetwork: Boolean = true,
-    val autoSwitchSource: Boolean = true,
     val playbackRetryCount: Int = 3,
     val consecutiveFailureLimit: Int = 3,
     val defaultShowLyrics: Boolean = false,
     val searchPageSize: Int = 20,
     val apiLimitPerWindow: Int = 45,
     val downloadDirectory: String = "",
-    val downloadQualityKbps: Int = 0,
+    val downloadQualityKbps: Int = 128,
     val downloadLyrics: Boolean = false,
     val downloadArtwork: Boolean = false,
     val cacheMaxBytes: Long = DEFAULT_CACHE_MAX_BYTES,
@@ -68,7 +67,8 @@ val BOTTOM_NAV_OPTIONS = listOf(
     NavOption("settings", "设置"),
 )
 
-val DEFAULT_BOTTOM_NAV_ITEMS = BOTTOM_NAV_OPTIONS.map { it.id }
+/** Home sits in the middle of the default five-item navigation bar. */
+val DEFAULT_BOTTOM_NAV_ITEMS = listOf("search", "library", "home", "downloads", "settings")
 
 private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 
@@ -80,7 +80,6 @@ class SettingsRepository(private val context: Context) {
         val quality = intPreferencesKey("quality_kbps")
         val sources = stringSetPreferencesKey("enabled_sources")
         val allowMobileNetwork = booleanPreferencesKey("allow_mobile_network")
-        val autoSwitchSource = booleanPreferencesKey("auto_switch_source")
         val playbackRetryCount = intPreferencesKey("playback_retry_count")
         val consecutiveFailureLimit = intPreferencesKey("consecutive_failure_limit")
         val defaultShowLyrics = booleanPreferencesKey("default_show_lyrics")
@@ -108,10 +107,9 @@ class SettingsRepository(private val context: Context) {
                     ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
                     ?: ThemeMode.SYSTEM,
                 dynamicColor = preferences[Keys.dynamicColor] ?: true,
-                qualityKbps = preferences[Keys.quality] ?: 320,
+                qualityKbps = preferences[Keys.quality] ?: 128,
                 enabledSources = preferences[Keys.sources] ?: setOf("netease"),
                 allowMobileNetwork = preferences[Keys.allowMobileNetwork] ?: true,
-                autoSwitchSource = preferences[Keys.autoSwitchSource] ?: true,
                 playbackRetryCount = (preferences[Keys.playbackRetryCount] ?: 3).coerceIn(0, 10),
                 consecutiveFailureLimit = (preferences[Keys.consecutiveFailureLimit] ?: 3).coerceIn(1, 10),
                 defaultShowLyrics = preferences[Keys.defaultShowLyrics] ?: false,
@@ -119,8 +117,8 @@ class SettingsRepository(private val context: Context) {
                 apiLimitPerWindow = (preferences[Keys.apiLimitPerWindow] ?: 45)
                     .coerceIn(1, MAX_API_LIMIT_PER_WINDOW),
                 downloadDirectory = preferences[Keys.downloadDirectory].orEmpty(),
-                downloadQualityKbps = (preferences[Keys.downloadQuality] ?: 0)
-                    .takeIf { it > 0 } ?: 0,
+                downloadQualityKbps = (preferences[Keys.downloadQuality] ?: 128)
+                    .takeIf { it > 0 } ?: 128,
                 downloadLyrics = preferences[Keys.downloadLyrics] ?: false,
                 downloadArtwork = preferences[Keys.downloadArtwork] ?: false,
                 cacheMaxBytes = (preferences[Keys.cacheMaxBytes] ?: DEFAULT_CACHE_MAX_BYTES)
@@ -160,10 +158,6 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAllowMobileNetwork(enabled: Boolean) = context.settingsDataStore.edit {
         it[Keys.allowMobileNetwork] = enabled
-    }
-
-    suspend fun setAutoSwitchSource(enabled: Boolean) = context.settingsDataStore.edit {
-        it[Keys.autoSwitchSource] = enabled
     }
 
     suspend fun setPlaybackRetryCount(count: Int) = context.settingsDataStore.edit {

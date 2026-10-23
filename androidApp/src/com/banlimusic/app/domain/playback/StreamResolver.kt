@@ -25,7 +25,8 @@ class StreamResolver(
         if (!current.allowMobileNetwork && networkMonitor?.isMetered() == true) {
             throw MusicException.Unavailable("已关闭移动网络播放，请连接 Wi-Fi 或在设置中允许移动网络")
         }
-        val effective = if (current.autoSwitchSource) candidates else candidates.take(1)
+        // Playback retry handles failures; do not silently switch to another source.
+        val effective = candidates.take(1)
         val quality = qualityKbps ?: current.qualityKbps
         val cacheKey = effective.joinToString(";") { "${it.providerId}:${it.providerTrackId}" } + ":$quality"
         cache.get(cacheKey)?.let { return it }

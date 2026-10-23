@@ -32,6 +32,7 @@ class GdMusicProvider(
         streaming = true,
         lyrics = true,
         download = true,
+        downloadQualities = listOf(128, 192, 320, 740, 999),
         artwork = true,
     )
 

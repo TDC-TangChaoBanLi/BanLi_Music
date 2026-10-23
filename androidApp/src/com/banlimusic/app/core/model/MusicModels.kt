@@ -37,6 +37,8 @@ data class ProviderCapabilities(
     val streaming: Boolean = true,
     val lyrics: Boolean = false,
     val download: Boolean = false,
+    /** Empty means the provider does not expose quality choices. */
+    val downloadQualities: List<Int> = emptyList(),
     val artwork: Boolean = false,
     val playlists: Boolean = false,
 )

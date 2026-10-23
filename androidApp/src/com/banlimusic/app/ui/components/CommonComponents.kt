@@ -1,7 +1,9 @@
 package com.banlimusic.app.ui.components
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +51,7 @@ fun providerLabel(providerId: String): String = when (providerId) {
     "gd-joox" -> "JOOX"
     "gd-bilibili" -> "B站"
     "local" -> "本地"
+    "download" -> "已下载"
     else -> providerId.substringAfterLast('-')
 }
 
@@ -134,6 +137,7 @@ fun SourceBadge(providerId: String) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TrackRow(
     track: Track,
@@ -142,13 +146,21 @@ fun TrackRow(
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
     selected: Boolean? = null,
+    onLongClick: (() -> Unit)? = null,
+    selectionDragModifier: Modifier = Modifier,
     trailing: (@Composable () -> Unit)? = null,
 ) {
+    val clickModifier = if (onLongClick != null) {
+        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
+            .then(selectionDragModifier)
+            .then(clickModifier)
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

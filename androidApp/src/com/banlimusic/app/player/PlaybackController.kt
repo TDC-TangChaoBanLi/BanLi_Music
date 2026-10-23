@@ -146,13 +146,13 @@ class PlaybackController(
         failedMediaId = null
         scope.launch {
             val tracks = queue.ifEmpty { listOf(track) }
-            val localFiles = runCatching {
-                downloads.completedFiles(tracks.map { it.id })
+            val localUris = runCatching {
+                downloads.completedUris(tracks.map { it.id })
             }.getOrDefault(emptyMap())
             val items = tracks.map { item ->
-                val localFile = localFiles[item.id]
-                if (localFile != null) {
-                    TrackMediaItems.createLocal(item, Uri.fromFile(localFile), json)
+                val localUri = localUris[item.id]
+                if (localUri != null) {
+                    TrackMediaItems.createLocal(item, localUri, json)
                 } else {
                     TrackMediaItems.create(item, json)
                 }
@@ -166,12 +166,14 @@ class PlaybackController(
         }
     }
 
-    fun playFile(track: Track, file: File) {
+    fun playFile(track: Track, file: File) = playFile(track, Uri.fromFile(file))
+
+    fun playFile(track: Track, uri: Uri) {
         retryJob?.cancel()
         retryAttempt = 0
         consecutiveFailures = 0
         failedMediaId = null
-        val item = TrackMediaItems.createLocal(track, Uri.fromFile(file), json)
+        val item = TrackMediaItems.createLocal(track, uri, json)
         withController { player ->
             player.setMediaItem(item)
             player.prepare()

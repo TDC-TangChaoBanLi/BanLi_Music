@@ -64,9 +64,6 @@ class SettingsViewModel(
     fun setAllowMobileNetwork(enabled: Boolean) =
         viewModelScope.launch { settings.setAllowMobileNetwork(enabled) }
 
-    fun setAutoSwitchSource(enabled: Boolean) =
-        viewModelScope.launch { settings.setAutoSwitchSource(enabled) }
-
     fun setPlaybackRetryCount(count: Int) =
         viewModelScope.launch { settings.setPlaybackRetryCount(count) }
 

@@ -10,6 +10,7 @@ import com.banlimusic.app.core.database.dao.DownloadDao
 import com.banlimusic.app.core.database.dao.LibraryDao
 import com.banlimusic.app.core.database.dao.LocalMusicDao
 import com.banlimusic.app.core.database.entity.DownloadTaskEntity
+import com.banlimusic.app.core.database.entity.FavoriteCategoryEntity
 import com.banlimusic.app.core.database.entity.FavoriteTrackEntity
 import com.banlimusic.app.core.database.entity.LocalTrackEntity
 import com.banlimusic.app.core.database.entity.PlayHistoryEntity
@@ -22,8 +23,9 @@ import com.banlimusic.app.core.database.entity.SearchHistoryEntity
         SearchHistoryEntity::class,
         DownloadTaskEntity::class,
         LocalTrackEntity::class,
+        FavoriteCategoryEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class MusicDatabase : RoomDatabase() {
@@ -64,13 +66,26 @@ abstract class MusicDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS favorite_categories (
+                        name TEXT NOT NULL PRIMARY KEY,
+                        createdAt INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
         fun get(context: Context): MusicDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 MusicDatabase::class.java,
                 "banli_music.db",
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 .also { instance = it }

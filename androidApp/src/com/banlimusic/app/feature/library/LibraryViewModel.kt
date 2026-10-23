@@ -4,14 +4,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.model.Track
+import com.banlimusic.app.core.model.TrackAction
+import com.banlimusic.app.core.model.TrackSource
 import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.LocalMusicRepository
+import com.banlimusic.app.data.repository.MusicRepository
+import com.banlimusic.app.domain.download.DownloadStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -22,6 +27,7 @@ class LibraryViewModel(
     private val library: LibraryRepository,
     private val localMusic: LocalMusicRepository,
     private val downloads: DownloadRepository,
+    private val music: MusicRepository,
     settings: SettingsRepository,
 ) : ViewModel() {
 
@@ -38,8 +44,30 @@ class LibraryViewModel(
     val history: StateFlow<List<Track>> = library.observeHistory(100)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val localTracks: StateFlow<List<Track>> = localMusic.observeTracks()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val localTracks: StateFlow<List<Track>> = combine(
+        localMusic.observeTracks(),
+        downloads.observeTasks(),
+    ) { imported, tasks ->
+        val downloaded = tasks
+            .filter { it.status == DownloadStatus.COMPLETED && !it.filePath.isNullOrBlank() }
+            .map { task ->
+                val uri = task.filePath.orEmpty()
+                task.track.copy(
+                    sources = listOf(
+                        TrackSource(
+                            providerId = "download",
+                            providerTrackId = uri,
+                            availableActions = setOf(TrackAction.STREAM),
+                            localUri = uri,
+                            durationMs = task.track.durationMs,
+                        ),
+                    ),
+                )
+            }
+        (imported + downloaded).distinctBy { track ->
+            track.sources.firstNotNullOfOrNull { it.localUri } ?: track.id
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val defaultCategory: StateFlow<String> = settings.settings
         .map { it.defaultFavoriteCategory }
@@ -99,13 +127,49 @@ class LibraryViewModel(
         _selectedIds.value = emptySet()
     }
 
-    fun downloadSelected(tracks: List<Track>) {
+    suspend fun downloadQualities(tracks: List<Track>): List<Int> =
+        runCatching { music.downloadQualities(tracks) }.getOrDefault(emptyList())
+
+    fun addFavorites(tracks: List<Track>, category: String) {
         val selected = tracks.filter { it.id in _selectedIds.value }
         if (selected.isEmpty()) return
         viewModelScope.launch {
-            val queued = downloads.enqueueAll(selected)
+            library.addFavorites(selected, category)
+            _message.value = "已收藏 ${selected.size} 首到“$category”"
+            clearSelection()
+        }
+    }
+
+    fun downloadSelected(tracks: List<Track>, qualityKbps: Int? = null) {
+        val selected = tracks.filter { it.id in _selectedIds.value }
+        if (selected.isEmpty()) return
+        viewModelScope.launch {
+            val queued = downloads.enqueueAll(selected, qualityKbps = qualityKbps)
             _message.value = "已加入下载队列：$queued 首"
             clearSelection()
+        }
+    }
+
+    fun createCategory(name: String) {
+        val normalized = name.trim()
+        if (normalized.isEmpty()) return
+        viewModelScope.launch {
+            library.ensureCategory(normalized)
+            _message.value = "已创建收藏夹“$normalized”"
+        }
+    }
+
+    suspend fun exportFavoritesJson(): String = library.exportFavoritesJson()
+
+    fun importFavoritesJson(raw: String, replace: Boolean) {
+        viewModelScope.launch {
+            val count = runCatching { library.importFavoritesJson(raw, replace) }
+                .getOrDefault(0)
+            _message.value = if (replace) {
+                "已覆盖导入 $count 首收藏"
+            } else {
+                "已追加 $count 首收藏"
+            }
         }
     }
 

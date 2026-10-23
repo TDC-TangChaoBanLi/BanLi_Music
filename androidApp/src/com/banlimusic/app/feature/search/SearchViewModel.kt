@@ -57,6 +57,9 @@ class SearchViewModel(
         .map { it.defaultFavoriteCategory }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "默认收藏")
 
+    val favoriteCategories: StateFlow<List<String>> = library.observeFavoriteCategories()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     private var searchJob: Job? = null
 
     init {
@@ -151,23 +154,29 @@ class SearchViewModel(
         _uiState.update { it.copy(selectedIds = emptySet(), selectionMode = false) }
     }
 
-    fun batchFavorite() {
+    suspend fun downloadQualities(): List<Int> {
+        val tracks = _uiState.value.results.filter { it.id in _uiState.value.selectedIds }
+        if (tracks.isEmpty()) return emptyList()
+        return runCatching { music.downloadQualities(tracks) }.getOrDefault(emptyList())
+    }
+
+    fun batchFavorite(category: String = defaultFavoriteCategory.value) {
         val state = _uiState.value
         val tracks = state.results.filter { it.id in state.selectedIds }
         if (tracks.isEmpty()) return
         viewModelScope.launch {
-            library.addFavorites(tracks, defaultFavoriteCategory.value)
-            _message.value = "已收藏 ${tracks.size} 首到“${defaultFavoriteCategory.value}”"
+            library.addFavorites(tracks, category)
+            _message.value = "已收藏 ${tracks.size} 首到“$category”"
             clearSelection()
         }
     }
 
-    fun batchDownload() {
+    fun batchDownload(qualityKbps: Int? = null) {
         val state = _uiState.value
         val tracks = state.results.filter { it.id in state.selectedIds }
         if (tracks.isEmpty()) return
         viewModelScope.launch {
-            val queued = downloads.enqueueAll(tracks)
+            val queued = downloads.enqueueAll(tracks, qualityKbps = qualityKbps)
             _message.value = "已加入下载队列：$queued 首"
             clearSelection()
         }

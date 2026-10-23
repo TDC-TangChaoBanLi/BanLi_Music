@@ -1,14 +1,18 @@
 package com.banlimusic.app.domain.download
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.banlimusic.app.AppContainer
 import com.banlimusic.app.MusicApplication
 import com.banlimusic.app.core.common.MusicException
+import com.banlimusic.app.core.common.TextNormalizer
 import com.banlimusic.app.core.common.userMessage
 import com.banlimusic.app.core.database.entity.DownloadTaskEntity
 import com.banlimusic.app.core.model.Track
@@ -49,8 +53,10 @@ class DownloadWorker(
             val settings = container.settingsRepository.current()
             val quality = entity.qualityKbps.takeIf { it > 0 } ?: settings.qualityKbps
             val stream = container.musicRepository.resolveStream(track, quality)
-            val file = prepareFile(repository, track, entity.filePath, stream.url, entity.id)
-            repository.updateStatus(taskId, DownloadStatus.DOWNLOADING, filePath = file.absolutePath)
+            val target = repository.downloadTarget()
+            val fileName = repository.suggestedFileName(track, stream.url, entity.id)
+            val tempFile = tempFile(entity.id)
+            repository.updateStatus(taskId, DownloadStatus.DOWNLOADING)
 
             var lastDbUpdate = 0L
             var lastNotificationUpdate = 0L
@@ -58,7 +64,7 @@ class DownloadWorker(
             downloadToFile(
                 client = container.downloadHttpClient,
                 url = stream.url,
-                file = file,
+                file = tempFile,
             ) { bytes, total ->
                 latestTotal = total
                 val now = System.currentTimeMillis()
@@ -75,15 +81,17 @@ class DownloadWorker(
                 }
             }
 
-            repository.updateStatus(taskId, DownloadStatus.VERIFYING, filePath = file.absolutePath)
-            val length = file.length()
+            repository.updateStatus(taskId, DownloadStatus.VERIFYING)
+            val length = tempFile.length()
             if (length <= 0L) throw IOException("下载的文件为空")
             if (latestTotal > 0L && length < latestTotal - 1024L) {
                 throw IOException("文件不完整，请重试")
             }
+            val location = publish(tempFile, target, fileName, track)
+            tempFile.delete()
             repository.updateProgress(taskId, length, if (latestTotal > 0) latestTotal else length)
-            writeSidecars(container, track, file, entity)
-            repository.updateStatus(taskId, DownloadStatus.COMPLETED, filePath = file.absolutePath)
+            writeSidecars(container, track, target, fileName, entity)
+            repository.updateStatus(taskId, DownloadStatus.COMPLETED, filePath = location)
             Result.success()
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -105,29 +113,96 @@ class DownloadWorker(
         }
     }
 
-    private suspend fun prepareFile(
-        repository: DownloadRepository,
+    private fun tempFile(taskId: String): File {
+        val directory = File(applicationContext.cacheDir, "downloads").apply { mkdirs() }
+        return File(directory, "${TextNormalizer.sanitizeFileName(taskId)}.part")
+    }
+
+    private suspend fun publish(
+        tempFile: File,
+        target: DownloadTarget,
+        fileName: String,
         track: Track,
-        existingPath: String?,
-        url: String,
-        taskId: String,
-    ): File {
-        existingPath?.let { path ->
-            val existing = File(path)
-            if (existing.parentFile?.exists() == true) return existing
+    ): String = withContext(Dispatchers.IO) {
+        when (target) {
+            DownloadTarget.MediaStoreMusic -> publishToMediaStore(tempFile, fileName, track)
+            is DownloadTarget.Directory -> {
+                val destination = File(target.directory, fileName)
+                tempFile.copyTo(destination, overwrite = true)
+                destination.absolutePath
+            }
         }
-        val directory = repository.downloadDirectory()
-        return File(directory, repository.suggestedFileName(track, url, taskId))
+    }
+
+    private fun publishToMediaStore(
+        tempFile: File,
+        fileName: String,
+        track: Track,
+    ): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            throw IOException("当前系统不支持 MediaStore 音乐目录")
+        }
+        val resolver = applicationContext.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Audio.Media.MIME_TYPE, mimeTypeFor(fileName))
+            put(
+                MediaStore.Audio.Media.RELATIVE_PATH,
+                "${Environment.DIRECTORY_MUSIC}/BanLiMusic",
+            )
+            put(MediaStore.Audio.Media.IS_PENDING, 1)
+            put(MediaStore.Audio.Media.TITLE, track.title)
+            put(MediaStore.Audio.Media.ARTIST, track.artistLine)
+            track.album?.title?.let { put(MediaStore.Audio.Media.ALBUM, it) }
+            track.durationMs?.takeIf { it > 0L }?.let {
+                put(MediaStore.Audio.Media.DURATION, it)
+            }
+        }
+        val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+            ?: throw IOException("无法创建媒体库条目")
+        try {
+            resolver.openOutputStream(uri)?.use { output ->
+                tempFile.inputStream().use { input -> input.copyTo(output) }
+            } ?: throw IOException("无法写入媒体库")
+            resolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) },
+                null,
+                null,
+            )
+            return uri.toString()
+        } catch (error: Throwable) {
+            runCatching { resolver.delete(uri, null, null) }
+            throw error
+        }
+    }
+
+    private fun mimeTypeFor(fileName: String): String = when (
+        fileName.substringAfterLast('.', "").lowercase()
+    ) {
+        "flac" -> "audio/flac"
+        "m4a" -> "audio/mp4"
+        "aac" -> "audio/aac"
+        "ogg", "opus" -> "audio/ogg"
+        "wav" -> "audio/wav"
+        else -> "audio/mpeg"
     }
 
     private suspend fun writeSidecars(
         container: AppContainer,
         track: Track,
-        audioFile: File,
+        target: DownloadTarget,
+        fileName: String,
         entity: DownloadTaskEntity,
     ) {
-        val directory = audioFile.parentFile ?: return
-        val baseName = audioFile.nameWithoutExtension
+        val directory = when (target) {
+            is DownloadTarget.Directory -> target.directory
+            DownloadTarget.MediaStoreMusic -> File(
+                applicationContext.filesDir,
+                "BanLiMusic/Sidecars",
+            ).apply { mkdirs() }
+        }
+        val baseName = fileName.substringBeforeLast('.')
         if (entity.downloadLyrics) {
             try {
                 val lyrics = container.musicRepository.lyrics(track)

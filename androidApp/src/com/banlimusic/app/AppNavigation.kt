@@ -214,7 +214,10 @@ private fun AppNavHost(
             SearchScreen(onPlayQueue = playQueue)
         }
         composable(Routes.LIBRARY) {
-            LibraryScreen(onPlayQueue = playQueue)
+            LibraryScreen(
+                onPlayQueue = playQueue,
+                onOpenDownloads = { navController.navigate(Routes.DOWNLOADS) },
+            )
         }
         composable(Routes.DOWNLOADS) {
             DownloadsScreen(

@@ -3,6 +3,11 @@ package com.banlimusic.app.domain.download
 import com.banlimusic.app.core.model.Track
 import java.io.File
 
+sealed interface DownloadTarget {
+    data object MediaStoreMusic : DownloadTarget
+    data class Directory(val directory: File) : DownloadTarget
+}
+
 enum class DownloadStatus {
     QUEUED,
     DOWNLOADING,
@@ -34,7 +39,12 @@ data class DownloadTask(
             else -> (bytesDownloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
         }
 
-    val file: File? get() = filePath?.let(::File)
+    /** Null for MediaStore content URIs. */
+    val file: File? get() = filePath
+        ?.takeIf { !it.startsWith("content://") }
+        ?.let(::File)
+
+    val isMediaStoreUri: Boolean get() = filePath?.startsWith("content://") == true
 
     val isActive: Boolean
         get() = status == DownloadStatus.QUEUED ||

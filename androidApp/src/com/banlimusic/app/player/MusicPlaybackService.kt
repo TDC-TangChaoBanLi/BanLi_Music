@@ -176,7 +176,10 @@ class MusicPlaybackService : MediaSessionService() {
         }
         val position = player.currentPosition.coerceAtLeast(0L)
 
-        if (!artworkUrl.isNullOrBlank() && artworkUrl != widgetArtworkUrl) {
+        if (artworkUrl.isNullOrBlank()) {
+            widgetArtworkUrl = null
+            widgetArtworkUri = null
+        } else if (artworkUrl != widgetArtworkUrl) {
             widgetArtworkUrl = artworkUrl
             widgetArtworkUri = null
             widgetArtworkJob?.cancel()

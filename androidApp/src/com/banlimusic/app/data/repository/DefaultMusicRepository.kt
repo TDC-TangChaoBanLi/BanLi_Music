@@ -144,6 +144,23 @@ class DefaultMusicRepository(
         )
     }
 
+    override suspend fun downloadQualities(tracks: Collection<Track>): List<Int> {
+        if (tracks.isEmpty()) return emptyList()
+        val providersForTracks = tracks.map { track ->
+            track.sources.firstOrNull { TrackAction.DOWNLOAD in it.availableActions }
+                ?.let { providersById[it.providerId] }
+                ?: track.sources.firstOrNull { TrackAction.STREAM in it.availableActions }
+                    ?.let { providersById[it.providerId] }
+        }
+        if (providersForTracks.any { it == null }) return emptyList()
+        val qualities = providersForTracks.filterNotNull().map { it.capabilities.downloadQualities }
+        if (qualities.any { it.isEmpty() }) return emptyList()
+        return qualities
+            .map { it.toSet() }
+            .reduce { common, next -> common.intersect(next) }
+            .sorted()
+    }
+
     override suspend fun providers(): List<ProviderInfo> {
         val enabled = settings.current().enabledSources
         return providers.map { provider ->

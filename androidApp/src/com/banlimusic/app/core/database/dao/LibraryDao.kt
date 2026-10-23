@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Upsert
+import com.banlimusic.app.core.database.entity.FavoriteCategoryEntity
 import com.banlimusic.app.core.database.entity.FavoriteTrackEntity
 import com.banlimusic.app.core.database.entity.PlayHistoryEntity
 import com.banlimusic.app.core.database.entity.SearchHistoryEntity
@@ -19,8 +20,29 @@ interface LibraryDao {
     @Query("SELECT * FROM favorites WHERE category = :category ORDER BY addedAt DESC")
     fun observeFavoritesByCategory(category: String): Flow<List<FavoriteTrackEntity>>
 
-    @Query("SELECT DISTINCT category FROM favorites ORDER BY category")
+    @Query(
+        "SELECT name FROM favorite_categories " +
+            "UNION SELECT category AS name FROM favorites ORDER BY name",
+    )
     fun observeFavoriteCategories(): Flow<List<String>>
+
+    @Query(
+        "SELECT name FROM favorite_categories " +
+            "UNION SELECT category AS name FROM favorites ORDER BY name",
+    )
+    suspend fun getFavoriteCategories(): List<String>
+
+    @Query("SELECT * FROM favorites ORDER BY addedAt DESC")
+    suspend fun getAllFavorites(): List<FavoriteTrackEntity>
+
+    @Query("DELETE FROM favorites")
+    suspend fun clearFavorites()
+
+    @Upsert
+    suspend fun upsertCategory(entity: FavoriteCategoryEntity)
+
+    @Query("DELETE FROM favorite_categories")
+    suspend fun clearCategories()
 
     @Query("SELECT trackId FROM favorites")
     fun observeFavoriteIds(): Flow<List<String>>

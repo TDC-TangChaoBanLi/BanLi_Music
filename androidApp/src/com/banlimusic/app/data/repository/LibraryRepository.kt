@@ -1,6 +1,7 @@
 package com.banlimusic.app.data.repository
 
 import com.banlimusic.app.core.database.dao.LibraryDao
+import com.banlimusic.app.core.database.entity.FavoriteCategoryEntity
 import com.banlimusic.app.core.database.entity.FavoriteTrackEntity
 import com.banlimusic.app.core.database.entity.PlayHistoryEntity
 import com.banlimusic.app.core.database.entity.SearchHistoryEntity
@@ -8,7 +9,22 @@ import com.banlimusic.app.core.datastore.DEFAULT_FAVORITE_CATEGORY
 import com.banlimusic.app.core.model.Track
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+
+@Serializable
+data class FavoritesExport(
+    val version: Int = 1,
+    val categories: List<String> = emptyList(),
+    val favorites: List<FavoriteExportItem> = emptyList(),
+)
+
+@Serializable
+data class FavoriteExportItem(
+    val category: String = DEFAULT_FAVORITE_CATEGORY,
+    val addedAt: Long = 0L,
+    val track: Track,
+)
 
 class LibraryRepository(
     private val dao: LibraryDao,
@@ -24,6 +40,13 @@ class LibraryRepository(
     }
 
     fun observeFavoriteCategories(): Flow<List<String>> = dao.observeFavoriteCategories()
+
+    suspend fun ensureCategory(name: String) {
+        val normalized = name.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY }
+        dao.upsertCategory(
+            FavoriteCategoryEntity(normalized, System.currentTimeMillis()),
+        )
+    }
 
     fun observeFavoriteIds(): Flow<Set<String>> = dao.observeFavoriteIds().map { it.toSet() }
 
@@ -51,12 +74,14 @@ class LibraryRepository(
     }
 
     suspend fun addFavorite(track: Track, category: String = DEFAULT_FAVORITE_CATEGORY) {
+        val normalized = category.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY }
+        ensureCategory(normalized)
         dao.upsertFavorite(
             FavoriteTrackEntity(
                 trackId = track.id,
                 trackJson = json.encodeToString(Track.serializer(), track),
                 addedAt = System.currentTimeMillis(),
-                category = category.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY },
+                category = normalized,
             ),
         )
     }
@@ -66,6 +91,7 @@ class LibraryRepository(
         category: String = DEFAULT_FAVORITE_CATEGORY,
     ) {
         val normalized = category.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY }
+        ensureCategory(normalized)
         val now = System.currentTimeMillis()
         tracks.distinctBy { it.id }.forEach { track ->
             dao.upsertFavorite(
@@ -80,6 +106,48 @@ class LibraryRepository(
     }
 
     suspend fun removeFavorite(trackId: String) = dao.deleteFavorite(trackId)
+
+    suspend fun exportFavoritesJson(): String {
+        val categories = dao.getFavoriteCategories()
+        val favorites = dao.getAllFavorites().mapNotNull { entity ->
+            decode(entity.trackJson)?.let { track ->
+                FavoriteExportItem(
+                    category = entity.category,
+                    addedAt = entity.addedAt,
+                    track = track,
+                )
+            }
+        }
+        return json.encodeToString(
+            FavoritesExport.serializer(),
+            FavoritesExport(categories = categories, favorites = favorites),
+        )
+    }
+
+    /** @return number of imported favorite entries. */
+    suspend fun importFavoritesJson(raw: String, replace: Boolean): Int {
+        val data = json.decodeFromString(FavoritesExport.serializer(), raw)
+        if (replace) {
+            dao.clearFavorites()
+            dao.clearCategories()
+        }
+        (data.categories + data.favorites.map { it.category }).forEach { category ->
+            ensureCategory(category)
+        }
+        val now = System.currentTimeMillis()
+        data.favorites.forEach { item ->
+            val category = item.category.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY }
+            dao.upsertFavorite(
+                FavoriteTrackEntity(
+                    trackId = item.track.id,
+                    trackJson = json.encodeToString(Track.serializer(), item.track),
+                    addedAt = item.addedAt.takeIf { it > 0L } ?: now,
+                    category = category,
+                ),
+            )
+        }
+        return data.favorites.size
+    }
 
     suspend fun recordPlay(track: Track) {
         val now = System.currentTimeMillis()

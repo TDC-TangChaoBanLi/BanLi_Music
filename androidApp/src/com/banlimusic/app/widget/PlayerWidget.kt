@@ -42,7 +42,6 @@ import com.banlimusic.app.MusicApplication
 import com.banlimusic.app.R
 import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.core.network.JsonHttpClient
-import com.banlimusic.app.ui.components.formatPlaybackTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -118,8 +117,8 @@ private fun WidgetContent(state: WidgetState, isLarge: Boolean) {
         modifier = GlanceModifier
             .fillMaxSize()
             .background(background)
-            .cornerRadius(22.dp)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .cornerRadius(16.dp)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.Vertical.CenterVertically,
     ) {
         if (isLarge) {
@@ -129,25 +128,25 @@ private fun WidgetContent(state: WidgetState, isLarge: Boolean) {
                     contentDescription = "专辑封面",
                     contentScale = ContentScale.Crop,
                     modifier = GlanceModifier
-                        .size(60.dp)
-                        .cornerRadius(12.dp),
+                        .size(30.dp)
+                        .cornerRadius(7.dp),
                 )
             } else {
                 Box(
                     modifier = GlanceModifier
-                        .size(60.dp)
+                        .size(30.dp)
                         .background(ColorProvider(Color(if (state.dark) 0x33FFFFFF else 0x22000000)))
-                        .cornerRadius(12.dp),
+                        .cornerRadius(7.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Image(
                         provider = ImageProvider(R.drawable.ic_launcher_foreground),
                         contentDescription = "BanLiMusic",
-                        modifier = GlanceModifier.size(36.dp),
+                        modifier = GlanceModifier.size(20.dp),
                     )
                 }
             }
-            Spacer(GlanceModifier.width(12.dp))
+            Spacer(GlanceModifier.width(8.dp))
         }
 
         Column(modifier = GlanceModifier.defaultWeight()) {
@@ -156,51 +155,41 @@ private fun WidgetContent(state: WidgetState, isLarge: Boolean) {
                 maxLines = 1,
                 style = TextStyle(
                     color = foreground,
-                    fontSize = 16.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
             Text(
                 text = state.artist,
                 maxLines = 1,
-                style = TextStyle(color = muted, fontSize = 12.sp),
-                modifier = GlanceModifier.padding(top = 1.dp),
+                style = TextStyle(color = muted, fontSize = 9.sp),
             )
             if (state.hasMedia) {
                 LinearProgressIndicator(
                     progress = fraction,
                     modifier = GlanceModifier
                         .fillMaxWidth()
-                        .height(3.dp)
-                        .padding(top = 7.dp),
+                        .height(2.dp)
+                        .padding(top = 2.dp),
                     color = accent,
                     backgroundColor = track,
-                )
-                Text(
-                    text = "${formatPlaybackTime(state.positionMs)} / " +
-                        formatPlaybackTime(state.durationMs),
-                    maxLines = 1,
-                    style = TextStyle(color = muted, fontSize = 10.sp),
-                    modifier = GlanceModifier.padding(top = 2.dp),
                 )
             }
         }
 
-        Spacer(GlanceModifier.width(8.dp))
+        Spacer(GlanceModifier.width(6.dp))
         Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
             WidgetButton(
                 iconRes = R.drawable.ic_skip_previous,
                 description = "上一首",
                 action = actionRunCallback<PreviousTrackAction>(),
             )
-            Spacer(GlanceModifier.width(2.dp))
             WidgetButton(
                 iconRes = if (state.isPlaying) R.drawable.ic_pause else R.drawable.ic_play,
                 description = if (state.isPlaying) "暂停" else "播放",
                 action = actionRunCallback<TogglePlaybackAction>(),
-                size = 36.dp,
+                size = 30.dp,
             )
-            Spacer(GlanceModifier.width(2.dp))
             WidgetButton(
                 iconRes = R.drawable.ic_skip_next,
                 description = "下一首",
@@ -215,7 +204,7 @@ private fun WidgetButton(
     iconRes: Int,
     description: String,
     action: Action,
-    size: androidx.compose.ui.unit.Dp = 32.dp,
+    size: androidx.compose.ui.unit.Dp = 28.dp,
 ) {
     Image(
         provider = ImageProvider(iconRes),

@@ -33,6 +33,7 @@ object AppViewModelProvider {
                 library = app().container.libraryRepository,
                 localMusic = app().container.localMusicRepository,
                 downloads = app().container.downloadRepository,
+                music = app().container.musicRepository,
                 settings = app().container.settingsRepository,
             )
         }

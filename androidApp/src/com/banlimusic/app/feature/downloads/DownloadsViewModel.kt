@@ -1,5 +1,6 @@
 package com.banlimusic.app.feature.downloads
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.banlimusic.app.data.repository.DownloadRepository
@@ -9,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 
 class DownloadsViewModel(
     private val downloads: DownloadRepository,
@@ -33,8 +35,14 @@ class DownloadsViewModel(
     }
 
     fun play(task: DownloadTask) {
-        val file = task.file ?: return
-        if (!file.exists()) return
-        playback.playFile(task.track, file)
+        val path = task.filePath ?: return
+        val uri = if (path.startsWith("content://")) {
+            Uri.parse(path)
+        } else {
+            val file = File(path)
+            if (!file.exists()) return
+            Uri.fromFile(file)
+        }
+        playback.playFile(task.track, uri)
     }
 }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.Delete
@@ -25,10 +26,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -40,7 +46,9 @@ import com.banlimusic.app.domain.download.DownloadTask
 import com.banlimusic.app.feature.common.AppViewModelProvider
 import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackArtwork
+import com.banlimusic.app.ui.components.TrackRow
 import com.banlimusic.app.ui.components.formatBytes
+import com.banlimusic.app.ui.components.qualityLabel
 
 @Composable
 fun DownloadsScreen(
@@ -48,9 +56,11 @@ fun DownloadsScreen(
     viewModel: DownloadsViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
-    val completedBytes = tasks
-        .filter { it.status == DownloadStatus.COMPLETED }
-        .sumOf { it.totalBytes }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+
+    val completed = tasks.filter { it.status == DownloadStatus.COMPLETED }
+    val active = tasks.filter { it.status != DownloadStatus.COMPLETED }
+    val completedBytes = completed.sumOf { it.totalBytes }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -62,52 +72,136 @@ fun DownloadsScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = "下载", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    text = "已占用 ${formatBytes(completedBytes)}",
+                    text = "已下载 ${completed.size} 首 · ${formatBytes(completedBytes)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (tasks.any { it.status == DownloadStatus.COMPLETED }) {
+            if (selectedTab == 0 && completed.isNotEmpty()) {
                 TextButton(onClick = viewModel::clearCompleted) { Text("清除已完成") }
             }
         }
 
-        if (tasks.isEmpty()) {
-            EmptyState(
-                title = "没有下载任务",
-                description = "在播放页点击下载按钮，任务会在这里显示并支持暂停与续传。",
-                icon = Icons.Rounded.Download,
+        PrimaryTabRow(selectedTabIndex = selectedTab) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = { Text("已下载") },
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = { Text("下载列表") },
+            )
+        }
+
+        if (selectedTab == 0) {
+            DownloadedList(
+                tasks = completed,
+                onPlay = { task ->
+                    viewModel.play(task)
+                    onOpenPlayer()
+                },
+                onDelete = { task -> viewModel.remove(task.id) },
             )
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(tasks, key = { it.id }) { task ->
-                    DownloadCard(
-                        task = task,
-                        onPlay = {
-                            if (task.file?.exists() == true) {
-                                viewModel.play(task)
-                                onOpenPlayer()
-                            }
-                        },
-                        onPause = { viewModel.pause(task.id) },
-                        onResume = { viewModel.resume(task.id) },
-                        onCancel = { viewModel.cancel(task.id) },
-                        onDelete = { viewModel.remove(task.id) },
-                    )
-                }
-                item {
-                    Text(
-                        text = "下载的音乐仅保存在应用私有目录，供个人学习使用。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-            }
+            DownloadQueueList(
+                tasks = active,
+                onPause = viewModel::pause,
+                onResume = viewModel::resume,
+                onCancel = viewModel::cancel,
+                onDelete = viewModel::remove,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadedList(
+    tasks: List<DownloadTask>,
+    onPlay: (DownloadTask) -> Unit,
+    onDelete: (DownloadTask) -> Unit,
+) {
+    if (tasks.isEmpty()) {
+        EmptyState(
+            title = "还没有已下载歌曲",
+            description = "在播放页或批量操作中选择下载，完成后会出现在这里。",
+            icon = Icons.Rounded.Download,
+        )
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
+            TrackRow(
+                track = task.track,
+                onClick = { onPlay(task) },
+                isFavorite = false,
+                trailing = {
+                    if (task.qualityKbps > 0) {
+                        Text(
+                            text = qualityLabel(task.qualityKbps),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { onDelete(task) }) {
+                        Icon(Icons.Rounded.Delete, contentDescription = "删除下载")
+                    }
+                },
+            )
+        }
+        item {
+            Text(
+                text = "下载目录可在设置中修改；Android 10+ 默认写入系统音乐目录，不可写时回退到应用外部音乐目录。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadQueueList(
+    tasks: List<DownloadTask>,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onCancel: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    if (tasks.isEmpty()) {
+        EmptyState(
+            title = "下载列表为空",
+            description = "正在下载、等待中或失败的任务会显示在这里。",
+            icon = Icons.Rounded.Download,
+        )
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(tasks, key = { it.id }) { task ->
+            DownloadCard(
+                task = task,
+                onPause = { onPause(task.id) },
+                onResume = { onResume(task.id) },
+                onCancel = { onCancel(task.id) },
+                onDelete = { onDelete(task.id) },
+            )
+        }
+        item {
+            Text(
+                text = "批量下载会经过共享限流器，GD 音乐台请求间隔至少 1 秒。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
     }
 }
@@ -115,15 +209,12 @@ fun DownloadsScreen(
 @Composable
 private fun DownloadCard(
     task: DownloadTask,
-    onPlay: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val isCompleted = task.status == DownloadStatus.COMPLETED
     Card(
-        onClick = { if (isCompleted) onPlay() },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
@@ -152,18 +243,16 @@ private fun DownloadCard(
                         maxLines = 1,
                     )
                 }
-                if (isCompleted) {
-                    IconButton(onClick = onPlay) {
-                        Icon(Icons.Rounded.PlayArrow, contentDescription = "播放")
-                    }
-                } else if (task.canPause) {
-                    IconButton(onClick = onPause) {
+                when {
+                    task.canPause -> IconButton(onClick = onPause) {
                         Icon(Icons.Rounded.Pause, contentDescription = "暂停")
                     }
-                } else if (task.canResume) {
-                    IconButton(onClick = onResume) {
+
+                    task.canResume -> IconButton(onClick = onResume) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "继续下载")
                     }
+
+                    else -> Unit
                 }
                 IconButton(onClick = if (task.isActive) onCancel else onDelete) {
                     Icon(
@@ -184,11 +273,16 @@ private fun DownloadCard(
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+                if (task.qualityKbps > 0) {
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        text = qualityLabel(task.qualityKbps),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 val sizeText = when {
-                    task.status == DownloadStatus.COMPLETED && task.totalBytes > 0 ->
-                        formatBytes(task.totalBytes)
-
                     task.totalBytes > 0 ->
                         "${formatBytes(task.bytesDownloaded)} / ${formatBytes(task.totalBytes)}"
 
@@ -200,26 +294,24 @@ private fun DownloadCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (!isCompleted) {
-                Spacer(Modifier.height(6.dp))
-                if (task.totalBytes > 0L) {
-                    LinearProgressIndicator(
-                        progress = { task.progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(4.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                } else {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(4.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                }
+            Spacer(Modifier.height(6.dp))
+            if (task.totalBytes > 0L) {
+                LinearProgressIndicator(
+                    progress = { task.progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
             }
             if (!task.error.isNullOrBlank()) {
                 Spacer(Modifier.height(6.dp))

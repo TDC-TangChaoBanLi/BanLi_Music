@@ -19,6 +19,9 @@ interface MusicRepository {
 
     suspend fun downloadInfo(track: Track, qualityKbps: Int? = null): DownloadInfo
 
+    /** Common quality choices supported by every selected track's provider. */
+    suspend fun downloadQualities(tracks: Collection<Track>): List<Int>
+
     suspend fun providers(): List<ProviderInfo>
 
     suspend fun rateLimitStatus(): RateLimitStatus?

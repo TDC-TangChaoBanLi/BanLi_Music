@@ -114,6 +114,15 @@ fun PlayerScreen(
     var downloadQuality by rememberSaveable(appSettings.downloadQualityKbps) {
         mutableStateOf(appSettings.downloadQualityKbps)
     }
+    var downloadQualities by remember { mutableStateOf<List<Int>>(emptyList()) }
+    val track = state.currentTrack
+
+    LaunchedEffect(track?.id) {
+        downloadQualities = if (track == null) emptyList() else viewModel.downloadQualities()
+        if (downloadQuality !in downloadQualities) {
+            downloadQuality = downloadQualities.firstOrNull() ?: 0
+        }
+    }
 
     LaunchedEffect(message) {
         message?.let {
@@ -136,7 +145,6 @@ fun PlayerScreen(
         if (target == 1) viewModel.ensureLyrics()
     }
 
-    val track = state.currentTrack
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -194,11 +202,14 @@ fun PlayerScreen(
                                     TrackAction.DOWNLOAD in it.availableActions
                                 },
                                 downloadQuality = downloadQuality,
+                                downloadQualities = downloadQualities,
                                 onToggleFavorite = viewModel::toggleFavorite,
                                 onAddFavorite = viewModel::addFavoriteToCategory,
                                 onNewCategory = { showCategoryDialog = true },
                                 onDownload = {
-                                    viewModel.downloadCurrent(downloadQuality.takeIf { it > 0 })
+                                    viewModel.downloadCurrent(
+                                        downloadQuality.takeIf { it in downloadQualities },
+                                    )
                                 },
                                 onDownloadQualityChange = { downloadQuality = it },
                                 onSeek = viewModel::seekTo,
@@ -266,6 +277,7 @@ private fun PosterPage(
     favoriteCategories: List<String>,
     canDownload: Boolean,
     downloadQuality: Int,
+    downloadQualities: List<Int>,
     onToggleFavorite: () -> Unit,
     onAddFavorite: (String) -> Unit,
     onNewCategory: () -> Unit,
@@ -304,6 +316,7 @@ private fun PosterPage(
                     favoriteCategories = favoriteCategories,
                     canDownload = canDownload,
                     downloadQuality = downloadQuality,
+                    downloadQualities = downloadQualities,
                     onToggleFavorite = onToggleFavorite,
                     onAddFavorite = onAddFavorite,
                     onNewCategory = onNewCategory,
@@ -345,6 +358,7 @@ private fun PosterPage(
                     favoriteCategories = favoriteCategories,
                     canDownload = canDownload,
                     downloadQuality = downloadQuality,
+                    downloadQualities = downloadQualities,
                     onToggleFavorite = onToggleFavorite,
                     onAddFavorite = onAddFavorite,
                     onNewCategory = onNewCategory,
@@ -377,6 +391,7 @@ private fun PlayerDetails(
     favoriteCategories: List<String>,
     canDownload: Boolean,
     downloadQuality: Int,
+    downloadQualities: List<Int>,
     onToggleFavorite: () -> Unit,
     onAddFavorite: (String) -> Unit,
     onNewCategory: () -> Unit,
@@ -506,39 +521,38 @@ private fun PlayerDetails(
                 Spacer(Modifier.size(5.dp))
                 Text("下载")
             }
-            Box {
-                IconButton(
-                    onClick = { qualityMenu = true },
-                    modifier = Modifier.size(32.dp),
-                ) {
-                    Icon(
-                        Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = "选择下载音质",
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-                DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("跟随设置") },
-                        onClick = {
-                            qualityMenu = false
-                            onDownloadQualityChange(0)
-                        },
-                    )
-                    listOf(128, 192, 320, 740, 999).forEach { quality ->
-                        DropdownMenuItem(
-                            text = { Text(qualityLabel(quality)) },
-                            onClick = {
-                                qualityMenu = false
-                                onDownloadQualityChange(quality)
-                            },
+            if (downloadQualities.isNotEmpty()) {
+                Box {
+                    IconButton(
+                        onClick = { qualityMenu = true },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.KeyboardArrowDown,
+                            contentDescription = "选择下载音质",
+                            modifier = Modifier.size(18.dp),
                         )
+                    }
+                    DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
+                        downloadQualities.forEach { quality ->
+                            DropdownMenuItem(
+                                text = { Text(qualityLabel(quality)) },
+                                onClick = {
+                                    qualityMenu = false
+                                    onDownloadQualityChange(quality)
+                                },
+                            )
+                        }
                     }
                 }
             }
         }
         Text(
-            text = "下载音质：${if (downloadQuality == 0) "跟随设置" else qualityLabel(downloadQuality)}",
+            text = if (downloadQualities.isEmpty()) {
+                "下载音质：默认（该来源不提供选择）"
+            } else {
+                "下载音质：${downloadQuality.takeIf { it > 0 }?.let(::qualityLabel) ?: "默认"}"
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

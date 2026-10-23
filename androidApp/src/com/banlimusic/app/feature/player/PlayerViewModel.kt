@@ -127,6 +127,12 @@ class PlayerViewModel(
         }
     }
 
+    suspend fun downloadQualities(): List<Int> {
+        val track = playback.state.value.currentTrack ?: return emptyList()
+        return runCatching { music.downloadQualities(listOf(track)) }
+            .getOrDefault(emptyList())
+    }
+
     fun consumeMessage() {
         _message.value = null
     }

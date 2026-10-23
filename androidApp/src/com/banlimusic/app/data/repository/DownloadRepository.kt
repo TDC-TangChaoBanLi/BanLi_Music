@@ -1,6 +1,8 @@
 package com.banlimusic.app.data.repository
 
 import android.content.Context
+import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -17,6 +19,7 @@ import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.model.TrackAction
 import com.banlimusic.app.domain.download.DownloadStatus
+import com.banlimusic.app.domain.download.DownloadTarget
 import com.banlimusic.app.domain.download.DownloadTask
 import com.banlimusic.app.domain.download.DownloadWorker
 import kotlinx.coroutines.flow.Flow
@@ -57,8 +60,7 @@ class DownloadRepository(
         val taskId = taskId(track.id, source.providerId, quality, lyrics, artwork)
         val existing = dao.getById(taskId)
         if (existing != null && existing.status == DownloadStatus.COMPLETED.name) {
-            val path = existing.filePath
-            if (path != null && File(path).exists()) return@runCatching
+            if (locationExists(existing.filePath)) return@runCatching
         }
 
         val now = System.currentTimeMillis()
@@ -136,7 +138,8 @@ class DownloadRepository(
     suspend fun cancel(id: String) {
         workManager.cancelUniqueWork(workName(id))
         val entity = dao.getById(id) ?: return
-        entity.filePath?.let { runCatching { File(it).delete() } }
+        deleteLocation(entity.filePath)
+        deleteTemp(id)
         dao.updateStatus(
             id = id,
             status = DownloadStatus.CANCELLED.name,
@@ -150,15 +153,14 @@ class DownloadRepository(
     suspend fun remove(id: String) {
         workManager.cancelUniqueWork(workName(id))
         val entity = dao.getById(id) ?: return
-        entity.filePath?.let { runCatching { File(it).delete() } }
+        deleteLocation(entity.filePath)
+        deleteTemp(id)
         dao.delete(id)
     }
 
     suspend fun clearCompleted() {
         val completed = dao.getCompleted()
-        completed.forEach { entity ->
-            entity.filePath?.let { runCatching { File(it).delete() } }
-        }
+        completed.forEach { entity -> deleteLocation(entity.filePath) }
         dao.deleteCompleted()
     }
 
@@ -191,8 +193,8 @@ class DownloadRepository(
         json.decodeFromString(Track.serializer(), entity.trackJson)
     }.getOrNull()
 
-    /** Returns completed files for the given application-level track ids. */
-    suspend fun completedFiles(trackIds: Collection<String>): Map<String, File> {
+    /** Returns completed local media URIs for the given application-level track ids. */
+    suspend fun completedUris(trackIds: Collection<String>): Map<String, Uri> {
         val wanted = trackIds.toSet()
         if (wanted.isEmpty()) return emptyMap()
         return dao.getCompleted()
@@ -203,36 +205,35 @@ class DownloadRepository(
             }
             .mapNotNull { entity ->
                 val path = entity.filePath ?: return@mapNotNull null
-                val file = File(path)
-                if (!file.exists()) return@mapNotNull null
                 val id = entity.trackId.ifBlank { entity.id.substringBeforeLast('@') }
-                id to file
+                id to path.toUri()
             }
             .toMap()
     }
 
-    suspend fun completedFileFor(trackId: String): File? =
-        completedFiles(listOf(trackId))[trackId]
-
     /**
-     * Defaults to the public Music/BanLiMusic directory when the platform allows
-     * it, then falls back to app-specific external storage. A user-configured path
-     * takes precedence.
+     * On Android 10+ the default target is MediaStore's Music/BanLiMusic folder,
+     * which does not require broad storage permissions. A writable custom folder
+     * takes precedence; older devices fall back to a file directory.
      */
-    suspend fun downloadDirectory(): File {
+    suspend fun downloadTarget(): DownloadTarget {
         val configured = settings.current().downloadDirectory.trim()
         if (configured.isNotEmpty()) {
             val directory = File(configured)
-            if (isWritableDirectory(directory)) return directory
+            if (isWritableDirectory(directory)) return DownloadTarget.Directory(directory)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return DownloadTarget.MediaStoreMusic
         }
 
         val publicMusic = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
         val publicDirectory = File(publicMusic, "BanLiMusic")
-        if (isWritableDirectory(publicDirectory)) return publicDirectory
+        if (isWritableDirectory(publicDirectory)) return DownloadTarget.Directory(publicDirectory)
 
         val fallbackRoot = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
             ?: context.filesDir
-        return File(fallbackRoot, "BanLiMusic").apply { mkdirs() }
+        return DownloadTarget.Directory(File(fallbackRoot, "BanLiMusic").apply { mkdirs() })
     }
 
     private fun isWritableDirectory(directory: File): Boolean {
@@ -242,6 +243,29 @@ class DownloadRepository(
             val probe = File(directory, ".banli_write_test")
             probe.createNewFile() && probe.delete()
         }.getOrDefault(false)
+    }
+
+    private fun locationExists(path: String?): Boolean {
+        if (path.isNullOrBlank()) return false
+        if (path.startsWith("content://")) return true
+        return File(path).exists()
+    }
+
+    private fun deleteLocation(path: String?) {
+        if (path.isNullOrBlank()) return
+        if (path.startsWith("content://")) {
+            runCatching { context.contentResolver.delete(Uri.parse(path), null, null) }
+        } else {
+            runCatching { File(path).delete() }
+        }
+    }
+
+    private fun deleteTemp(taskId: String) {
+        val temp = File(
+            context.cacheDir,
+            "downloads/${TextNormalizer.sanitizeFileName(taskId)}.part",
+        )
+        runCatching { temp.delete() }
     }
 
     fun suggestedFileName(track: Track, url: String, taskId: String): String {

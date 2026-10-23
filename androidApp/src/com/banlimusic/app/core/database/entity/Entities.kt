@@ -12,6 +12,12 @@ data class FavoriteTrackEntity(
     val category: String = "默认收藏",
 )
 
+@Entity(tableName = "favorite_categories")
+data class FavoriteCategoryEntity(
+    @PrimaryKey val name: String,
+    val createdAt: Long,
+)
+
 @Entity(tableName = "play_history")
 data class PlayHistoryEntity(
     @PrimaryKey val trackId: String,
