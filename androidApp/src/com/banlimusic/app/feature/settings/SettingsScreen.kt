@@ -67,7 +67,7 @@ fun SettingsScreen(
     val versionName = remember(context) {
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull() ?: "0.1.0"
+        }.getOrNull() ?: "0.2.0"
     }
 
     LazyColumn(
