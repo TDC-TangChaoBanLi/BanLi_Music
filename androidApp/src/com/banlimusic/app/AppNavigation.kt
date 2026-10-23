@@ -142,6 +142,7 @@ fun AppRoot(container: AppContainer) {
                         AppNavHost(
                             navController = navController,
                             playQueue = ::playQueue,
+                            navigateTopLevel = ::navigateTo,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
@@ -185,6 +186,7 @@ fun AppRoot(container: AppContainer) {
                 AppNavHost(
                     navController = navController,
                     playQueue = ::playQueue,
+                    navigateTopLevel = ::navigateTo,
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -196,6 +198,7 @@ fun AppRoot(container: AppContainer) {
 private fun AppNavHost(
     navController: NavHostController,
     playQueue: (List<Track>, Int) -> Unit,
+    navigateTopLevel: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -205,8 +208,8 @@ private fun AppNavHost(
     ) {
         composable(Routes.HOME) {
             HomeScreen(
-                onSearchClick = { navController.navigate(Routes.SEARCH) },
-                onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
+                onSearchClick = { navigateTopLevel(Routes.SEARCH) },
+                onOpenLibrary = { navigateTopLevel(Routes.LIBRARY) },
                 onPlayQueue = playQueue,
             )
         }
@@ -216,7 +219,7 @@ private fun AppNavHost(
         composable(Routes.LIBRARY) {
             LibraryScreen(
                 onPlayQueue = playQueue,
-                onOpenDownloads = { navController.navigate(Routes.DOWNLOADS) },
+                onOpenDownloads = { navigateTopLevel(Routes.DOWNLOADS) },
             )
         }
         composable(Routes.DOWNLOADS) {

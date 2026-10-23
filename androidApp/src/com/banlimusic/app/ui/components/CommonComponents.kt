@@ -64,6 +64,15 @@ fun qualityLabel(kbps: Int): String = when (kbps) {
     else -> "${kbps}K"
 }
 
+fun qualityShortLabel(kbps: Int): String = when (kbps) {
+    128 -> "标准"
+    192 -> "较高"
+    320 -> "高品"
+    740 -> "无损"
+    999 -> "超无损"
+    else -> "${kbps}K"
+}
+
 fun formatBytes(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB")

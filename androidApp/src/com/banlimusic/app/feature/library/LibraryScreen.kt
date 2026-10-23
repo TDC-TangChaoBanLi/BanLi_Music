@@ -9,6 +9,11 @@ import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +39,7 @@ import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -55,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +75,7 @@ import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackRow
 import com.banlimusic.app.ui.components.dragSelect
 import com.banlimusic.app.ui.components.qualityLabel
+import com.banlimusic.app.ui.components.qualityShortLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -97,6 +105,7 @@ fun LibraryScreen(
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var libraryHeaderVisible by remember { mutableStateOf(true) }
     var sort by rememberSaveable { mutableStateOf(LibrarySort.TITLE) }
     var ascending by rememberSaveable { mutableStateOf(true) }
     var showNewCategory by rememberSaveable { mutableStateOf(false) }
@@ -199,6 +208,7 @@ fun LibraryScreen(
                     onClick = {
                         selectedTab = index
                         selectionMode = false
+                        libraryHeaderVisible = true
                         viewModel.clearSelection()
                     },
                     text = { Text(label) },
@@ -206,12 +216,18 @@ fun LibraryScreen(
             }
         }
 
-        SortBar(
-            sort = sort,
-            ascending = ascending,
-            onSort = { sort = it },
-            onToggleOrder = { ascending = !ascending },
-        )
+        AnimatedVisibility(
+            visible = selectedTab != 0 || libraryHeaderVisible,
+            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+        ) {
+            SortBar(
+                sort = sort,
+                ascending = ascending,
+                onSort = { sort = it },
+                onToggleOrder = { ascending = !ascending },
+            )
+        }
 
         when (selectedTab) {
             0 -> FavoritesTabContent(
@@ -253,6 +269,7 @@ fun LibraryScreen(
                 onImport = {
                     importJsonLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                 },
+                onHeaderVisibilityChange = { libraryHeaderVisible = it },
                 modifier = Modifier.weight(1f),
             )
 
@@ -364,7 +381,7 @@ private fun SortBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 2.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -372,7 +389,7 @@ private fun SortBar(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(4.dp))
         LibrarySort.entries.forEach { option ->
             FilterChip(
                 selected = sort == option,
@@ -414,6 +431,7 @@ private fun FavoritesTabContent(
     downloadQualities: suspend (List<Track>) -> List<Int>,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    onHeaderVisibilityChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -421,6 +439,23 @@ private fun FavoritesTabContent(
     var chosenCategory by remember(defaultCategory) { mutableStateOf(defaultCategory) }
     var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
     var chosenQuality by remember { mutableStateOf<Int?>(null) }
+    var headerVisible by remember { mutableStateOf(true) }
+
+    LaunchedEffect(listState) {
+        var previousIndex = 0
+        var previousOffset = 0
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                val scrollingDown = index > previousIndex ||
+                    (index == previousIndex && offset > previousOffset)
+                headerVisible = !scrollingDown || (index == 0 && offset == 0)
+                previousIndex = index
+                previousOffset = offset
+            }
+    }
+    LaunchedEffect(headerVisible) {
+        onHeaderVisibilityChange(headerVisible)
+    }
 
     LaunchedEffect(selectedIds, favorites) {
         qualities = if (selectedIds.isEmpty()) emptyList() else downloadQualities(selectedTracks)
@@ -429,65 +464,77 @@ private fun FavoritesTabContent(
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            AnimatedVisibility(
+                visible = headerVisible,
+                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
             ) {
-                item {
-                    FilterChip(
-                        selected = selectedCategory == null,
-                        onClick = { onSelectCategory(null) },
-                        label = { Text("全部") },
-                    )
-                }
-                items(categories) { category ->
-                    FilterChip(
-                        selected = selectedCategory == category,
-                        onClick = { onSelectCategory(category) },
-                        label = { Text(category) },
-                    )
-                }
-                item {
-                    FilterChip(
-                        selected = false,
-                        onClick = onCreateCategory,
-                        label = { Text("+ 新建") },
-                    )
-                }
-            }
+                Column {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        item {
+                            FilterChip(
+                                selected = selectedCategory == null,
+                                onClick = { onSelectCategory(null) },
+                                label = { Text("全部") },
+                            )
+                        }
+                        items(categories) { category ->
+                            FilterChip(
+                                selected = selectedCategory == category,
+                                onClick = { onSelectCategory(category) },
+                                label = { Text(category) },
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = false,
+                                onClick = onCreateCategory,
+                                label = { Text("+ 新建") },
+                            )
+                        }
+                    }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "共 ${favorites.size} 首",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.weight(1f))
-                TextButton(
-                    enabled = favorites.isNotEmpty(),
-                    onClick = { onPlayQueue(favorites, 0) },
-                ) { Text("播放全部") }
-                if (selectionMode) {
-                    TextButton(onClick = onSelectAll) { Text("全选") }
-                    TextButton(onClick = { onSelectionModeChange(false) }) { Text("取消") }
-                } else {
-                    TextButton(onClick = { onSelectionModeChange(true) }) { Text("选择") }
-                }
-            }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (selectionMode) {
+                                "已选 ${selectedIds.size} 首"
+                            } else {
+                                "共 ${favorites.size} 首"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        if (!selectionMode) {
+                            TextButton(
+                                enabled = favorites.isNotEmpty(),
+                                onClick = { onPlayQueue(favorites, 0) },
+                            ) { Text("播放全部") }
+                            TextButton(onClick = { onSelectionModeChange(true) }) {
+                                Text("选择")
+                            }
+                        }
+                    }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = onExport) { Text("导出收藏") }
-                TextButton(onClick = onImport) { Text("导入收藏") }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        AssistChip(onClick = onExport, label = { Text("导出") })
+                        AssistChip(onClick = onImport, label = { Text("导入") })
+                    }
+                }
             }
 
             if (favorites.isEmpty()) {
@@ -561,6 +608,7 @@ private fun FavoritesTabContent(
                 onQualityChange = { chosenQuality = it },
                 onFavorite = { onAddFavorites(favorites, chosenCategory) },
                 onDownload = { onDownloadSelected(favorites, chosenQuality) },
+                onSelectAll = onSelectAll,
                 onCancel = onClearSelection,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
@@ -568,7 +616,6 @@ private fun FavoritesTabContent(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FavoritesSelectionBar(
     count: Int,
@@ -580,6 +627,7 @@ private fun FavoritesSelectionBar(
     onQualityChange: (Int) -> Unit,
     onFavorite: () -> Unit,
     onDownload: () -> Unit,
+    onSelectAll: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -591,66 +639,76 @@ private fun FavoritesSelectionBar(
         tonalElevation = 8.dp,
         shadowElevation = 8.dp,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "已选 $count 首",
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.weight(1f),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            Box {
+                CompactTextButton(
+                    text = "$chosenCategory ▾",
+                    onClick = { categoryMenu = true },
                 )
-                TextButton(onClick = onCancel) { Text("取消") }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Box {
-                    TextButton(onClick = { categoryMenu = true }) {
-                        Text("收藏夹: $chosenCategory", maxLines = 1)
+                DropdownMenu(
+                    expanded = categoryMenu,
+                    onDismissRequest = { categoryMenu = false },
+                ) {
+                    categories.forEach { category ->
+                        DropdownMenuItem(
+                            text = { Text(category) },
+                            onClick = {
+                                categoryMenu = false
+                                onCategoryChange(category)
+                            },
+                        )
                     }
+                }
+            }
+            CompactTextButton(text = "收藏", onClick = onFavorite, enabled = count > 0)
+            Spacer(Modifier.weight(1f))
+            if (qualities.isNotEmpty()) {
+                Box {
+                    CompactTextButton(
+                        text = "${chosenQuality?.let(::qualityShortLabel) ?: "标准"} ▾",
+                        onClick = { qualityMenu = true },
+                    )
                     DropdownMenu(
-                        expanded = categoryMenu,
-                        onDismissRequest = { categoryMenu = false },
+                        expanded = qualityMenu,
+                        onDismissRequest = { qualityMenu = false },
                     ) {
-                        categories.forEach { category ->
+                        qualities.forEach { quality ->
                             DropdownMenuItem(
-                                text = { Text(category) },
+                                text = { Text(qualityLabel(quality)) },
                                 onClick = {
-                                    categoryMenu = false
-                                    onCategoryChange(category)
+                                    qualityMenu = false
+                                    onQualityChange(quality)
                                 },
                             )
                         }
                     }
                 }
-                TextButton(onClick = onFavorite, enabled = count > 0) { Text("收藏") }
-                if (qualities.isNotEmpty()) {
-                    Box {
-                        TextButton(onClick = { qualityMenu = true }) {
-                            Text(
-                                "音质: ${chosenQuality?.let(::qualityLabel) ?: "默认"}",
-                                maxLines = 1,
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = qualityMenu,
-                            onDismissRequest = { qualityMenu = false },
-                        ) {
-                            qualities.forEach { quality ->
-                                DropdownMenuItem(
-                                    text = { Text(qualityLabel(quality)) },
-                                    onClick = {
-                                        qualityMenu = false
-                                        onQualityChange(quality)
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-                TextButton(onClick = onDownload, enabled = count > 0) { Text("下载") }
             }
+            CompactTextButton(text = "下载", onClick = onDownload, enabled = count > 0)
+            CompactTextButton(text = "全选", onClick = onSelectAll, enabled = count > 0)
+            CompactTextButton(text = "取消", onClick = onCancel)
         }
+    }
+}
+
+@Composable
+private fun CompactTextButton(
+    text: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+    ) {
+        Text(text = text, maxLines = 1)
     }
 }
 

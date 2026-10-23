@@ -60,6 +60,7 @@ import com.banlimusic.app.ui.components.SectionHeader
 import com.banlimusic.app.ui.components.TrackRow
 import com.banlimusic.app.ui.components.dragSelect
 import com.banlimusic.app.ui.components.qualityLabel
+import com.banlimusic.app.ui.components.qualityShortLabel
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -203,7 +204,11 @@ fun SearchScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = "找到 ${state.results.size} 首",
+                                    text = if (state.selectionMode) {
+                                        "已选 ${state.selectedIds.size} 首"
+                                    } else {
+                                        "找到 ${state.results.size} 首"
+                                    },
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -215,10 +220,7 @@ fun SearchScreen(
                                         color = MaterialTheme.colorScheme.error,
                                     )
                                 }
-                                if (state.selectionMode) {
-                                    TextButton(onClick = viewModel::selectAll) { Text("全选") }
-                                    TextButton(onClick = viewModel::clearSelection) { Text("取消") }
-                                } else {
+                                if (!state.selectionMode) {
                                     TextButton(onClick = { viewModel.setSelectionMode(true) }) {
                                         Text("选择")
                                     }
@@ -316,6 +318,7 @@ fun SearchScreen(
                 onQualityChange = { chosenQuality = it },
                 onFavorite = { viewModel.batchFavorite(chosenCategory) },
                 onDownload = { viewModel.batchDownload(chosenQuality) },
+                onSelectAll = viewModel::selectAll,
                 onCancel = viewModel::clearSelection,
             )
         }
@@ -336,7 +339,6 @@ private fun SearchPrompt(
     )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SelectionActionBar(
     count: Int,
@@ -348,76 +350,81 @@ private fun SelectionActionBar(
     onQualityChange: (Int) -> Unit,
     onFavorite: () -> Unit,
     onDownload: () -> Unit,
+    onSelectAll: () -> Unit,
     onCancel: () -> Unit,
 ) {
     var categoryMenu by remember { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
     Surface(tonalElevation = 6.dp, shadowElevation = 6.dp) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "已选 $count 首",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
+            Box {
+                CompactTextButton(
+                    text = "$chosenCategory ▾",
+                    onClick = { categoryMenu = true },
                 )
-                TextButton(onClick = onCancel) { Text("取消") }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Box {
-                    TextButton(onClick = { categoryMenu = true }) {
-                        Text("收藏夹: $chosenCategory", maxLines = 1)
+                DropdownMenu(
+                    expanded = categoryMenu,
+                    onDismissRequest = { categoryMenu = false },
+                ) {
+                    categories.forEach { category ->
+                        DropdownMenuItem(
+                            text = { Text(category) },
+                            onClick = {
+                                categoryMenu = false
+                                onCategoryChange(category)
+                            },
+                        )
                     }
+                }
+            }
+            CompactTextButton(text = "收藏", onClick = onFavorite, enabled = count > 0)
+            Spacer(Modifier.weight(1f))
+            if (qualities.isNotEmpty()) {
+                Box {
+                    CompactTextButton(
+                        text = "${chosenQuality?.let(::qualityShortLabel) ?: "标准"} ▾",
+                        onClick = { qualityMenu = true },
+                    )
                     DropdownMenu(
-                        expanded = categoryMenu,
-                        onDismissRequest = { categoryMenu = false },
+                        expanded = qualityMenu,
+                        onDismissRequest = { qualityMenu = false },
                     ) {
-                        categories.forEach { category ->
+                        qualities.forEach { quality ->
                             DropdownMenuItem(
-                                text = { Text(category) },
+                                text = { Text(qualityLabel(quality)) },
                                 onClick = {
-                                    categoryMenu = false
-                                    onCategoryChange(category)
+                                    qualityMenu = false
+                                    onQualityChange(quality)
                                 },
                             )
                         }
                     }
                 }
-                TextButton(onClick = onFavorite, enabled = count > 0) { Text("收藏") }
-                if (qualities.isNotEmpty()) {
-                    Box {
-                        TextButton(onClick = { qualityMenu = true }) {
-                            Text(
-                                "音质: ${chosenQuality?.let(::qualityLabel) ?: "默认"}",
-                                maxLines = 1,
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = qualityMenu,
-                            onDismissRequest = { qualityMenu = false },
-                        ) {
-                            qualities.forEach { quality ->
-                                DropdownMenuItem(
-                                    text = { Text(qualityLabel(quality)) },
-                                    onClick = {
-                                        qualityMenu = false
-                                        onQualityChange(quality)
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-                TextButton(onClick = onDownload, enabled = count > 0) { Text("下载") }
             }
+            CompactTextButton(text = "下载", onClick = onDownload, enabled = count > 0)
+            CompactTextButton(text = "全选", onClick = onSelectAll, enabled = count > 0)
+            CompactTextButton(text = "取消", onClick = onCancel)
         }
+    }
+}
+
+@Composable
+private fun CompactTextButton(
+    text: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+    ) {
+        Text(text = text, maxLines = 1)
     }
 }
 

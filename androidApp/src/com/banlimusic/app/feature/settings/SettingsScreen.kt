@@ -1,6 +1,7 @@
 package com.banlimusic.app.feature.settings
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -81,6 +82,8 @@ fun SettingsScreen(
     val rateStatus by viewModel.rateStatus.collectAsStateWithLifecycle()
     val cacheSize by viewModel.cacheSize.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
+
+    BackHandler(enabled = page != null) { page = null }
 
     if (page == null) {
         SettingsHome(onSelect = { page = it })

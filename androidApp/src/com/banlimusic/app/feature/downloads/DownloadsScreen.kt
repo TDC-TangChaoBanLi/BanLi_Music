@@ -1,6 +1,7 @@
 package com.banlimusic.app.feature.downloads
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -18,8 +19,8 @@ import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -27,12 +28,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,6 +61,9 @@ fun DownloadsScreen(
 ) {
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val completed = tasks.filter { it.status == DownloadStatus.COMPLETED }
     val active = tasks.filter { it.status != DownloadStatus.COMPLETED }
@@ -77,20 +84,28 @@ fun DownloadsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (selectedTab == 0 && completed.isNotEmpty()) {
-                TextButton(onClick = viewModel::clearCompleted) { Text("清除已完成") }
+            if (selectedTab == 0 && completed.isNotEmpty() && !selectionMode) {
+                TextButton(onClick = { selectionMode = true }) { Text("选择") }
             }
         }
 
         PrimaryTabRow(selectedTabIndex = selectedTab) {
             Tab(
                 selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
+                onClick = {
+                    selectedTab = 0
+                    selectionMode = false
+                    selectedIds = emptySet()
+                },
                 text = { Text("已下载") },
             )
             Tab(
                 selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
+                onClick = {
+                    selectedTab = 1
+                    selectionMode = false
+                    selectedIds = emptySet()
+                },
                 text = { Text("下载列表") },
             )
         }
@@ -98,12 +113,32 @@ fun DownloadsScreen(
         if (selectedTab == 0) {
             DownloadedList(
                 tasks = completed,
+                selectionMode = selectionMode,
+                selectedIds = selectedIds,
                 onPlay = { task ->
                     viewModel.play(task)
                     onOpenPlayer()
                 },
-                onDelete = { task -> viewModel.remove(task.id) },
+                onToggleSelection = { id ->
+                    selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+                },
+                onEnterSelection = { id ->
+                    selectionMode = true
+                    selectedIds = selectedIds + id
+                },
+                modifier = Modifier.weight(1f),
             )
+            if (selectionMode) {
+                DeleteSelectionBar(
+                    count = selectedIds.size,
+                    onSelectAll = { selectedIds = completed.map { it.id }.toSet() },
+                    onDelete = { if (selectedIds.isNotEmpty()) showDeleteConfirm = true },
+                    onCancel = {
+                        selectionMode = false
+                        selectedIds = emptySet()
+                    },
+                )
+            }
         } else {
             DownloadQueueList(
                 tasks = active,
@@ -111,35 +146,73 @@ fun DownloadsScreen(
                 onResume = viewModel::resume,
                 onCancel = viewModel::cancel,
                 onDelete = viewModel::remove,
+                modifier = Modifier.weight(1f),
             )
         }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除已下载歌曲") },
+            text = {
+                Text("将删除 ${selectedIds.size} 首已下载歌曲及其媒体库文件，是否继续？")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.removeMany(selectedIds)
+                        selectedIds = emptySet()
+                        selectionMode = false
+                        showDeleteConfirm = false
+                    },
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+            },
+        )
     }
 }
 
 @Composable
 private fun DownloadedList(
     tasks: List<DownloadTask>,
+    selectionMode: Boolean,
+    selectedIds: Set<String>,
     onPlay: (DownloadTask) -> Unit,
-    onDelete: (DownloadTask) -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onEnterSelection: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     if (tasks.isEmpty()) {
-        EmptyState(
-            title = "还没有已下载歌曲",
-            description = "在播放页或批量操作中选择下载，完成后会出现在这里。",
-            icon = Icons.Rounded.Download,
-        )
+        Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            EmptyState(
+                title = "还没有已下载歌曲",
+                description = "在播放页或批量操作中选择下载，完成后会出现在这里。",
+                icon = Icons.Rounded.Download,
+            )
+        }
         return
     }
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
+        itemsIndexed(tasks, key = { _, task -> task.id }) { _, task ->
             TrackRow(
                 track = task.track,
-                onClick = { onPlay(task) },
+                onClick = {
+                    if (selectionMode) onToggleSelection(task.id) else onPlay(task)
+                },
                 isFavorite = false,
+                selected = if (selectionMode) task.id in selectedIds else null,
+                onLongClick = if (selectionMode) {
+                    null
+                } else {
+                    { onEnterSelection(task.id) }
+                },
                 trailing = {
                     if (task.qualityKbps > 0) {
                         Text(
@@ -147,9 +220,6 @@ private fun DownloadedList(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    }
-                    IconButton(onClick = { onDelete(task) }) {
-                        Icon(Icons.Rounded.Delete, contentDescription = "删除下载")
                     }
                 },
             )
@@ -166,23 +236,52 @@ private fun DownloadedList(
 }
 
 @Composable
+private fun DeleteSelectionBar(
+    count: Int,
+    onSelectAll: () -> Unit,
+    onDelete: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "已选 $count 首",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onSelectAll) { Text("全选") }
+            TextButton(onClick = onDelete, enabled = count > 0) { Text("删除") }
+            TextButton(onClick = onCancel) { Text("取消") }
+        }
+    }
+}
+
+@Composable
 private fun DownloadQueueList(
     tasks: List<DownloadTask>,
     onPause: (String) -> Unit,
     onResume: (String) -> Unit,
     onCancel: (String) -> Unit,
     onDelete: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     if (tasks.isEmpty()) {
-        EmptyState(
-            title = "下载列表为空",
-            description = "正在下载、等待中或失败的任务会显示在这里。",
-            icon = Icons.Rounded.Download,
-        )
+        Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            EmptyState(
+                title = "下载列表为空",
+                description = "正在下载、等待中或失败的任务会显示在这里。",
+                icon = Icons.Rounded.Download,
+            )
+        }
         return
     }
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {

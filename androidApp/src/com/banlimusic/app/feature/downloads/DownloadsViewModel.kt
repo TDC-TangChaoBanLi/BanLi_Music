@@ -30,6 +30,10 @@ class DownloadsViewModel(
         downloads.remove(id)
     }
 
+    fun removeMany(ids: Collection<String>) = viewModelScope.launch {
+        ids.forEach { downloads.remove(it) }
+    }
+
     fun clearCompleted() = viewModelScope.launch {
         downloads.clearCompleted()
     }
