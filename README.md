@@ -63,9 +63,29 @@
 ./kotlin run -m androidApp     # 安装并运行到已连接的设备/模拟器
 ```
 
-当前 APK 输出路径为 `build/tasks/_androidApp_buildAndroidDebug/gradle-project-debug.apk`（该路径可能随 Toolchain 版本调整，以命令输出为准）。
+当前 debug APK 输出路径为 `build/tasks/_androidApp_buildAndroidDebug/gradle-project-debug.apk`（该路径可能随 Toolchain 版本调整，以命令输出为准）。
 
 首次构建需要下载依赖与工具链组件。Android SDK 路径来自 `local.properties` 或 `ANDROID_HOME`。新增 `shared/`、`desktopApp/` 等模块时，需要把目录名加入 `project.yaml` 的 `modules` 列表。
+
+### 发布 APK
+
+`./kotlin build -v release` 会生成未签名的 release APK：
+
+```text
+build/tasks/_androidApp_buildAndroidRelease/gradle-project-release-unsigned.apk
+```
+
+使用 Android SDK 的 `apksigner` 签名（示例）：
+
+```bash
+apksigner sign \
+  --ks /path/to/release.keystore \
+  --ks-key-alias banlimusic \
+  --out dist/BanLiMusic-0.1.0-release.apk \
+  build/tasks/_androidApp_buildAndroidRelease/gradle-project-release-unsigned.apk
+```
+
+本次已在 `dist/BanLiMusic-0.1.0-release.apk` 生成签名 APK；签名密钥保存在本机 `~/.local/share/BanLiMusic/keystore/`，未提交到仓库。正式发布时请使用你自己的长期 release keystore，并妥善备份。
 
 ## 架构
 

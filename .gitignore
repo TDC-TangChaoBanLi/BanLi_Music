@@ -6,6 +6,7 @@ local.properties
 .tooling/
 build/
 **/build/
+dist/
 captures/
 .externalNativeBuild/
 .cxx/
