@@ -162,7 +162,7 @@ private fun SettingsDetail(
     val versionName = remember(context) {
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull() ?: "0.2.0"
+        }.getOrNull() ?: "未知版本"
     }
 
     Column(modifier = Modifier.fillMaxSize()) {

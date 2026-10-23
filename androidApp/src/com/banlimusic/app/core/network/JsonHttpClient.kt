@@ -71,7 +71,7 @@ class JsonHttpClient(
     }
 
     companion object {
-        const val USER_AGENT = "BanLiMusic/0.2 (Android)"
+        const val USER_AGENT = "BanLiMusic (Android)"
 
         fun createClient(cacheDir: java.io.File? = null): OkHttpClient {
             val builder = OkHttpClient.Builder()

@@ -93,6 +93,29 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
 
 新增核心算法（去重、限流、解析、迁移、下载状态机）必须补充 JVM 单元测试。
 
+## 版本与发布
+
+版本号采用 `MAJOR.MINOR.PATCH`：
+
+- **MAJOR（第一位）**：只在用户明确要求时变更，代理不得自行提升。
+- **MINOR（第二位）**：功能新增、架构/数据模型/UI 大改、跨模块行为调整等较大改动时 +1。
+- **PATCH（第三位）**：Bug 修复、文案修正、小范围兼容性处理等小改动时 +1。
+
+每次版本变更必须同时：
+
+1. 更新 `androidApp/module.yaml` 中的 `versionCode`（单调递增，不复用）和 `versionName`；这是唯一的版本号来源。
+2. 不要在 Kotlin 源码中硬编码版本号。运行时版本通过 `PackageManager` 读取；HTTP `User-Agent` 不携带版本号。README 中的产物名使用 `BanLiMusic-<version>-release.apk` 占位符。
+3. 运行 `./kotlin test` 与 `./kotlin build`；发布时执行 `./kotlin build -v release` 并重新签名。
+4. 在提交信息或发布说明中记录版本号变化及原因。
+
+判断示例：
+
+- 只修复缺陷：`0.3.0` → `0.3.1`（PATCH）。
+- 新增功能或较大范围重构：`0.3.1` → `0.4.0`（MINOR）。
+- 第一位版本号变化必须先获得用户明确指令，不得自动修改。
+
+当前版本为 `0.3.0`，`versionCode` 为 3。
+
 ## 不要提交的文件
 
 - `.vscode/`（已从 Git 历史移除，本地可保留）

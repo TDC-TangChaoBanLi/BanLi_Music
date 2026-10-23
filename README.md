@@ -280,11 +280,11 @@ build/tasks/_androidApp_buildAndroidRelease/gradle-project-release-unsigned.apk
 apksigner sign \
   --ks /path/to/release.keystore \
   --ks-key-alias banlimusic \
-  --out dist/BanLiMusic-0.2.0-release.apk \
+  --out dist/BanLiMusic-<version>-release.apk \
   build/tasks/_androidApp_buildAndroidRelease/gradle-project-release-unsigned.apk
 ```
 
-本次已在 `dist/BanLiMusic-0.2.0-release.apk` 生成签名 APK；签名密钥保存在本机 `~/.local/share/BanLiMusic/keystore/`，未提交到仓库。正式发布时请使用你自己的长期 release keystore，并妥善备份。
+本次已在 `dist/BanLiMusic-<version>-release.apk` 生成签名 APK；签名密钥保存在本机 `~/.local/share/BanLiMusic/keystore/`，未提交到仓库。正式发布时请使用你自己的长期 release keystore，并妥善备份。
 
 ## 架构
 
