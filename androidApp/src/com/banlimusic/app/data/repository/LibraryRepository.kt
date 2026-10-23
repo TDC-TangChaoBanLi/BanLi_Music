@@ -4,6 +4,7 @@ import com.banlimusic.app.core.database.dao.LibraryDao
 import com.banlimusic.app.core.database.entity.FavoriteTrackEntity
 import com.banlimusic.app.core.database.entity.PlayHistoryEntity
 import com.banlimusic.app.core.database.entity.SearchHistoryEntity
+import com.banlimusic.app.core.datastore.DEFAULT_FAVORITE_CATEGORY
 import com.banlimusic.app.core.model.Track
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -13,9 +14,16 @@ class LibraryRepository(
     private val dao: LibraryDao,
     private val json: Json,
 ) {
-    fun observeFavorites(): Flow<List<Track>> = dao.observeFavorites().map { entities ->
-        entities.mapNotNull { decode(it.trackJson) }
+    fun observeFavorites(category: String? = null): Flow<List<Track>> {
+        val source = if (category == null) {
+            dao.observeFavorites()
+        } else {
+            dao.observeFavoritesByCategory(category)
+        }
+        return source.map { entities -> entities.mapNotNull { decode(it.trackJson) } }
     }
+
+    fun observeFavoriteCategories(): Flow<List<String>> = dao.observeFavoriteCategories()
 
     fun observeFavoriteIds(): Flow<Set<String>> = dao.observeFavoriteIds().map { it.toSet() }
 
@@ -29,21 +37,49 @@ class LibraryRepository(
     suspend fun isFavorite(trackId: String): Boolean = dao.isFavorite(trackId)
 
     /** @return the new favorite state. */
-    suspend fun toggleFavorite(track: Track): Boolean {
+    suspend fun toggleFavorite(
+        track: Track,
+        category: String = DEFAULT_FAVORITE_CATEGORY,
+    ): Boolean {
         val existing = dao.isFavorite(track.id)
         if (existing) {
             dao.deleteFavorite(track.id)
         } else {
+            addFavorite(track, category)
+        }
+        return !existing
+    }
+
+    suspend fun addFavorite(track: Track, category: String = DEFAULT_FAVORITE_CATEGORY) {
+        dao.upsertFavorite(
+            FavoriteTrackEntity(
+                trackId = track.id,
+                trackJson = json.encodeToString(Track.serializer(), track),
+                addedAt = System.currentTimeMillis(),
+                category = category.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY },
+            ),
+        )
+    }
+
+    suspend fun addFavorites(
+        tracks: Collection<Track>,
+        category: String = DEFAULT_FAVORITE_CATEGORY,
+    ) {
+        val normalized = category.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY }
+        val now = System.currentTimeMillis()
+        tracks.distinctBy { it.id }.forEach { track ->
             dao.upsertFavorite(
                 FavoriteTrackEntity(
                     trackId = track.id,
                     trackJson = json.encodeToString(Track.serializer(), track),
-                    addedAt = System.currentTimeMillis(),
+                    addedAt = now,
+                    category = normalized,
                 ),
             )
         }
-        return !existing
     }
+
+    suspend fun removeFavorite(trackId: String) = dao.deleteFavorite(trackId)
 
     suspend fun recordPlay(track: Track) {
         val now = System.currentTimeMillis()

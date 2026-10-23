@@ -5,11 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.banlimusic.app.core.common.userMessage
 import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.model.Track
+import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.MusicRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,20 +24,27 @@ data class SearchUiState(
     val results: List<Track> = emptyList(),
     val isSearching: Boolean = false,
     val isLoadingMore: Boolean = false,
+    val hasSearched: Boolean = false,
     val page: Int = 0,
     val hasMore: Boolean = false,
     val error: String? = null,
     val favoriteIds: Set<String> = emptySet(),
+    val selectionMode: Boolean = false,
+    val selectedIds: Set<String> = emptySet(),
 )
 
 class SearchViewModel(
     private val music: MusicRepository,
     private val library: LibraryRepository,
-    settings: SettingsRepository,
+    private val downloads: DownloadRepository,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
+
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
 
     val history: StateFlow<List<String>> = library.observeSearchHistory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -45,6 +52,10 @@ class SearchViewModel(
     val enabledSources: StateFlow<Set<String>> = settings.settings
         .map { it.enabledSources }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), setOf("netease"))
+
+    val defaultFavoriteCategory: StateFlow<String> = settings.settings
+        .map { it.defaultFavoriteCategory }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "默认收藏")
 
     private var searchJob: Job? = null
 
@@ -56,24 +67,25 @@ class SearchViewModel(
         }
     }
 
+    /**
+     * Typing only updates the query. A request is sent when the user explicitly
+     * presses the search button or the IME action, which keeps API usage low.
+     */
     fun onQueryChange(value: String) {
-        _uiState.update { it.copy(query = value, error = null) }
         searchJob?.cancel()
-        if (value.isBlank()) {
-            _uiState.update {
-                it.copy(
-                    results = emptyList(),
-                    page = 0,
-                    hasMore = false,
-                    isSearching = false,
-                    isLoadingMore = false,
-                )
-            }
-            return
-        }
-        searchJob = viewModelScope.launch {
-            delay(300L)
-            performSearch(reset = true)
+        _uiState.update {
+            it.copy(
+                query = value,
+                results = emptyList(),
+                page = 0,
+                hasMore = false,
+                hasSearched = false,
+                isSearching = false,
+                isLoadingMore = false,
+                error = null,
+                selectionMode = false,
+                selectedIds = emptySet(),
+            )
         }
     }
 
@@ -84,7 +96,7 @@ class SearchViewModel(
     }
 
     fun useHistory(query: String) {
-        onQueryChange(query)
+        _uiState.update { it.copy(query = query) }
         submit()
     }
 
@@ -100,17 +112,76 @@ class SearchViewModel(
     }
 
     fun toggleFavorite(track: Track) {
-        viewModelScope.launch { library.toggleFavorite(track) }
+        viewModelScope.launch {
+            library.toggleFavorite(track, defaultFavoriteCategory.value)
+        }
     }
 
     fun clearHistory() {
         viewModelScope.launch { library.clearSearchHistory() }
     }
 
+    fun setSelectionMode(enabled: Boolean) {
+        _uiState.update {
+            it.copy(
+                selectionMode = enabled,
+                selectedIds = if (enabled) it.selectedIds else emptySet(),
+            )
+        }
+    }
+
+    fun toggleSelection(trackId: String) {
+        _uiState.update { state ->
+            val selected = if (trackId in state.selectedIds) {
+                state.selectedIds - trackId
+            } else {
+                state.selectedIds + trackId
+            }
+            state.copy(selectedIds = selected)
+        }
+    }
+
+    fun selectAll() {
+        _uiState.update { state ->
+            state.copy(selectedIds = state.results.map { it.id }.toSet())
+        }
+    }
+
+    fun clearSelection() {
+        _uiState.update { it.copy(selectedIds = emptySet(), selectionMode = false) }
+    }
+
+    fun batchFavorite() {
+        val state = _uiState.value
+        val tracks = state.results.filter { it.id in state.selectedIds }
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            library.addFavorites(tracks, defaultFavoriteCategory.value)
+            _message.value = "已收藏 ${tracks.size} 首到“${defaultFavoriteCategory.value}”"
+            clearSelection()
+        }
+    }
+
+    fun batchDownload() {
+        val state = _uiState.value
+        val tracks = state.results.filter { it.id in state.selectedIds }
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            val queued = downloads.enqueueAll(tracks)
+            _message.value = "已加入下载队列：$queued 首"
+            clearSelection()
+        }
+    }
+
+    fun consumeMessage() {
+        _message.value = null
+    }
+
     private suspend fun performSearch(reset: Boolean) {
         val query = _uiState.value.query.trim()
         if (query.isBlank()) return
         val page = if (reset) 1 else _uiState.value.page + 1
+        val pageSize = settings.current().searchPageSize
         _uiState.update {
             it.copy(
                 isSearching = reset,
@@ -119,7 +190,7 @@ class SearchViewModel(
             )
         }
         try {
-            val result = music.search(query, page)
+            val result = music.search(query, page, pageSize)
             if (query != _uiState.value.query.trim()) return
             library.addSearchQuery(query)
             _uiState.update { previous ->
@@ -132,6 +203,7 @@ class SearchViewModel(
                     results = combined,
                     page = result.page,
                     hasMore = result.hasMore,
+                    hasSearched = true,
                     isSearching = false,
                     isLoadingMore = false,
                 )
@@ -142,6 +214,7 @@ class SearchViewModel(
             _uiState.update {
                 it.copy(
                     results = if (reset) emptyList() else it.results,
+                    hasSearched = true,
                     isSearching = false,
                     isLoadingMore = false,
                     error = error.userMessage(),

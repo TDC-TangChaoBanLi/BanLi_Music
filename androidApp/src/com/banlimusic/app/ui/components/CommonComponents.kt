@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -140,6 +141,7 @@ fun TrackRow(
     modifier: Modifier = Modifier,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
+    selected: Boolean? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -150,6 +152,14 @@ fun TrackRow(
             .padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selected != null) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = null,
+                modifier = Modifier.size(34.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+        }
         TrackArtwork(
             track = track,
             modifier = Modifier.size(52.dp),

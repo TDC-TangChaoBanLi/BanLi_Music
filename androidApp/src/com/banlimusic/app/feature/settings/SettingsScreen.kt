@@ -24,12 +24,18 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -40,8 +46,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.banlimusic.app.core.common.formatDuration
 import com.banlimusic.app.core.datastore.SUPPORTED_SOURCES
 import com.banlimusic.app.core.datastore.ThemeMode
+import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.feature.common.AppViewModelProvider
+import com.banlimusic.app.ui.components.formatBytes
 import com.banlimusic.app.ui.components.qualityLabel
+import com.banlimusic.app.widget.PlayerWidgetUpdater
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -49,7 +60,9 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val settings by viewModel.appSettings.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     val rateStatus by viewModel.rateStatus.collectAsStateWithLifecycle()
+    val cacheSize by viewModel.cacheSize.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val versionName = remember(context) {
         runCatching {
@@ -139,13 +152,38 @@ fun SettingsScreen(
                     checked = settings.autoSwitchSource,
                     onCheckedChange = viewModel::setAutoSwitchSource,
                 )
+                SwitchRow(
+                    title = "单曲页默认显示歌词",
+                    description = "开启后左滑页面初始停在歌词页",
+                    checked = settings.defaultShowLyrics,
+                    onCheckedChange = viewModel::setDefaultShowLyrics,
+                )
+                LabeledSlider(
+                    title = "失败重试次数",
+                    valueText = "${settings.playbackRetryCount} 次",
+                    value = settings.playbackRetryCount.toFloat(),
+                    valueRange = 0f..10f,
+                    steps = 9,
+                ) { viewModel.setPlaybackRetryCount(it.toInt()) }
+                LabeledSlider(
+                    title = "连续失败停止阈值",
+                    valueText = "${settings.consecutiveFailureLimit} 首",
+                    value = settings.consecutiveFailureLimit.toFloat(),
+                    valueRange = 1f..10f,
+                    steps = 8,
+                ) { viewModel.setConsecutiveFailureLimit(it.toInt()) }
+                Text(
+                    text = "重试间隔依次为 2、4、8、16 秒；达到停止阈值后会发送系统通知并停止播放。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
 
         item {
-            SettingsSection(title = "音乐源") {
+            SettingsSection(title = "GD 音乐台") {
                 Text(
-                    text = "GD 音乐台当前开放：netease、joox、bilibili。启用多个来源时搜索结果会自动合并去重。",
+                    text = "当前开放：netease、joox、bilibili。启用多个来源时搜索结果会自动合并去重。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -168,11 +206,38 @@ fun SettingsScreen(
                         )
                     }
                 }
-            }
-        }
-
-        item {
-            SettingsSection(title = "请求状态") {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "音源专属配置集中在此模块，后续新增来源会使用独立的设置区块。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                LabeledSlider(
+                    title = "5 分钟请求上限",
+                    valueText = "${settings.apiLimitPerWindow} 次",
+                    value = settings.apiLimitPerWindow.toFloat(),
+                    valueRange = 1f..50f,
+                    steps = 48,
+                ) { viewModel.setApiLimit(it.toInt()) }
+                Text(
+                    text = "不得超过 50 次；GD 音乐台请求之间强制间隔至少 1 秒。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(text = "每次搜索/加载数量", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(10, 20, 30, 50).forEach { size ->
+                        FilterChip(
+                            selected = settings.searchPageSize == size,
+                            onClick = { viewModel.setSearchPageSize(size) },
+                            label = { Text("$size 首") },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 val status = rateStatus
                 if (status == null) {
                     Text(
@@ -203,22 +268,226 @@ fun SettingsScreen(
         }
 
         item {
-            SettingsSection(title = "数据") {
+            SettingsSection(title = "下载") {
+                var downloadDirectory by remember(settings.downloadDirectory) {
+                    mutableStateOf(settings.downloadDirectory)
+                }
+                OutlinedTextField(
+                    value = downloadDirectory,
+                    onValueChange = { downloadDirectory = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("下载目录") },
+                    placeholder = { Text("留空使用系统音乐/BanLiMusic") },
+                    singleLine = true,
+                    trailingIcon = {
+                        TextButton(onClick = { viewModel.setDownloadDirectory(downloadDirectory) }) {
+                            Text("保存")
+                        }
+                    },
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "留空时优先使用系统音乐目录；Android 10 及以上如果目录不可写，会自动回退到应用外部音乐目录。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(text = "下载音质", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = settings.downloadQualityKbps == 0,
+                        onClick = { viewModel.setDownloadQuality(0) },
+                        label = { Text("跟随播放音质") },
+                    )
+                    listOf(128, 192, 320, 740, 999).forEach { quality ->
+                        FilterChip(
+                            selected = settings.downloadQualityKbps == quality,
+                            onClick = { viewModel.setDownloadQuality(quality) },
+                            label = { Text(qualityLabel(quality)) },
+                        )
+                    }
+                }
+                SwitchRow(
+                    title = "同时下载歌词",
+                    description = "在音频文件旁保存同名 .lrc 文件",
+                    checked = settings.downloadLyrics,
+                    onCheckedChange = viewModel::setDownloadLyrics,
+                )
+                SwitchRow(
+                    title = "同时下载海报",
+                    description = "在音频文件旁保存同名 .jpg 文件",
+                    checked = settings.downloadArtwork,
+                    onCheckedChange = viewModel::setDownloadArtwork,
+                )
+            }
+        }
+
+        item {
+            SettingsSection(title = "缓存") {
+                Text(
+                    text = "当前缓存：${formatBytes(cacheSize)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(text = "最大缓存大小", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(6.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        100L * 1024 * 1024,
+                        200L * 1024 * 1024,
+                        500L * 1024 * 1024,
+                        1024L * 1024 * 1024,
+                    ).forEach { bytes ->
+                        FilterChip(
+                            selected = settings.cacheMaxBytes == bytes,
+                            onClick = { viewModel.setCacheMaxBytes(bytes) },
+                            label = { Text(formatBytes(bytes)) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                TextButton(
+                    onClick = {
+                        viewModel.clearCaches()
+                        Toast.makeText(context, "已清理缓存", Toast.LENGTH_SHORT).show()
+                    },
+                ) { Text("清理缓存") }
                 TextButton(
                     onClick = {
                         viewModel.clearSearchHistory()
                         Toast.makeText(context, "已清空搜索历史", Toast.LENGTH_SHORT).show()
                     },
-                ) {
-                    Text("清空搜索历史")
+                ) { Text("清空搜索历史") }
+                TextButton(onClick = viewModel::refreshCacheSize) { Text("刷新缓存大小") }
+            }
+        }
+
+        item {
+            SettingsSection(title = "音乐库与收藏") {
+                var defaultCategory by remember(settings.defaultFavoriteCategory) {
+                    mutableStateOf(settings.defaultFavoriteCategory)
                 }
-                TextButton(
-                    onClick = {
-                        viewModel.clearCaches()
-                        Toast.makeText(context, "已清理搜索、歌词和播放地址缓存", Toast.LENGTH_SHORT).show()
+                OutlinedTextField(
+                    value = defaultCategory,
+                    onValueChange = { defaultCategory = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("默认收藏夹") },
+                    singleLine = true,
+                    trailingIcon = {
+                        TextButton(onClick = { viewModel.setDefaultFavoriteCategory(defaultCategory) }) {
+                            Text("保存")
+                        }
                     },
-                ) {
-                    Text("清理缓存")
+                )
+                Text(
+                    text = "播放页收藏按钮默认收藏到此文件夹；分类可在收藏页筛选。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SwitchRow(
+                    title = "启动时自动导入本地音乐",
+                    description = "需要媒体读取权限；只记录系统媒体库中的音频，不复制文件",
+                    checked = settings.autoImportLocalMusic,
+                    onCheckedChange = viewModel::setAutoImportLocalMusic,
+                )
+            }
+        }
+
+        item {
+            SettingsSection(title = "桌面小组件") {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    WidgetTheme.entries.forEach { theme ->
+                        FilterChip(
+                            selected = settings.widgetTheme == theme,
+                            onClick = {
+                                viewModel.setWidgetTheme(theme)
+                                scope.launch {
+                                    delay(200L)
+                                    PlayerWidgetUpdater.refresh(context)
+                                }
+                            },
+                            label = {
+                                Text(
+                                    when (theme) {
+                                        WidgetTheme.SYSTEM -> "跟随系统"
+                                        WidgetTheme.BLACK -> "黑色"
+                                        WidgetTheme.WHITE -> "白色"
+                                    },
+                                )
+                            },
+                        )
+                    }
+                }
+                Text(
+                    text = "小组件支持 3x1/4x1 两种布局，可调整大小；磨砂效果使用半透明背景近似实现。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        item {
+            SettingsSection(title = "导航栏") {
+                Text(
+                    text = "选择显示的入口并调整顺序，至少保留一项。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                var navItems by remember(settings.bottomNavItems) {
+                    mutableStateOf(settings.bottomNavItems)
+                }
+                val options = com.banlimusic.app.core.datastore.BOTTOM_NAV_OPTIONS
+                options.forEach { option ->
+                    val enabled = option.id in navItems
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = enabled,
+                            onCheckedChange = { checked ->
+                                val updated = if (checked) {
+                                    navItems + option.id
+                                } else if (navItems.size > 1) {
+                                    navItems - option.id
+                                } else {
+                                    navItems
+                                }
+                                navItems = updated
+                                viewModel.setBottomNavItems(updated)
+                            },
+                        )
+                        Text(
+                            text = option.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (enabled) {
+                            val index = navItems.indexOf(option.id)
+                            TextButton(
+                                enabled = index > 0,
+                                onClick = {
+                                    val updated = navItems.toMutableList()
+                                    updated.removeAt(index)
+                                    updated.add(index - 1, option.id)
+                                    navItems = updated
+                                    viewModel.setBottomNavItems(updated)
+                                },
+                            ) { Text("上移") }
+                            TextButton(
+                                enabled = index < navItems.lastIndex,
+                                onClick = {
+                                    val updated = navItems.toMutableList()
+                                    updated.removeAt(index)
+                                    updated.add(index + 1, option.id)
+                                    navItems = updated
+                                    viewModel.setBottomNavItems(updated)
+                                },
+                            ) { Text("下移") }
+                        }
+                    }
                 }
             }
         }
@@ -263,6 +532,33 @@ fun SettingsScreen(
             )
         }
     }
+}
+
+@Composable
+private fun LabeledSlider(
+    title: String,
+    valueText: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onValueChangeFinished: (Float) -> Unit,
+) {
+    var current by remember(value) { mutableFloatStateOf(value) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text = title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Text(
+            text = valueText,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+    Slider(
+        value = current,
+        onValueChange = { current = it },
+        valueRange = valueRange,
+        steps = steps,
+        onValueChangeFinished = { onValueChangeFinished(current) },
+    )
 }
 
 @Composable

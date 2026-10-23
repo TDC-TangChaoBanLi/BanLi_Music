@@ -33,12 +33,19 @@ class SlidingWindowRateLimiter(
     private val windowMs: Long,
     private val timeSource: TimeSource = SystemTimeSource,
     private val maxWaitMs: Long = 4_000L,
+    /** Minimum spacing between two successful requests, e.g. 1s for GD Music. */
+    private val minIntervalMs: Long = 0L,
+    /** Allows the user-configured limit to change at runtime without rebuilding the client. */
+    private val limitProvider: suspend () -> Int = { limit },
 ) {
     private val mutex = Mutex()
     private val timestamps = ArrayDeque<Long>()
     private var cooldownUntil = 0L
+    private var lastRequestAt = 0L
+    private var hasRequested = false
 
     suspend fun acquire() {
+        val effectiveLimit = effectiveLimit()
         while (true) {
             val waitMs = mutex.withLock {
                 val now = timeSource.nowMs()
@@ -49,11 +56,22 @@ class SlidingWindowRateLimiter(
                     while (timestamps.isNotEmpty() && now - timestamps.first() >= windowMs) {
                         timestamps.removeFirst()
                     }
-                    if (timestamps.size < limit) {
-                        timestamps.addLast(now)
-                        0L
-                    } else {
+                    if (timestamps.size >= effectiveLimit) {
                         timestamps.first() + windowMs - now
+                    } else {
+                        val intervalWait = if (!hasRequested) {
+                            0L
+                        } else {
+                            (lastRequestAt + minIntervalMs - now).coerceAtLeast(0L)
+                        }
+                        if (intervalWait > 0L) {
+                            intervalWait
+                        } else {
+                            timestamps.addLast(now)
+                            lastRequestAt = now
+                            hasRequested = true
+                            0L
+                        }
                     }
                 }
             }
@@ -70,19 +88,25 @@ class SlidingWindowRateLimiter(
         }
     }
 
-    suspend fun status(): RateLimitStatus = mutex.withLock {
-        val now = timeSource.nowMs()
-        while (timestamps.isNotEmpty() && now - timestamps.first() >= windowMs) {
-            timestamps.removeFirst()
+    suspend fun status(): RateLimitStatus {
+        val effectiveLimit = effectiveLimit()
+        return mutex.withLock {
+            val now = timeSource.nowMs()
+            while (timestamps.isNotEmpty() && now - timestamps.first() >= windowMs) {
+                timestamps.removeFirst()
+            }
+            RateLimitStatus(
+                limit = effectiveLimit,
+                used = timestamps.size,
+                remaining = (effectiveLimit - timestamps.size).coerceAtLeast(0),
+                windowResetInMs = timestamps.firstOrNull()?.let { it + windowMs - now }?.coerceAtLeast(0) ?: 0L,
+                cooldownRemainingMs = (cooldownUntil - now).coerceAtLeast(0L),
+            )
         }
-        RateLimitStatus(
-            limit = limit,
-            used = timestamps.size,
-            remaining = (limit - timestamps.size).coerceAtLeast(0),
-            windowResetInMs = timestamps.firstOrNull()?.let { it + windowMs - now }?.coerceAtLeast(0) ?: 0L,
-            cooldownRemainingMs = (cooldownUntil - now).coerceAtLeast(0L),
-        )
     }
+
+    private suspend fun effectiveLimit(): Int =
+        limitProvider().coerceIn(1, limit)
 }
 
 /** Bounds concurrency, then asks the limiter for a slot. */

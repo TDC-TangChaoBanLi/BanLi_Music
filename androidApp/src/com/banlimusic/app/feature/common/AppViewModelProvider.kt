@@ -24,11 +24,17 @@ object AppViewModelProvider {
             SearchViewModel(
                 music = app().container.musicRepository,
                 library = app().container.libraryRepository,
+                downloads = app().container.downloadRepository,
                 settings = app().container.settingsRepository,
             )
         }
         initializer {
-            LibraryViewModel(library = app().container.libraryRepository)
+            LibraryViewModel(
+                library = app().container.libraryRepository,
+                localMusic = app().container.localMusicRepository,
+                downloads = app().container.downloadRepository,
+                settings = app().container.settingsRepository,
+            )
         }
         initializer {
             DownloadsViewModel(
@@ -41,6 +47,7 @@ object AppViewModelProvider {
                 settings = app().container.settingsRepository,
                 music = app().container.musicRepository,
                 library = app().container.libraryRepository,
+                cacheManager = app().container.cacheManager,
             )
         }
         initializer {
@@ -49,6 +56,7 @@ object AppViewModelProvider {
                 library = app().container.libraryRepository,
                 music = app().container.musicRepository,
                 downloads = app().container.downloadRepository,
+                settings = app().container.settingsRepository,
             )
         }
     }

@@ -9,6 +9,7 @@ data class FavoriteTrackEntity(
     @PrimaryKey val trackId: String,
     val trackJson: String,
     val addedAt: Long,
+    val category: String = "默认收藏",
 )
 
 @Entity(tableName = "play_history")
@@ -44,4 +45,20 @@ data class DownloadTaskEntity(
     val retryCount: Int = 0,
     val createdAt: Long,
     val updatedAt: Long,
+    val trackId: String = "",
+    val qualityKbps: Int = 0,
+    val downloadLyrics: Boolean = false,
+    val downloadArtwork: Boolean = false,
+)
+
+@Entity(tableName = "local_tracks")
+data class LocalTrackEntity(
+    @PrimaryKey val trackId: String,
+    val trackJson: String,
+    val uri: String,
+    val title: String,
+    val artist: String,
+    val album: String?,
+    val durationMs: Long,
+    val addedAt: Long,
 )

@@ -16,6 +16,12 @@ interface LibraryDao {
     @Query("SELECT * FROM favorites ORDER BY addedAt DESC")
     fun observeFavorites(): Flow<List<FavoriteTrackEntity>>
 
+    @Query("SELECT * FROM favorites WHERE category = :category ORDER BY addedAt DESC")
+    fun observeFavoritesByCategory(category: String): Flow<List<FavoriteTrackEntity>>
+
+    @Query("SELECT DISTINCT category FROM favorites ORDER BY category")
+    fun observeFavoriteCategories(): Flow<List<String>>
+
     @Query("SELECT trackId FROM favorites")
     fun observeFavoriteIds(): Flow<List<String>>
 

@@ -3,6 +3,8 @@ package com.banlimusic.app.feature.player
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.banlimusic.app.core.common.userMessage
+import com.banlimusic.app.core.datastore.AppSettings
+import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.model.Lyrics
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.data.repository.DownloadRepository
@@ -33,12 +35,19 @@ class PlayerViewModel(
     private val library: LibraryRepository,
     private val music: MusicRepository,
     private val downloads: DownloadRepository,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
 
     val playbackState: StateFlow<PlaybackUiState> = playback.state
 
+    val appSettings: StateFlow<AppSettings> = settings.settings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings())
+
     val favoriteIds: StateFlow<Set<String>> = library.observeFavoriteIds()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    val favoriteCategories: StateFlow<List<String>> = library.observeFavoriteCategories()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _artworkUrl = MutableStateFlow<String?>(null)
     val artworkUrl: StateFlow<String?> = _artworkUrl.asStateFlow()
@@ -108,10 +117,10 @@ class PlayerViewModel(
         ensureLyrics()
     }
 
-    fun downloadCurrent() {
+    fun downloadCurrent(qualityKbps: Int? = null) {
         val track = playback.state.value.currentTrack ?: return
         viewModelScope.launch {
-            _message.value = downloads.enqueue(track).fold(
+            _message.value = downloads.enqueue(track, qualityKbps = qualityKbps).fold(
                 onSuccess = { "已加入下载队列" },
                 onFailure = { it.userMessage() },
             )
@@ -124,7 +133,17 @@ class PlayerViewModel(
 
     fun toggleFavorite() {
         val track = playback.state.value.currentTrack ?: return
-        viewModelScope.launch { library.toggleFavorite(track) }
+        viewModelScope.launch {
+            library.toggleFavorite(track, appSettings.value.defaultFavoriteCategory)
+        }
+    }
+
+    fun addFavoriteToCategory(category: String) {
+        val track = playback.state.value.currentTrack ?: return
+        viewModelScope.launch {
+            library.addFavorite(track, category)
+            _message.value = "已收藏到“$category”"
+        }
     }
 
     fun togglePlayPause() = playback.togglePlayPause()

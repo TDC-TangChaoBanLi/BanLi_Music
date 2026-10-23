@@ -6,10 +6,13 @@ import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import com.banlimusic.app.AppContainer
 import com.banlimusic.app.MusicApplication
 import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.common.userMessage
+import com.banlimusic.app.core.database.entity.DownloadTaskEntity
 import com.banlimusic.app.core.model.Track
+import com.banlimusic.app.core.network.JsonHttpClient
 import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.system.notification.Notifications
 import kotlinx.coroutines.CancellationException
@@ -43,7 +46,8 @@ class DownloadWorker(
         runCatching { setForeground(notification) }
 
         return try {
-            val quality = container.settingsRepository.current().qualityKbps
+            val settings = container.settingsRepository.current()
+            val quality = entity.qualityKbps.takeIf { it > 0 } ?: settings.qualityKbps
             val stream = container.musicRepository.resolveStream(track, quality)
             val file = prepareFile(repository, track, entity.filePath, stream.url, entity.id)
             repository.updateStatus(taskId, DownloadStatus.DOWNLOADING, filePath = file.absolutePath)
@@ -78,6 +82,7 @@ class DownloadWorker(
                 throw IOException("文件不完整，请重试")
             }
             repository.updateProgress(taskId, length, if (latestTotal > 0) latestTotal else length)
+            writeSidecars(container, track, file, entity)
             repository.updateStatus(taskId, DownloadStatus.COMPLETED, filePath = file.absolutePath)
             Result.success()
         } catch (cancelled: CancellationException) {
@@ -100,7 +105,7 @@ class DownloadWorker(
         }
     }
 
-    private fun prepareFile(
+    private suspend fun prepareFile(
         repository: DownloadRepository,
         track: Track,
         existingPath: String?,
@@ -111,10 +116,54 @@ class DownloadWorker(
             val existing = File(path)
             if (existing.parentFile?.exists() == true) return existing
         }
-        val musicRoot = applicationContext.getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC)
-            ?: applicationContext.filesDir
-        val directory = File(musicRoot, "BanLiMusic").apply { mkdirs() }
+        val directory = repository.downloadDirectory()
         return File(directory, repository.suggestedFileName(track, url, taskId))
+    }
+
+    private suspend fun writeSidecars(
+        container: AppContainer,
+        track: Track,
+        audioFile: File,
+        entity: DownloadTaskEntity,
+    ) {
+        val directory = audioFile.parentFile ?: return
+        val baseName = audioFile.nameWithoutExtension
+        if (entity.downloadLyrics) {
+            try {
+                val lyrics = container.musicRepository.lyrics(track)
+                if (lyrics != null && !lyrics.isEmpty) {
+                    File(directory, "$baseName.lrc").writeText(lyrics.raw)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Sidecar files are optional; the audio download still succeeds.
+            }
+        }
+        if (entity.downloadArtwork) {
+            try {
+                val artworkUrl = container.musicRepository.artwork(track)
+                if (!artworkUrl.isNullOrBlank()) {
+                    val request = Request.Builder()
+                        .url(artworkUrl)
+                        .header("User-Agent", JsonHttpClient.USER_AGENT)
+                        .build()
+                    container.downloadHttpClient.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            response.body.byteStream().use { input ->
+                                File(directory, "$baseName.jpg").outputStream().use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Sidecar files are optional.
+            }
+        }
     }
 
     private suspend fun downloadToFile(

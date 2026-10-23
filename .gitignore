@@ -1,5 +1,6 @@
 *.iml
 .idea/
+.vscode/
 .gradle/
 .kotlin/
 local.properties
@@ -13,3 +14,6 @@ captures/
 *.apk
 *.aab
 .DS_Store
+
+
+PLAN.md

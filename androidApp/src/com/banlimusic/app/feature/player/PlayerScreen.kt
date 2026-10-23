@@ -3,6 +3,7 @@ package com.banlimusic.app.feature.player
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -30,14 +32,17 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -49,14 +54,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,6 +73,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.Player
@@ -79,6 +89,7 @@ import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackArtwork
 import com.banlimusic.app.ui.components.formatPlaybackTime
 import com.banlimusic.app.ui.components.providerLabel
+import com.banlimusic.app.ui.components.qualityLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,10 +100,20 @@ fun PlayerScreen(
     val state by viewModel.playbackState.collectAsStateWithLifecycle()
     val artworkUrl by viewModel.artworkUrl.collectAsStateWithLifecycle()
     val favoriteIds by viewModel.favoriteIds.collectAsStateWithLifecycle()
+    val favoriteCategories by viewModel.favoriteCategories.collectAsStateWithLifecycle()
+    val appSettings by viewModel.appSettings.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyrics.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var showLyrics by rememberSaveable { mutableStateOf(false) }
+    val pagerState = rememberPagerState(
+        initialPage = if (appSettings.defaultShowLyrics) 1 else 0,
+        pageCount = { 2 },
+    )
+    var showCategoryDialog by rememberSaveable { mutableStateOf(false) }
+    var newCategory by rememberSaveable { mutableStateOf("") }
+    var downloadQuality by rememberSaveable(appSettings.downloadQualityKbps) {
+        mutableStateOf(appSettings.downloadQualityKbps)
+    }
 
     LaunchedEffect(message) {
         message?.let {
@@ -105,6 +126,14 @@ fun PlayerScreen(
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
         }
+    }
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage == 1) viewModel.ensureLyrics()
+    }
+    LaunchedEffect(appSettings.defaultShowLyrics) {
+        val target = if (appSettings.defaultShowLyrics) 1 else 0
+        if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+        if (target == 1) viewModel.ensureLyrics()
     }
 
     val track = state.currentTrack
@@ -142,140 +171,405 @@ fun PlayerScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp, vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                        .padding(padding),
                 ) {
                     TopBar(onBack = onBack)
-                    Spacer(Modifier.height(18.dp))
-                    TrackArtwork(
-                        track = track,
-                        artworkUrl = artworkUrl ?: state.artworkUrl,
+                    HorizontalPager(
+                        state = pagerState,
                         modifier = Modifier
-                            .fillMaxWidth(0.78f)
-                            .aspectRatio(1f),
-                        cornerRadius = 26.dp,
-                    )
-                    Spacer(Modifier.height(26.dp))
-                    Text(
-                        text = state.title ?: track.title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = state.artist ?: track.artistLine,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        track.primarySource?.let { source ->
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                            ) {
-                                Text(
-                                    text = providerLabel(source.providerId),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        if (track.sources.size > 1) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                            ) {
-                                Text(
-                                    text = "${track.sources.size} 个来源",
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(18.dp))
-                    ProgressSection(state = state, onSeek = viewModel::seekTo)
-                    Spacer(Modifier.height(10.dp))
-                    ControlsSection(
-                        state = state,
-                        onTogglePlayPause = viewModel::togglePlayPause,
-                        onPrevious = viewModel::previous,
-                        onNext = viewModel::next,
-                        onToggleShuffle = viewModel::toggleShuffle,
-                        onCycleRepeat = viewModel::cycleRepeatMode,
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    val canDownload = track.sources.any { TrackAction.DOWNLOAD in it.availableActions }
-                    Row(
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        TextButton(onClick = viewModel::toggleFavorite) {
-                            Icon(
-                                imageVector = if (track.id in favoriteIds) {
-                                    Icons.Rounded.Favorite
-                                } else {
-                                    Icons.Rounded.FavoriteBorder
+                            .fillMaxWidth()
+                            .weight(1f),
+                        beyondViewportPageCount = 1,
+                    ) { page ->
+                        if (page == 0) {
+                            PosterPage(
+                                track = track,
+                                state = state,
+                                artworkUrl = artworkUrl ?: state.artworkUrl,
+                                isFavorite = track.id in favoriteIds,
+                                favoriteCategories = (
+                                    favoriteCategories + appSettings.defaultFavoriteCategory
+                                    ).distinct(),
+                                canDownload = track.sources.any {
+                                    TrackAction.DOWNLOAD in it.availableActions
                                 },
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
+                                downloadQuality = downloadQuality,
+                                onToggleFavorite = viewModel::toggleFavorite,
+                                onAddFavorite = viewModel::addFavoriteToCategory,
+                                onNewCategory = { showCategoryDialog = true },
+                                onDownload = {
+                                    viewModel.downloadCurrent(downloadQuality.takeIf { it > 0 })
+                                },
+                                onDownloadQualityChange = { downloadQuality = it },
+                                onSeek = viewModel::seekTo,
+                                onTogglePlayPause = viewModel::togglePlayPause,
+                                onPrevious = viewModel::previous,
+                                onNext = viewModel::next,
+                                onToggleShuffle = viewModel::toggleShuffle,
+                                onCycleRepeat = viewModel::cycleRepeatMode,
                             )
-                            Spacer(Modifier.size(5.dp))
-                            Text(if (track.id in favoriteIds) "已收藏" else "收藏")
-                        }
-                        TextButton(
-                            onClick = {
-                                showLyrics = true
-                                viewModel.ensureLyrics()
-                            },
-                        ) {
-                            Icon(
-                                Icons.Rounded.Lyrics,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
+                        } else {
+                            LyricsPage(
+                                lyricsState = lyricsState,
+                                playbackState = state,
+                                onReload = viewModel::reloadLyrics,
+                                modifier = Modifier.fillMaxSize(),
                             )
-                            Spacer(Modifier.size(5.dp))
-                            Text("歌词")
-                        }
-                        TextButton(
-                            onClick = viewModel::downloadCurrent,
-                            enabled = canDownload,
-                        ) {
-                            Icon(
-                                Icons.Rounded.Download,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(Modifier.size(5.dp))
-                            Text("下载")
                         }
                     }
-                    Spacer(Modifier.height(16.dp))
+                    PageIndicator(
+                        pageCount = 2,
+                        currentPage = pagerState.currentPage,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
                 }
             }
         }
     }
 
-    if (showLyrics) {
-        ModalBottomSheet(
-            onDismissRequest = { showLyrics = false },
-            dragHandle = null,
+    if (showCategoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showCategoryDialog = false },
+            title = { Text("新建收藏夹") },
+            text = {
+                OutlinedTextField(
+                    value = newCategory,
+                    onValueChange = { newCategory = it },
+                    label = { Text("收藏夹名称") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newCategory.isNotBlank(),
+                    onClick = {
+                        val name = newCategory.trim()
+                        viewModel.addFavoriteToCategory(name)
+                        newCategory = ""
+                        showCategoryDialog = false
+                    },
+                ) { Text("收藏") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCategoryDialog = false }) { Text("取消") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun PosterPage(
+    track: com.banlimusic.app.core.model.Track,
+    state: PlaybackUiState,
+    artworkUrl: String?,
+    isFavorite: Boolean,
+    favoriteCategories: List<String>,
+    canDownload: Boolean,
+    downloadQuality: Int,
+    onToggleFavorite: () -> Unit,
+    onAddFavorite: (String) -> Unit,
+    onNewCategory: () -> Unit,
+    onDownload: () -> Unit,
+    onDownloadQualityChange: (Int) -> Unit,
+    onSeek: (Long) -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val isWide = LocalConfiguration.current.smallestScreenWidthDp >= 600
+        if (isWide) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 32.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TrackArtwork(
+                    track = track,
+                    artworkUrl = artworkUrl,
+                    modifier = Modifier
+                        .weight(0.9f)
+                        .fillMaxWidth()
+                        .aspectRatio(1f),
+                    cornerRadius = 28.dp,
+                )
+                Spacer(Modifier.size(32.dp))
+                PlayerDetails(
+                    track = track,
+                    state = state,
+                    isFavorite = isFavorite,
+                    favoriteCategories = favoriteCategories,
+                    canDownload = canDownload,
+                    downloadQuality = downloadQuality,
+                    onToggleFavorite = onToggleFavorite,
+                    onAddFavorite = onAddFavorite,
+                    onNewCategory = onNewCategory,
+                    onDownload = onDownload,
+                    onDownloadQualityChange = onDownloadQualityChange,
+                    onSeek = onSeek,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
+                    onToggleShuffle = onToggleShuffle,
+                    onCycleRepeat = onCycleRepeat,
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .verticalScroll(rememberScrollState()),
+                )
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.height(10.dp))
+                TrackArtwork(
+                    track = track,
+                    artworkUrl = artworkUrl,
+                    modifier = Modifier
+                        .fillMaxWidth(0.78f)
+                        .aspectRatio(1f),
+                    cornerRadius = 26.dp,
+                )
+                Spacer(Modifier.height(20.dp))
+                PlayerDetails(
+                    track = track,
+                    state = state,
+                    isFavorite = isFavorite,
+                    favoriteCategories = favoriteCategories,
+                    canDownload = canDownload,
+                    downloadQuality = downloadQuality,
+                    onToggleFavorite = onToggleFavorite,
+                    onAddFavorite = onAddFavorite,
+                    onNewCategory = onNewCategory,
+                    onDownload = onDownload,
+                    onDownloadQualityChange = onDownloadQualityChange,
+                    onSeek = onSeek,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
+                    onToggleShuffle = onToggleShuffle,
+                    onCycleRepeat = onCycleRepeat,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "左滑查看歌词",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerDetails(
+    track: com.banlimusic.app.core.model.Track,
+    state: PlaybackUiState,
+    isFavorite: Boolean,
+    favoriteCategories: List<String>,
+    canDownload: Boolean,
+    downloadQuality: Int,
+    onToggleFavorite: () -> Unit,
+    onAddFavorite: (String) -> Unit,
+    onNewCategory: () -> Unit,
+    onDownload: () -> Unit,
+    onDownloadQualityChange: (Int) -> Unit,
+    onSeek: (Long) -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var favoriteMenu by remember { mutableStateOf(false) }
+    var qualityMenu by remember { mutableStateOf(false) }
+
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = state.title ?: track.title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = state.artist ?: track.artistLine,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            track.primarySource?.let { source ->
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Text(
+                        text = providerLabel(source.providerId),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (track.sources.size > 1) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Text(
+                        text = "${track.sources.size} 个来源",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        ProgressSection(state = state, onSeek = onSeek)
+        Spacer(Modifier.height(10.dp))
+        ControlsSection(
+            state = state,
+            onTogglePlayPause = onTogglePlayPause,
+            onPrevious = onPrevious,
+            onNext = onNext,
+            onToggleShuffle = onToggleShuffle,
+            onCycleRepeat = onCycleRepeat,
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            LyricsSheet(
-                lyricsState = lyricsState,
-                playbackState = state,
-                onReload = viewModel::reloadLyrics,
+            TextButton(onClick = onToggleFavorite) {
+                Icon(
+                    imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(5.dp))
+                Text(if (isFavorite) "已收藏" else "收藏")
+            }
+            Box {
+                IconButton(
+                    onClick = { favoriteMenu = true },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "选择收藏夹",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                DropdownMenu(expanded = favoriteMenu, onDismissRequest = { favoriteMenu = false }) {
+                    favoriteCategories.forEach { category ->
+                        DropdownMenuItem(
+                            text = { Text(category) },
+                            onClick = {
+                                favoriteMenu = false
+                                onAddFavorite(category)
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("新建收藏夹…") },
+                        onClick = {
+                            favoriteMenu = false
+                            onNewCategory()
+                        },
+                    )
+                }
+            }
+            Spacer(Modifier.size(8.dp))
+            TextButton(onClick = onDownload, enabled = canDownload) {
+                Icon(
+                    Icons.Rounded.Download,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.size(5.dp))
+                Text("下载")
+            }
+            Box {
+                IconButton(
+                    onClick = { qualityMenu = true },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "选择下载音质",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("跟随设置") },
+                        onClick = {
+                            qualityMenu = false
+                            onDownloadQualityChange(0)
+                        },
+                    )
+                    listOf(128, 192, 320, 740, 999).forEach { quality ->
+                        DropdownMenuItem(
+                            text = { Text(qualityLabel(quality)) },
+                            onClick = {
+                                qualityMenu = false
+                                onDownloadQualityChange(quality)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        Text(
+            text = "下载音质：${if (downloadQuality == 0) "跟随设置" else qualityLabel(downloadQuality)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun PageIndicator(
+    pageCount: Int,
+    currentPage: Int,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(pageCount) { index ->
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 3.dp)
+                    .size(if (index == currentPage) 8.dp else 6.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (index == currentPage) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                        },
+                    ),
             )
         }
     }
@@ -425,15 +719,14 @@ private fun ControlsSection(
 }
 
 @Composable
-private fun LyricsSheet(
+private fun LyricsPage(
     lyricsState: LyricsUiState,
     playbackState: PlaybackUiState,
     onReload: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 28.dp),
+        modifier = modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 28.dp),
     ) {
         val lyrics: Lyrics? = lyricsState.lyrics
         var showTranslation by rememberSaveable { mutableStateOf(true) }
@@ -494,7 +787,8 @@ private fun LyricsSheet(
                     text = lyrics.raw.stripTimestamps(),
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier
-                        .heightIn(max = 420.dp)
+                        .fillMaxWidth()
+                        .weight(1f)
                         .verticalScroll(rememberScrollState()),
                 )
             }
@@ -512,7 +806,7 @@ private fun LyricsSheet(
                     state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 430.dp),
+                        .weight(1f),
                 ) {
                     itemsIndexed(lines) { index, line ->
                         val translated = translatedLines[line.timeMs]?.text

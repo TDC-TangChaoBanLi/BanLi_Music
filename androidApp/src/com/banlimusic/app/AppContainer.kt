@@ -1,7 +1,10 @@
 package com.banlimusic.app
 
 import android.content.Context
+import com.banlimusic.app.core.cache.CacheManager
 import com.banlimusic.app.core.database.MusicDatabase
+import com.banlimusic.app.core.datastore.MAX_API_LIMIT_PER_WINDOW
+import com.banlimusic.app.core.datastore.MIN_GD_REQUEST_INTERVAL_MS
 import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.limiter.RequestScheduler
 import com.banlimusic.app.core.limiter.SlidingWindowRateLimiter
@@ -10,6 +13,7 @@ import com.banlimusic.app.core.network.NetworkMonitor
 import com.banlimusic.app.data.repository.DefaultMusicRepository
 import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.data.repository.LibraryRepository
+import com.banlimusic.app.data.repository.LocalMusicRepository
 import com.banlimusic.app.data.repository.MusicRepository
 import com.banlimusic.app.data.source.MusicProvider
 import com.banlimusic.app.data.source.gd.GdApiClient
@@ -47,9 +51,16 @@ class AppContainer(private val context: Context) {
             .build()
     }
 
-    // GD Studio documents a limit of 50 requests per 5 minutes per IP.
+    // GD Studio documents a limit of 50 requests per 5 minutes per IP. The user
+    // can lower it at runtime, and every request is spaced by at least 1 second.
     private val rateLimiter by lazy {
-        SlidingWindowRateLimiter(limit = 50, windowMs = 5 * 60_000L, maxWaitMs = 8_000L)
+        SlidingWindowRateLimiter(
+            limit = MAX_API_LIMIT_PER_WINDOW,
+            windowMs = 5 * 60_000L,
+            maxWaitMs = 12_000L,
+            minIntervalMs = MIN_GD_REQUEST_INTERVAL_MS,
+            limitProvider = { settingsRepository.current().apiLimitPerWindow },
+        )
     }
     private val requestScheduler by lazy { RequestScheduler(maxConcurrent = 2, limiter = rateLimiter) }
     private val httpClient by lazy { JsonHttpClient(okHttpClient, json, requestScheduler) }
@@ -83,11 +94,17 @@ class AppContainer(private val context: Context) {
         LibraryRepository(database.libraryDao(), json)
     }
 
+    val localMusicRepository: LocalMusicRepository by lazy {
+        LocalMusicRepository(context, database.localMusicDao(), json)
+    }
+
     val downloadRepository: DownloadRepository by lazy {
         DownloadRepository(context, database.downloadDao(), json, settingsRepository)
     }
 
+    val cacheManager: CacheManager by lazy { CacheManager(context) }
+
     val playbackController: PlaybackController by lazy {
-        PlaybackController(context, json)
+        PlaybackController(context, json, settingsRepository, downloadRepository)
     }
 }

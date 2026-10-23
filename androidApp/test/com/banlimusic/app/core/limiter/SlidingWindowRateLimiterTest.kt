@@ -84,4 +84,40 @@ class SlidingWindowRateLimiterTest {
         assertEquals(3, status.remaining)
         assertEquals(5_000L, status.windowResetInMs)
     }
+
+    @Test
+    fun enforcesMinimumIntervalBetweenRequests() = runTest {
+        val limiter = SlidingWindowRateLimiter(
+            limit = 10,
+            windowMs = 10_000L,
+            timeSource = TimeSource { testScheduler.currentTime },
+            maxWaitMs = 5_000L,
+            minIntervalMs = 1_000L,
+        )
+
+        limiter.acquire()
+        assertEquals(0L, testScheduler.currentTime)
+        limiter.acquire()
+        assertEquals(1_000L, testScheduler.currentTime)
+    }
+
+    @Test
+    fun readsLimitProviderAtRuntimeAndCapsAtHardLimit() = runTest {
+        var configuredLimit = 2
+        val limiter = SlidingWindowRateLimiter(
+            limit = 50,
+            windowMs = 10_000L,
+            timeSource = FakeTime(),
+            maxWaitMs = 100L,
+            limitProvider = { configuredLimit },
+        )
+
+        limiter.acquire()
+        limiter.acquire()
+        assertEquals(2, limiter.status().limit)
+        assertEquals(0, limiter.status().remaining)
+
+        configuredLimit = 100
+        assertEquals(50, limiter.status().limit)
+    }
 }

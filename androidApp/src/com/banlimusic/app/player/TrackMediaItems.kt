@@ -15,13 +15,16 @@ object TrackMediaItems {
     const val EXTRA_TRACK_JSON = "com.banlimusic.app.TRACK_JSON"
 
     fun create(track: Track, json: Json): MediaItem {
+        val localUri = track.sources.firstNotNullOfOrNull { source ->
+            source.localUri?.takeIf { it.isNotBlank() }
+        }
         val candidates = track.sources
-            .filter { TrackAction.STREAM in it.availableActions }
+            .filter { TrackAction.STREAM in it.availableActions && it.localUri == null }
             .map { StreamCandidate(it.providerId, it.providerTrackId) }
-        val uri = if (candidates.isEmpty()) {
-            Uri.EMPTY
-        } else {
-            StreamUriCodec.toUri(candidates, track.id)
+        val uri = when {
+            localUri != null -> localUri.toUri()
+            candidates.isEmpty() -> Uri.EMPTY
+            else -> StreamUriCodec.toUri(candidates, track.id)
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(track.title)

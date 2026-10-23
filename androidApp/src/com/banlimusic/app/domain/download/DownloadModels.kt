@@ -23,6 +23,9 @@ data class DownloadTask(
     val error: String?,
     val createdAt: Long,
     val updatedAt: Long,
+    val qualityKbps: Int = 0,
+    val downloadLyrics: Boolean = false,
+    val downloadArtwork: Boolean = false,
 ) {
     val progress: Float
         get() = when {

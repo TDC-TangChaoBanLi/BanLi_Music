@@ -1,6 +1,7 @@
 package com.banlimusic.app.data.repository
 
 import android.content.Context
+import android.os.Environment
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.Data
@@ -38,11 +39,22 @@ class DownloadRepository(
 
     suspend fun completedBytes(): Long = dao.completedBytes()
 
-    suspend fun enqueue(track: Track): Result<Unit> = runCatching {
+    suspend fun enqueue(
+        track: Track,
+        qualityKbps: Int? = null,
+        downloadLyrics: Boolean? = null,
+        downloadArtwork: Boolean? = null,
+    ): Result<Unit> = runCatching {
+        val current = settings.current()
         val source = track.sources.firstOrNull { TrackAction.DOWNLOAD in it.availableActions }
             ?: track.sources.firstOrNull { TrackAction.STREAM in it.availableActions }
             ?: throw IllegalStateException("没有可下载的来源")
-        val taskId = taskId(track.id, source.providerId)
+        val quality = qualityKbps
+            ?: current.downloadQualityKbps.takeIf { it > 0 }
+            ?: current.qualityKbps
+        val lyrics = downloadLyrics ?: current.downloadLyrics
+        val artwork = downloadArtwork ?: current.downloadArtwork
+        val taskId = taskId(track.id, source.providerId, quality, lyrics, artwork)
         val existing = dao.getById(taskId)
         if (existing != null && existing.status == DownloadStatus.COMPLETED.name) {
             val path = existing.filePath
@@ -66,9 +78,33 @@ class DownloadRepository(
                 retryCount = existing?.retryCount ?: 0,
                 createdAt = existing?.createdAt ?: now,
                 updatedAt = now,
+                trackId = track.id,
+                qualityKbps = quality,
+                downloadLyrics = lyrics,
+                downloadArtwork = artwork,
             ),
         )
         schedule(taskId, ExistingWorkPolicy.KEEP)
+    }
+
+    /**
+     * Queues multiple downloads through the same WorkManager pipeline. API calls
+     * are still serialized by the shared rate limiter, so batch operations cannot
+     * exceed the configured GD Music request budget.
+     */
+    suspend fun enqueueAll(
+        tracks: Collection<Track>,
+        qualityKbps: Int? = null,
+        downloadLyrics: Boolean? = null,
+        downloadArtwork: Boolean? = null,
+    ): Int {
+        var queued = 0
+        tracks.distinctBy { it.id }.forEach { track ->
+            if (enqueue(track, qualityKbps, downloadLyrics, downloadArtwork).isSuccess) {
+                queued++
+            }
+        }
+        return queued
     }
 
     suspend fun pause(id: String) {
@@ -155,6 +191,59 @@ class DownloadRepository(
         json.decodeFromString(Track.serializer(), entity.trackJson)
     }.getOrNull()
 
+    /** Returns completed files for the given application-level track ids. */
+    suspend fun completedFiles(trackIds: Collection<String>): Map<String, File> {
+        val wanted = trackIds.toSet()
+        if (wanted.isEmpty()) return emptyMap()
+        return dao.getCompleted()
+            .asSequence()
+            .filter { entity ->
+                val id = entity.trackId.ifBlank { entity.id.substringBeforeLast('@') }
+                id in wanted
+            }
+            .mapNotNull { entity ->
+                val path = entity.filePath ?: return@mapNotNull null
+                val file = File(path)
+                if (!file.exists()) return@mapNotNull null
+                val id = entity.trackId.ifBlank { entity.id.substringBeforeLast('@') }
+                id to file
+            }
+            .toMap()
+    }
+
+    suspend fun completedFileFor(trackId: String): File? =
+        completedFiles(listOf(trackId))[trackId]
+
+    /**
+     * Defaults to the public Music/BanLiMusic directory when the platform allows
+     * it, then falls back to app-specific external storage. A user-configured path
+     * takes precedence.
+     */
+    suspend fun downloadDirectory(): File {
+        val configured = settings.current().downloadDirectory.trim()
+        if (configured.isNotEmpty()) {
+            val directory = File(configured)
+            if (isWritableDirectory(directory)) return directory
+        }
+
+        val publicMusic = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+        val publicDirectory = File(publicMusic, "BanLiMusic")
+        if (isWritableDirectory(publicDirectory)) return publicDirectory
+
+        val fallbackRoot = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+            ?: context.filesDir
+        return File(fallbackRoot, "BanLiMusic").apply { mkdirs() }
+    }
+
+    private fun isWritableDirectory(directory: File): Boolean {
+        if (!(directory.exists() || directory.mkdirs())) return false
+        if (!directory.canWrite()) return false
+        return runCatching {
+            val probe = File(directory, ".banli_write_test")
+            probe.createNewFile() && probe.delete()
+        }.getOrDefault(false)
+    }
+
     fun suggestedFileName(track: Track, url: String, taskId: String): String {
         val extension = extensionFor(url)
         val base = TextNormalizer.sanitizeFileName("${track.title} - ${track.artistLine}")
@@ -190,6 +279,9 @@ class DownloadRepository(
             error = entity.error,
             createdAt = entity.createdAt,
             updatedAt = entity.updatedAt,
+            qualityKbps = entity.qualityKbps,
+            downloadLyrics = entity.downloadLyrics,
+            downloadArtwork = entity.downloadArtwork,
         )
     }
 
@@ -202,7 +294,13 @@ class DownloadRepository(
         return if (extension in AUDIO_EXTENSIONS) extension else "mp3"
     }
 
-    private fun taskId(trackId: String, providerId: String): String = "$trackId@$providerId"
+    private fun taskId(
+        trackId: String,
+        providerId: String,
+        qualityKbps: Int,
+        lyrics: Boolean,
+        artwork: Boolean,
+    ): String = "$trackId@$providerId@$qualityKbps@${if (lyrics) 1 else 0}${if (artwork) 1 else 0}"
 
     private fun workName(id: String): String = "download-$id"
 

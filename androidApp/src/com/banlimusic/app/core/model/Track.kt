@@ -34,6 +34,7 @@ data class TrackSource(
     val lyricKey: String? = null,
     val qualityKbps: Int? = null,
     val durationMs: Long? = null,
+    val localUri: String? = null,
 )
 
 @Serializable

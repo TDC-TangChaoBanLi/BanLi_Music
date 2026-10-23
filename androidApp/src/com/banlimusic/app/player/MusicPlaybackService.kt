@@ -21,11 +21,16 @@ import com.banlimusic.app.MusicApplication
 import com.banlimusic.app.core.network.JsonHttpClient
 import com.banlimusic.app.domain.playback.StreamUriCodec
 import com.banlimusic.app.widget.PlayerWidgetUpdater
+import com.banlimusic.app.widget.WidgetArtworkStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @androidx.annotation.OptIn(UnstableApi::class)
 class MusicPlaybackService : MediaSessionService() {
@@ -35,6 +40,12 @@ class MusicPlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lastRecordedMediaId: String? = null
     private var lastWidgetUpdate = 0L
+    private var widgetTicker: Job? = null
+    private var widgetArtworkJob: Job? = null
+    @Volatile
+    private var widgetArtworkUrl: String? = null
+    @Volatile
+    private var widgetArtworkUri: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -104,6 +115,13 @@ class MusicPlaybackService : MediaSessionService() {
                 updateWidget(exoPlayer)
             }
         })
+
+        widgetTicker = scope.launch {
+            while (isActive) {
+                delay(1_000L)
+                player?.let { updateWidget(it) }
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -116,6 +134,8 @@ class MusicPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        widgetTicker?.cancel()
+        widgetArtworkJob?.cancel()
         mediaSession?.release()
         mediaSession = null
         player?.release()
@@ -139,11 +159,36 @@ class MusicPlaybackService : MediaSessionService() {
         val now = SystemClock.elapsedRealtime()
         if (now - lastWidgetUpdate < 400L) return
         lastWidgetUpdate = now
+        val container = (application as MusicApplication).container
         val item = player.currentMediaItem
+        val track = TrackMediaItems.trackOf(item, container.json)
         val title = item?.mediaMetadata?.title?.toString() ?: "BanLiMusic"
         val artist = item?.mediaMetadata?.artist?.toString() ?: "还没有播放歌曲"
         val isPlaying = player.isPlaying
         val hasMedia = item != null
+        val artworkUrl = item?.mediaMetadata?.artworkUri?.toString()
+            ?: track?.artworkUrl
+        val trackDuration = track?.durationMs ?: 0L
+        val duration = when {
+            player.duration > 0L && player.duration != C.TIME_UNSET -> player.duration
+            trackDuration > 0L -> trackDuration
+            else -> 0L
+        }
+        val position = player.currentPosition.coerceAtLeast(0L)
+
+        if (!artworkUrl.isNullOrBlank() && artworkUrl != widgetArtworkUrl) {
+            widgetArtworkUrl = artworkUrl
+            widgetArtworkUri = null
+            widgetArtworkJob?.cancel()
+            widgetArtworkJob = scope.launch {
+                widgetArtworkUri = withContext(Dispatchers.IO) {
+                    WidgetArtworkStore.write(this@MusicPlaybackService, artworkUrl)
+                }
+                updateWidget(player)
+            }
+        }
+
+        val artworkUri = widgetArtworkUri
         scope.launch(Dispatchers.Default) {
             PlayerWidgetUpdater.update(
                 context = this@MusicPlaybackService,
@@ -151,6 +196,9 @@ class MusicPlaybackService : MediaSessionService() {
                 artist = artist,
                 isPlaying = isPlaying,
                 hasMedia = hasMedia,
+                artworkUri = artworkUri,
+                positionMs = position,
+                durationMs = duration,
             )
         }
     }

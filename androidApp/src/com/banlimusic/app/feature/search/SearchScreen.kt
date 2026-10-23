@@ -1,5 +1,6 @@
 package com.banlimusic.app.feature.search
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -32,9 +34,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -57,7 +61,16 @@ fun SearchScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.history.collectAsStateWithLifecycle()
     val enabledSources by viewModel.enabledSources.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
     val keyboard = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
+
+    LaunchedEffect(message) {
+        message?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.consumeMessage()
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -69,9 +82,20 @@ fun SearchScreen(
             placeholder = { Text("搜索歌曲、歌手或专辑") },
             leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
             trailingIcon = {
-                if (state.query.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.onQueryChange("") }) {
-                        Icon(Icons.Rounded.Close, contentDescription = "清空")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (state.query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.onQueryChange("") }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "清空")
+                        }
+                    }
+                    IconButton(
+                        onClick = {
+                            viewModel.submit()
+                            keyboard?.hide()
+                        },
+                        enabled = state.query.isNotBlank() && !state.isSearching,
+                    ) {
+                        Icon(Icons.Rounded.Search, contentDescription = "搜索")
                     }
                 }
             },
@@ -92,6 +116,17 @@ fun SearchScreen(
                 enabledSources = enabledSources,
                 onQueryClick = viewModel::useHistory,
                 onClearHistory = viewModel::clearHistory,
+            )
+            return@Column
+        }
+
+        if (!state.hasSearched && !state.isSearching) {
+            SearchPrompt(
+                query = state.query,
+                onSearch = {
+                    viewModel.submit()
+                    keyboard?.hide()
+                },
             )
             return@Column
         }
@@ -156,6 +191,14 @@ fun SearchScreen(
                                         color = MaterialTheme.colorScheme.error,
                                     )
                                 }
+                                if (state.selectionMode) {
+                                    TextButton(onClick = viewModel::selectAll) { Text("全选") }
+                                    TextButton(onClick = viewModel::clearSelection) { Text("取消") }
+                                } else {
+                                    TextButton(onClick = { viewModel.setSelectionMode(true) }) {
+                                        Text("选择")
+                                    }
+                                }
                             }
                         }
                         itemsIndexed(
@@ -165,11 +208,20 @@ fun SearchScreen(
                             TrackRow(
                                 track = track,
                                 onClick = {
-                                    keyboard?.hide()
-                                    onPlayQueue(state.results, index)
+                                    if (state.selectionMode) {
+                                        viewModel.toggleSelection(track.id)
+                                    } else {
+                                        keyboard?.hide()
+                                        onPlayQueue(state.results, index)
+                                    }
                                 },
                                 isFavorite = track.id in state.favoriteIds,
                                 onToggleFavorite = { viewModel.toggleFavorite(track) },
+                                selected = if (state.selectionMode) {
+                                    track.id in state.selectedIds
+                                } else {
+                                    null
+                                },
                             )
                         }
                         item {
@@ -206,6 +258,54 @@ fun SearchScreen(
                 }
             }
         }
+
+        if (state.selectionMode) {
+            SelectionActionBar(
+                count = state.selectedIds.size,
+                onFavorite = viewModel::batchFavorite,
+                onDownload = viewModel::batchDownload,
+                onCancel = viewModel::clearSelection,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SearchPrompt(
+    query: String,
+    onSearch: () -> Unit,
+) {
+    EmptyState(
+        title = "点击搜索",
+        description = "已输入“$query”。确认内容后点击搜索按钮，应用不会自动请求接口。",
+        icon = Icons.Rounded.Search,
+        modifier = Modifier.padding(horizontal = 20.dp),
+    )
+}
+
+@Composable
+private fun SelectionActionBar(
+    count: Int,
+    onFavorite: () -> Unit,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "已选 $count 首",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onFavorite, enabled = count > 0) { Text("收藏") }
+        TextButton(onClick = onDownload, enabled = count > 0) { Text("下载") }
+        TextButton(onClick = onCancel) { Text("取消") }
     }
 }
 
@@ -261,7 +361,7 @@ private fun SearchLanding(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "GD 音乐台限制每 5 分钟 50 次请求，搜索已做 300ms 防抖。",
+                text = "输入完成后点击搜索或键盘搜索键；应用不会自动发起请求。GD 音乐台限制每 5 分钟 50 次请求。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
             )

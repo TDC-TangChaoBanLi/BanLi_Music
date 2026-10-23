@@ -9,14 +9,18 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.banlimusic.app.core.datastore.ThemeMode
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.banlimusic.app.core.datastore.AppSettings
+import com.banlimusic.app.feature.agreement.AgreementScreen
 import com.banlimusic.app.ui.theme.BanLiMusicTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -47,7 +51,23 @@ class MainActivity : ComponentActivity() {
                 themeMode = settings.themeMode,
                 dynamicColor = settings.dynamicColor,
             ) {
-                AppRoot(container = container)
+                val scope = rememberCoroutineScope()
+                if (!settings.agreementAccepted) {
+                    AgreementScreen(
+                        onAccept = {
+                            scope.launch {
+                                container.settingsRepository.setAgreementAccepted(true)
+                            }
+                        },
+                    )
+                } else {
+                    LaunchedEffect(settings.autoImportLocalMusic) {
+                        if (settings.autoImportLocalMusic && hasAudioPermission()) {
+                            container.localMusicRepository.importAll()
+                        }
+                    }
+                    AppRoot(container = container)
+                }
             }
         }
     }
@@ -61,5 +81,15 @@ class MainActivity : ComponentActivity() {
         if (!granted) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    private fun hasAudioPermission(): Boolean {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        return ContextCompat.checkSelfPermission(this, permission) ==
+            PackageManager.PERMISSION_GRANTED
     }
 }
