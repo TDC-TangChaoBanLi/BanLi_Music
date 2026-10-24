@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,9 +16,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
@@ -25,6 +29,7 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -52,13 +58,30 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.banlimusic.app.domain.download.DownloadStatus
 import com.banlimusic.app.domain.download.DownloadStatusLabels
 import com.banlimusic.app.domain.download.DownloadTask
+import com.banlimusic.app.domain.sort.AlphabetSection
+import com.banlimusic.app.domain.sort.TrackSort
+import com.banlimusic.app.domain.sort.TrackSorter
 import com.banlimusic.app.feature.common.AppViewModelProvider
+import com.banlimusic.app.ui.components.AlphabetDragBubble
+import com.banlimusic.app.ui.components.AlphabetIndex
 import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackArtwork
 import com.banlimusic.app.ui.components.TrackRow
 import com.banlimusic.app.ui.components.formatBytes
 import com.banlimusic.app.ui.components.qualityLabel
 import kotlinx.coroutines.launch
+
+private enum class DownloadSort(val label: String) {
+    TITLE("名称"),
+    ARTIST("歌手"),
+    CREATED("下载时间"),
+}
+
+private fun DownloadSort.toTrackSort(): TrackSort? = when (this) {
+    DownloadSort.TITLE -> TrackSort.TITLE
+    DownloadSort.ARTIST -> TrackSort.ARTIST
+    DownloadSort.CREATED -> null
+}
 
 @Composable
 fun DownloadsScreen(
@@ -73,10 +96,31 @@ fun DownloadsScreen(
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var sort by rememberSaveable { mutableStateOf(DownloadSort.TITLE) }
+    var ascending by rememberSaveable { mutableStateOf(true) }
 
     val completed = tasks.filter { it.status == DownloadStatus.COMPLETED }
     val active = tasks.filter { it.status != DownloadStatus.COMPLETED }
     val completedBytes = completed.sumOf { it.totalBytes }
+    val sortedCompleted = remember(completed, sort, ascending) {
+        val trackSort = sort.toTrackSort()
+        if (trackSort == null) {
+            val ordered = completed.sortedBy { it.createdAt }
+            if (ascending) ordered else ordered.reversed()
+        } else {
+            val order = TrackSorter.sort(completed.map { it.track }, trackSort, ascending)
+                .map { it.id }
+                .withIndex()
+                .associate { it.value to it.index }
+            completed.sortedWith(
+                compareBy({ order[it.track.id] ?: Int.MAX_VALUE }, { it.createdAt }),
+            )
+        }
+    }
+    val completedSections = remember(sortedCompleted, sort) {
+        val trackSort = sort.toTrackSort() ?: return@remember emptyList()
+        TrackSorter.sections(sortedCompleted.map { it.track }, trackSort)
+    }
 
     LaunchedEffect(pagerState.currentPage) {
         selectionMode = false
@@ -124,12 +168,19 @@ fun DownloadsScreen(
         ) { page ->
             if (page == 0) {
                 Column(modifier = Modifier.fillMaxSize()) {
+                    DownloadSortBar(
+                        sort = sort,
+                        ascending = ascending,
+                        onSort = { sort = it },
+                        onToggleOrder = { ascending = !ascending },
+                    )
                     DownloadedList(
-                        tasks = completed,
+                        tasks = sortedCompleted,
+                        sections = completedSections,
                         selectionMode = selectionMode,
                         selectedIds = selectedIds,
                         onPlay = { index ->
-                            viewModel.play(completed, index)
+                            viewModel.play(sortedCompleted, index)
                             onOpenPlayer()
                         },
                         onToggleSelection = { id ->
@@ -144,7 +195,7 @@ fun DownloadsScreen(
                     if (selectionMode) {
                         DeleteSelectionBar(
                             count = selectedIds.size,
-                            onSelectAll = { selectedIds = completed.map { it.id }.toSet() },
+                            onSelectAll = { selectedIds = sortedCompleted.map { it.id }.toSet() },
                             onDelete = { if (selectedIds.isNotEmpty()) showDeleteConfirm = true },
                             onCancel = {
                                 selectionMode = false
@@ -193,6 +244,7 @@ fun DownloadsScreen(
 @Composable
 private fun DownloadedList(
     tasks: List<DownloadTask>,
+    sections: List<AlphabetSection>,
     selectionMode: Boolean,
     selectedIds: Set<String>,
     onPlay: (Int) -> Unit,
@@ -210,41 +262,109 @@ private fun DownloadedList(
         }
         return
     }
-    LazyColumn(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var dragLetter by remember { mutableStateOf<String?>(null) }
+    val currentSection by remember(listState, sections) {
+        derivedStateOf {
+            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
+        }
+    }
+    Box(modifier = modifier.fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 30.dp,
+                top = 6.dp,
+                bottom = 24.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
+                TrackRow(
+                    track = task.track,
+                    onClick = {
+                        if (selectionMode) onToggleSelection(task.id) else onPlay(index)
+                    },
+                    isFavorite = false,
+                    selected = if (selectionMode) task.id in selectedIds else null,
+                    onLongClick = if (selectionMode) {
+                        null
+                    } else {
+                        { onEnterSelection(task.id) }
+                    },
+                    trailing = {
+                        if (task.qualityKbps > 0) {
+                            Text(
+                                text = qualityLabel(task.qualityKbps),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                )
+            }
+            item {
+                Text(
+                    text = "下载目录可在设置中修改；Android 10+ 默认写入系统音乐目录，不可写时回退到应用外部音乐目录。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+        AlphabetIndex(
+            sections = sections,
+            currentSection = currentSection,
+            onSelect = { section -> scope.launch { listState.scrollToItem(section.itemIndex) } },
+            onDragLetter = { dragLetter = it },
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .padding(end = 2.dp),
+        )
+        AlphabetDragBubble(
+            letter = dragLetter,
+            modifier = Modifier.align(Alignment.Center),
+        )
+    }
+}
+
+@Composable
+private fun DownloadSortBar(
+    sort: DownloadSort,
+    ascending: Boolean,
+    onSort: (DownloadSort) -> Unit,
+    onToggleOrder: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
-            TrackRow(
-                track = task.track,
-                onClick = {
-                    if (selectionMode) onToggleSelection(task.id) else onPlay(index)
-                },
-                isFavorite = false,
-                selected = if (selectionMode) task.id in selectedIds else null,
-                onLongClick = if (selectionMode) {
-                    null
-                } else {
-                    { onEnterSelection(task.id) }
-                },
-                trailing = {
-                    if (task.qualityKbps > 0) {
-                        Text(
-                            text = qualityLabel(task.qualityKbps),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
+        Text(
+            text = "排序",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        DownloadSort.entries.forEach { option ->
+            FilterChip(
+                selected = sort == option,
+                onClick = { onSort(option) },
+                label = { Text(option.label, style = MaterialTheme.typography.labelSmall) },
+                modifier = Modifier.height(28.dp),
             )
         }
-        item {
-            Text(
-                text = "下载目录可在设置中修改；Android 10+ 默认写入系统音乐目录，不可写时回退到应用外部音乐目录。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
+        Spacer(Modifier.weight(1f))
+        IconButton(onClick = onToggleOrder, modifier = Modifier.size(30.dp)) {
+            Icon(
+                imageVector = if (ascending) Icons.Rounded.ArrowUpward else Icons.Rounded.ArrowDownward,
+                contentDescription = if (ascending) "升序" else "降序",
+                modifier = Modifier.size(18.dp),
             )
         }
     }
@@ -339,6 +459,8 @@ private fun DownloadCard(
                     track = task.track,
                     modifier = Modifier.size(50.dp),
                     cornerRadius = 10.dp,
+                    artworkUrl = task.localArtwork?.toURI()?.toString()
+                        ?: task.track.artworkUrl,
                 )
                 Column(
                     modifier = Modifier

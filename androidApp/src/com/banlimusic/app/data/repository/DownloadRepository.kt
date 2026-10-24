@@ -12,7 +12,9 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.core.net.toUri
+import com.banlimusic.app.core.cache.PlaybackCache
 import com.banlimusic.app.core.common.TextNormalizer
+import com.banlimusic.app.core.database.dao.CacheDao
 import com.banlimusic.app.core.database.dao.DownloadDao
 import com.banlimusic.app.core.database.entity.DownloadTaskEntity
 import com.banlimusic.app.core.datastore.SettingsRepository
@@ -31,6 +33,8 @@ import java.util.concurrent.TimeUnit
 class DownloadRepository(
     private val context: Context,
     private val dao: DownloadDao,
+    private val cacheDao: CacheDao,
+    private val playbackCache: PlaybackCache,
     private val json: Json,
     private val settings: SettingsRepository,
     private val workManager: WorkManager = WorkManager.getInstance(context),
@@ -41,6 +45,9 @@ class DownloadRepository(
     }
 
     suspend fun completedBytes(): Long = dao.completedBytes()
+
+    suspend fun hasCompleted(trackId: String): Boolean =
+        dao.getCompletedForTrack(trackId).any { locationExists(it.filePath) }
 
     suspend fun enqueue(
         track: Track,
@@ -60,7 +67,10 @@ class DownloadRepository(
         val taskId = taskId(track.id, source.providerId, quality, lyrics, artwork)
         val existing = dao.getById(taskId)
         if (existing != null && existing.status == DownloadStatus.COMPLETED.name) {
-            if (locationExists(existing.filePath)) return@runCatching
+            if (locationExists(existing.filePath)) {
+                clearCachedCopy(track.id)
+                return@runCatching
+            }
         }
 
         // A finished copy of the same track exists (maybe at another quality).
@@ -91,6 +101,7 @@ class DownloadRepository(
                     downloadArtwork = artwork,
                 ),
             )
+            clearCachedCopy(track.id)
             return@runCatching
         }
 
@@ -274,6 +285,11 @@ class DownloadRepository(
             val probe = File(directory, ".banli_write_test")
             probe.createNewFile() && probe.delete()
         }.getOrDefault(false)
+    }
+
+    private suspend fun clearCachedCopy(trackId: String) {
+        playbackCache.removeTrack(trackId)
+        cacheDao.deleteByTrackId(trackId)
     }
 
     private fun locationExists(path: String?): Boolean {

@@ -24,7 +24,7 @@ object TrackMediaItems {
         val uri = when {
             localUri != null -> localUri.toUri()
             candidates.isEmpty() -> Uri.EMPTY
-            else -> StreamUriCodec.toUri(candidates, track.id)
+            else -> StreamUriCodec.toUriString(candidates, track.id).toUri()
         }
         val metadata = MediaMetadata.Builder()
             .setTitle(track.title)

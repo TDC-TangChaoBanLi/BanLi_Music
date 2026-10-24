@@ -67,17 +67,17 @@ class GdApiClient(
     }
 }
 
-internal fun JsonElement?.stringOrNull(): String? {
+fun JsonElement?.stringOrNull(): String? {
     val primitive = this as? JsonPrimitive ?: return null
     if (!primitive.isString && primitive.content == "null") return null
     return primitive.content.takeIf { it.isNotBlank() && it != "null" }
 }
 
-internal fun JsonElement?.longOrNull(): Long? = stringOrNull()?.toLongOrNull()
+fun JsonElement?.longOrNull(): Long? = stringOrNull()?.toLongOrNull()
 
-internal fun JsonElement?.intOrNull(): Int? = (this as? JsonPrimitive)?.intOrNull
+fun JsonElement?.intOrNull(): Int? = (this as? JsonPrimitive)?.intOrNull
 
-internal fun JsonElement?.stringList(): List<String> = when (this) {
+fun JsonElement?.stringList(): List<String> = when (this) {
     is JsonArray -> mapNotNull { it.stringOrNull() }
     is JsonPrimitive -> stringOrNull()?.let { listOf(it) }.orEmpty()
     else -> emptyList()
@@ -87,7 +87,7 @@ internal fun JsonElement?.stringList(): List<String> = when (this) {
  * The public API normally returns an array, but error objects and wrapped
  * payloads are handled too so a single bad response does not crash search.
  */
-internal fun JsonElement.searchItems(): List<JsonObject> {
+fun JsonElement.searchItems(): List<JsonObject> {
     val array = when (this) {
         is JsonArray -> this
         is JsonObject -> {
@@ -107,5 +107,5 @@ internal fun JsonElement.searchItems(): List<JsonObject> {
     return array.mapNotNull { it as? JsonObject }
 }
 
-internal fun JsonObject.errorMessage(): String? =
+fun JsonObject.errorMessage(): String? =
     this["error"].stringOrNull() ?: this["msg"].stringOrNull() ?: this["message"].stringOrNull()

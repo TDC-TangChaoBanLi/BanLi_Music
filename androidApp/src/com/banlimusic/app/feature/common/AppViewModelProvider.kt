@@ -48,7 +48,7 @@ object AppViewModelProvider {
                 settings = app().container.settingsRepository,
                 music = app().container.musicRepository,
                 library = app().container.libraryRepository,
-                cacheManager = app().container.cacheManager,
+                cacheRepository = app().container.cacheRepository,
             )
         }
         initializer {

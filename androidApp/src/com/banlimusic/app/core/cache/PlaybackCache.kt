@@ -8,9 +8,9 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.datasource.cache.SimpleCache
 import com.banlimusic.app.core.network.JsonHttpClient
+import com.banlimusic.app.domain.playback.StreamUriCodec
 
 /**
  * Read access to the ExoPlayer media cache. Played audio stays on disk, so a later
@@ -22,13 +22,37 @@ class PlaybackCache(
     val cache: SimpleCache,
 ) {
 
-    /** Number of contiguous bytes cached from the start of [url]. */
-    fun cachedBytes(url: String): Long = runCatching {
-        val key = CacheKeyFactory.DEFAULT.buildCacheKey(DataSpec(url.toUri()))
+    fun cachedBytes(key: String): Long = runCatching {
         cache.getCachedBytes(key, 0L, Long.MAX_VALUE)
     }.getOrDefault(0L)
 
-    fun dataSpec(url: String): DataSpec = DataSpec(url.toUri())
+    fun isComplete(key: String, totalBytes: Long): Boolean {
+        if (totalBytes <= 0L) return false
+        val cached = cachedBytes(key)
+        return cached > 0L && cached >= (totalBytes - totalBytes / 100L).coerceAtLeast(1L)
+    }
+
+    fun keys(): Set<String> = runCatching { cache.keys }.getOrDefault(emptySet())
+
+    fun removeResource(key: String) {
+        runCatching { cache.removeResource(key) }
+    }
+
+    /** Removes every cached quality of one application-level track. */
+    fun removeTrack(trackId: String) {
+        val prefix = StreamUriCodec.trackCachePrefix(trackId)
+        keys().filter { it.startsWith(prefix) }.forEach(::removeResource)
+    }
+
+    fun removeAll() {
+        keys().forEach(::removeResource)
+    }
+
+    fun dataSpec(url: String, key: String? = null): DataSpec =
+        DataSpec.Builder()
+            .setUri(url.toUri())
+            .apply { if (!key.isNullOrBlank()) setKey(key) }
+            .build()
 
     /**
      * Reads [url] through the cache: cached spans are served locally, missing

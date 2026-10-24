@@ -1,5 +1,5 @@
 
-GD Studio's Online Music Platform API
+## GD Studio's Online Music Platform API
 To report any unlawful activity or to protect your local authority, please contact us: gdstudio@email.com
 
 Written by GD Studio. License: CC BY-NC 4.0
@@ -7,9 +7,9 @@ Written by GD Studio. License: CC BY-NC 4.0
 This platform is for study purposes only. Do NOT use it commercially!
 
 
-免责声明：本站资源来自网络，仅限本人学习参考，严禁下载、传播或商用，如侵权请与我联系删除。继续使用将视为同意本声明
+> 免责声明：本站资源来自网络，仅限本人学习参考，严禁下载、传播或商用，如侵权请与我联系删除。继续使用将视为同意本声明
 
-若使用本站提供的API，请注明出处“GD音乐台(music.gdstudio.xyz)”，尊重作者。使用过程如遇问题可B站私信：GD-Studio
+> 若使用本站提供的API，请注明出处“GD音乐台(music.gdstudio.xyz)”，尊重作者。使用过程如遇问题可B站私信：GD-Studio
 
 [动态更新] 当前可用音乐源：netease、joox、bilibili
 
@@ -18,7 +18,7 @@ This platform is for study purposes only. Do NOT use it commercially!
 更新日期：2026-09-16
 
 
-搜索
+### 搜索
 
 API：https://music-api.gdstudio.xyz/api.php?types=search&source=[MUSIC SOURCE]&name=[KEYWORD]&count=[PAGE LENGTH]&pages=[PAGE NUM]
 
@@ -34,7 +34,7 @@ pages：页码。选填，返回搜索结果第几页，默认为第1页
 
 返回：id（曲目ID，即track_id）、name（歌曲名）、artist（歌手列表）、album（专辑名）、pic_id（专辑图ID）、url_id（URL ID，废弃）、lyric_id（歌词ID）、source（音乐源）
 
-获取歌曲
+### 获取歌曲
 
 API：https://music-api.gdstudio.xyz/api.php?types=url&source=[MUSIC SOURCE]&id=[TRACK ID]&br=[128/192/320/740/999]
 
@@ -46,7 +46,7 @@ br：音质。选填，可选128、192、320、740、999（默认），其中740
 
 返回：url（音乐链接）、br（实际返回音质）、size（文件大小，单位为KB）
 
-获取专辑图
+### 获取专辑图
 
 API：https://music-api.gdstudio.xyz/api.php?types=pic&source=[MUSIC SOURCE]&id=[PIC ID]&size=[300/500]
 
@@ -58,7 +58,7 @@ size：图片尺寸。选填，可选300（默认）、500，其中300为小图�
 
 返回：url（专辑图链接）
 
-获取歌词
+### 获取歌词
 
 API：https://music-api.gdstudio.xyz/api.php?types=lyric&source=[MUSIC SOURCE]&id=[LYRIC ID]
 
@@ -67,13 +67,3 @@ source：音乐源。选填，参数值netease（默认）、tencent、kuwo、ti
 id：歌词ID。必填，歌词ID即lyric_id（一般与曲目ID相同），可通过本站提供的搜索接口获取
 
 返回：lyric（LRC格式的原语种歌词）、tlyric（LRC格式的中文翻译歌词，不一定会返回值）
-
-更多项目
-
-Embeat：基于声学特征的音乐推荐系统
-https://github.com/gdstudio-org/Embeat
-
-说明：在你的服务器上部署一个Spotify级别的音乐推荐系统，完全开源，欢迎Star！
-
-更新：V2版已发布！推荐效果爆杀网易云，2G内存VPS即可部署
-

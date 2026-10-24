@@ -2,12 +2,16 @@ package com.banlimusic.app.feature.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.banlimusic.app.core.cache.CacheManager
+import com.banlimusic.app.core.cache.CacheRepository
+import com.banlimusic.app.core.cache.CacheUsage
+import com.banlimusic.app.core.cache.CachedTrack
 import com.banlimusic.app.core.datastore.AppSettings
+import com.banlimusic.app.core.datastore.CustomSourceSettings
 import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.datastore.ThemeMode
 import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.core.limiter.RateLimitStatus
+import com.banlimusic.app.core.model.ProviderInfo
 import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.MusicRepository
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +27,7 @@ class SettingsViewModel(
     private val settings: SettingsRepository,
     private val music: MusicRepository,
     private val library: LibraryRepository,
-    private val cacheManager: CacheManager,
+    private val cacheRepository: CacheRepository,
 ) : ViewModel() {
 
     val appSettings: StateFlow<AppSettings> = settings.settings
@@ -32,15 +36,22 @@ class SettingsViewModel(
     private val _rateStatus = MutableStateFlow<RateLimitStatus?>(null)
     val rateStatus: StateFlow<RateLimitStatus?> = _rateStatus.asStateFlow()
 
-    private val _cacheSize = MutableStateFlow(0L)
-    val cacheSize: StateFlow<Long> = _cacheSize.asStateFlow()
+    private val _providers = MutableStateFlow<List<ProviderInfo>>(emptyList())
+    val providers: StateFlow<List<ProviderInfo>> = _providers.asStateFlow()
+
+    private val _cacheUsage = MutableStateFlow(CacheUsage())
+    val cacheUsage: StateFlow<CacheUsage> = _cacheUsage.asStateFlow()
+
+    val cachedTracks: StateFlow<List<CachedTrack>> = cacheRepository.observeCachedTracks()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
     init {
         refreshRateStatus()
-        refreshCacheSize()
+        refreshProviders()
+        refreshCacheUsage()
     }
 
     fun refreshRateStatus() {
@@ -49,9 +60,16 @@ class SettingsViewModel(
         }
     }
 
-    fun refreshCacheSize() {
+    fun refreshProviders() {
         viewModelScope.launch {
-            _cacheSize.value = withContext(Dispatchers.IO) { cacheManager.sizeBytes() }
+            _providers.value = runCatching { music.providers() }.getOrDefault(emptyList())
+        }
+    }
+
+    fun refreshCacheUsage() {
+        viewModelScope.launch {
+            _cacheUsage.value = cacheRepository.usage()
+            cacheRepository.refreshSizes()
         }
     }
 
@@ -94,16 +112,25 @@ class SettingsViewModel(
     fun setDownloadArtwork(enabled: Boolean) =
         viewModelScope.launch { settings.setDownloadArtwork(enabled) }
 
+    fun setRequestListArtwork(enabled: Boolean) =
+        viewModelScope.launch { settings.setRequestListArtwork(enabled) }
+
     fun setCacheMaxBytes(bytes: Long) {
         viewModelScope.launch {
             settings.setCacheMaxBytes(bytes)
-            withContext(Dispatchers.IO) { cacheManager.trimTo(bytes) }
-            refreshCacheSize()
+            cacheRepository.trimTo(bytes)
+            refreshCacheUsage()
         }
     }
 
     fun setBottomNavItems(items: List<String>) =
         viewModelScope.launch { settings.setBottomNavItems(items) }
+
+    fun setDefaultNavItem(item: String) =
+        viewModelScope.launch { settings.setDefaultNavItem(item) }
+
+    fun setCustomSources(sources: List<CustomSourceSettings>) =
+        viewModelScope.launch { settings.setCustomSources(sources) }
 
     fun setAgreementAccepted(accepted: Boolean) =
         viewModelScope.launch { settings.setAgreementAccepted(accepted) }
@@ -146,9 +173,53 @@ class SettingsViewModel(
     fun clearCaches() {
         viewModelScope.launch {
             music.clearCaches()
-            withContext(Dispatchers.IO) { cacheManager.clear() }
-            refreshCacheSize()
+            cacheRepository.clearAll()
+            refreshCacheUsage()
             refreshRateStatus()
+        }
+    }
+
+    fun clearAudioCache() {
+        viewModelScope.launch {
+            cacheRepository.clearAudio()
+            refreshCacheUsage()
+        }
+    }
+
+    fun clearArtworkCache() {
+        viewModelScope.launch {
+            cacheRepository.clearArtwork()
+            refreshCacheUsage()
+        }
+    }
+
+    fun clearLyricsCache() {
+        viewModelScope.launch {
+            cacheRepository.clearLyrics()
+            refreshCacheUsage()
+        }
+    }
+
+    fun clearOtherCache() {
+        viewModelScope.launch {
+            cacheRepository.clearOther()
+            refreshCacheUsage()
+        }
+    }
+
+    fun removeCachedTrack(cacheKey: String) {
+        viewModelScope.launch {
+            cacheRepository.remove(cacheKey)
+            refreshCacheUsage()
+        }
+    }
+
+    fun convertCachedToDownloads(entries: Collection<CachedTrack>) {
+        viewModelScope.launch {
+            val count = runCatching { cacheRepository.convertToDownloads(entries) }
+                .getOrDefault(0)
+            _message.value = if (count > 0) "已加入 $count 首下载" else "没有可转换的缓存歌曲"
+            refreshCacheUsage()
         }
     }
 }

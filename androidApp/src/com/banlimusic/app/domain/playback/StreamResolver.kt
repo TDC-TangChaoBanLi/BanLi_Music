@@ -49,15 +49,27 @@ class StreamResolver(
         throw (lastError as? MusicException) ?: MusicException.NoPlayableSource()
     }
 
+    data class ResolvedStream(
+        val info: StreamInfo,
+        val qualityKbps: Int,
+    )
+
     /**
      * Called on ExoPlayer's loading thread. Resolution is deliberately blocking so
      * the data source can rewrite the URI before opening it.
      */
-    fun resolveBlocking(candidates: List<StreamCandidate>): android.net.Uri {
-        val info = runBlocking {
-            withTimeout(30_000L) { resolve(candidates) }
-        }
-        return info.url.toUri()
+    fun resolveBlocking(
+        candidates: List<StreamCandidate>,
+        qualityKbps: Int? = null,
+    ): android.net.Uri = resolveBlockingInfo(candidates, qualityKbps).info.url.toUri()
+
+    fun resolveBlockingInfo(
+        candidates: List<StreamCandidate>,
+        qualityKbps: Int? = null,
+    ): ResolvedStream = runBlocking {
+        val quality = qualityKbps ?: settings.current().qualityKbps
+        val info = withTimeout(30_000L) { resolve(candidates, quality) }
+        ResolvedStream(info = info, qualityKbps = info.bitrateKbps ?: quality)
     }
 
     fun clearCache() = cache.clear()

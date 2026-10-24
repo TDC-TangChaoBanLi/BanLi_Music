@@ -13,70 +13,19 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.Json
 import java.io.IOException
-
-enum class ThemeMode { SYSTEM, LIGHT, DARK }
-
-enum class WidgetTheme { SYSTEM, BLACK, WHITE }
-
-const val DEFAULT_CACHE_MAX_BYTES = 200L * 1024L * 1024L
-const val MIN_CACHE_MAX_BYTES = 50L * 1024L * 1024L
-const val MAX_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L
-const val DEFAULT_FAVORITE_CATEGORY = "默认收藏"
-const val MAX_API_LIMIT_PER_WINDOW = 50
-const val MIN_GD_REQUEST_INTERVAL_MS = 1_000L
-
-data class AppSettings(
-    val themeMode: ThemeMode = ThemeMode.SYSTEM,
-    val dynamicColor: Boolean = true,
-    val qualityKbps: Int = 128,
-    val enabledSources: Set<String> = setOf("netease"),
-    val allowMobileNetwork: Boolean = true,
-    val playbackRetryCount: Int = 3,
-    val consecutiveFailureLimit: Int = 3,
-    val defaultShowLyrics: Boolean = false,
-    val searchPageSize: Int = 20,
-    val apiLimitPerWindow: Int = 45,
-    val downloadDirectory: String = "",
-    val downloadQualityKbps: Int = 128,
-    val downloadLyrics: Boolean = false,
-    val downloadArtwork: Boolean = false,
-    val cacheMaxBytes: Long = DEFAULT_CACHE_MAX_BYTES,
-    val bottomNavItems: List<String> = DEFAULT_BOTTOM_NAV_ITEMS,
-    val agreementAccepted: Boolean = false,
-    val defaultFavoriteCategory: String = DEFAULT_FAVORITE_CATEGORY,
-    val autoImportLocalMusic: Boolean = false,
-    val widgetTheme: WidgetTheme = WidgetTheme.SYSTEM,
-    /** Requests a ~90Hz display mode while browsing track lists. */
-    val highRefreshRateLists: Boolean = true,
-    /** Opens the full player when a track row is tapped; disable to stay on the list. */
-    val openPlayerOnTrackClick: Boolean = true,
-)
-
-val SUPPORTED_SOURCES = listOf(
-    SourceOption("netease", "GD网易云"),
-    SourceOption("joox", "GD JOOX"),
-    SourceOption("bilibili", "GD B站"),
-)
-
-data class SourceOption(val id: String, val label: String)
-
-data class NavOption(val id: String, val label: String)
-
-val BOTTOM_NAV_OPTIONS = listOf(
-    NavOption("home", "首页"),
-    NavOption("search", "搜索"),
-    NavOption("library", "音乐库"),
-    NavOption("downloads", "下载"),
-    NavOption("settings", "设置"),
-)
-
-/** Home sits in the middle of the default five-item navigation bar. */
-val DEFAULT_BOTTOM_NAV_ITEMS = listOf("search", "library", "home", "downloads", "settings")
 
 private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 
 class SettingsRepository(private val context: Context) {
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        explicitNulls = false
+        coerceInputValues = true
+    }
 
     private object Keys {
         val themeMode = stringPreferencesKey("theme_mode")
@@ -93,6 +42,7 @@ class SettingsRepository(private val context: Context) {
         val downloadQuality = intPreferencesKey("download_quality_kbps")
         val downloadLyrics = booleanPreferencesKey("download_lyrics")
         val downloadArtwork = booleanPreferencesKey("download_artwork")
+        val requestListArtwork = booleanPreferencesKey("request_list_artwork")
         val cacheMaxBytes = longPreferencesKey("cache_max_bytes")
         val bottomNavItems = stringPreferencesKey("bottom_nav_items")
         val agreementAccepted = booleanPreferencesKey("agreement_accepted")
@@ -101,6 +51,14 @@ class SettingsRepository(private val context: Context) {
         val widgetTheme = stringPreferencesKey("widget_theme")
         val highRefreshRateLists = booleanPreferencesKey("high_refresh_rate_lists")
         val openPlayerOnTrackClick = booleanPreferencesKey("open_player_on_track_click")
+
+        // New modular provider keys; the legacy keys above remain readable for upgrades.
+        val gdEnabledSources = stringSetPreferencesKey("provider_gd_enabled_sources")
+        val gdPlaybackQuality = intPreferencesKey("provider_gd_quality_kbps")
+        val gdApiLimit = intPreferencesKey("provider_gd_api_limit")
+        val gdSearchPageSize = intPreferencesKey("provider_gd_search_page_size")
+        val customSources = stringPreferencesKey("provider_custom_sources_json")
+        val defaultNavItem = stringPreferencesKey("default_nav_item")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data
@@ -108,28 +66,48 @@ class SettingsRepository(private val context: Context) {
             if (throwable is IOException) emit(emptyPreferences()) else throw throwable
         }
         .map { preferences ->
+            val sources = (preferences[Keys.gdEnabledSources]
+                ?: preferences[Keys.sources]
+                ?: setOf("netease"))
+                .filter { id -> SUPPORTED_SOURCES.any { it.id == id } }
+                .ifEmpty { setOf("netease") }
+                .toSet()
+            val gd = GdProviderSettings(
+                enabledSourceKeys = sources,
+                playbackQualityKbps = (preferences[Keys.gdPlaybackQuality]
+                    ?: preferences[Keys.quality]
+                    ?: 128).takeIf { it > 0 } ?: 128,
+                apiLimitPerWindow = (preferences[Keys.gdApiLimit]
+                    ?: preferences[Keys.apiLimitPerWindow]
+                    ?: 45).coerceIn(1, MAX_API_LIMIT_PER_WINDOW),
+                searchPageSize = (preferences[Keys.gdSearchPageSize]
+                    ?: preferences[Keys.searchPageSize]
+                    ?: 20).coerceIn(10, 50),
+            )
+            val navItems = parseNavItems(preferences[Keys.bottomNavItems])
             AppSettings(
                 themeMode = preferences[Keys.themeMode]
                     ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
                     ?: ThemeMode.SYSTEM,
                 dynamicColor = preferences[Keys.dynamicColor] ?: true,
-                qualityKbps = preferences[Keys.quality] ?: 128,
-                enabledSources = preferences[Keys.sources] ?: setOf("netease"),
+                providers = ProviderSettings(
+                    gd = gd,
+                    customSources = parseCustomSources(preferences[Keys.customSources]),
+                ),
                 allowMobileNetwork = preferences[Keys.allowMobileNetwork] ?: true,
                 playbackRetryCount = (preferences[Keys.playbackRetryCount] ?: 3).coerceIn(0, 10),
-                consecutiveFailureLimit = (preferences[Keys.consecutiveFailureLimit] ?: 3).coerceIn(1, 10),
+                consecutiveFailureLimit = (preferences[Keys.consecutiveFailureLimit] ?: 3)
+                    .coerceIn(1, 10),
                 defaultShowLyrics = preferences[Keys.defaultShowLyrics] ?: false,
-                searchPageSize = (preferences[Keys.searchPageSize] ?: 20).coerceIn(10, 50),
-                apiLimitPerWindow = (preferences[Keys.apiLimitPerWindow] ?: 45)
-                    .coerceIn(1, MAX_API_LIMIT_PER_WINDOW),
                 downloadDirectory = preferences[Keys.downloadDirectory].orEmpty(),
                 downloadQualityKbps = (preferences[Keys.downloadQuality] ?: 128)
                     .takeIf { it > 0 } ?: 128,
                 downloadLyrics = preferences[Keys.downloadLyrics] ?: false,
                 downloadArtwork = preferences[Keys.downloadArtwork] ?: false,
+                requestListArtwork = preferences[Keys.requestListArtwork] ?: false,
                 cacheMaxBytes = (preferences[Keys.cacheMaxBytes] ?: DEFAULT_CACHE_MAX_BYTES)
                     .coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES),
-                bottomNavItems = parseNavItems(preferences[Keys.bottomNavItems]),
+                bottomNavItems = navItems,
                 agreementAccepted = preferences[Keys.agreementAccepted] ?: false,
                 defaultFavoriteCategory = preferences[Keys.defaultFavoriteCategory]
                     ?.takeIf { it.isNotBlank() }
@@ -140,6 +118,7 @@ class SettingsRepository(private val context: Context) {
                     ?: WidgetTheme.SYSTEM,
                 highRefreshRateLists = preferences[Keys.highRefreshRateLists] ?: true,
                 openPlayerOnTrackClick = preferences[Keys.openPlayerOnTrackClick] ?: true,
+                defaultNavItem = sanitizeDefaultNavItem(preferences[Keys.defaultNavItem], navItems),
             )
         }
 
@@ -154,15 +133,20 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setQuality(qualityKbps: Int) = context.settingsDataStore.edit {
-        it[Keys.quality] = qualityKbps
+        it[Keys.gdPlaybackQuality] = if (qualityKbps > 0) qualityKbps else 128
     }
 
-    suspend fun setSourceEnabled(source: String, enabled: Boolean) = context.settingsDataStore.edit { preferences ->
-        val current = preferences[Keys.sources] ?: setOf("netease")
-        val updated = if (enabled) current + source else current - source
-        // Never leave the app without a music source.
-        preferences[Keys.sources] = updated.ifEmpty { setOf("netease") }
-    }
+    suspend fun setSourceEnabled(source: String, enabled: Boolean) =
+        context.settingsDataStore.edit { preferences ->
+            val current = preferences[Keys.gdEnabledSources]
+                ?: preferences[Keys.sources]
+                ?: setOf("netease")
+            val updated = if (enabled) current + source else current - source
+            preferences[Keys.gdEnabledSources] = updated
+                .filter { id -> SUPPORTED_SOURCES.any { it.id == id } }
+                .ifEmpty { setOf("netease") }
+                .toSet()
+        }
 
     suspend fun setAllowMobileNetwork(enabled: Boolean) = context.settingsDataStore.edit {
         it[Keys.allowMobileNetwork] = enabled
@@ -181,11 +165,11 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setSearchPageSize(size: Int) = context.settingsDataStore.edit {
-        it[Keys.searchPageSize] = size.coerceIn(10, 50)
+        it[Keys.gdSearchPageSize] = size.coerceIn(10, 50)
     }
 
     suspend fun setApiLimitPerWindow(limit: Int) = context.settingsDataStore.edit {
-        it[Keys.apiLimitPerWindow] = limit.coerceIn(1, MAX_API_LIMIT_PER_WINDOW)
+        it[Keys.gdApiLimit] = limit.coerceIn(1, MAX_API_LIMIT_PER_WINDOW)
     }
 
     suspend fun setDownloadDirectory(path: String) = context.settingsDataStore.edit {
@@ -204,12 +188,21 @@ class SettingsRepository(private val context: Context) {
         it[Keys.downloadArtwork] = enabled
     }
 
+    suspend fun setRequestListArtwork(enabled: Boolean) = context.settingsDataStore.edit {
+        it[Keys.requestListArtwork] = enabled
+    }
+
     suspend fun setCacheMaxBytes(bytes: Long) = context.settingsDataStore.edit {
         it[Keys.cacheMaxBytes] = bytes.coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES)
     }
 
     suspend fun setBottomNavItems(items: List<String>) = context.settingsDataStore.edit {
         it[Keys.bottomNavItems] = sanitizeNavItems(items).joinToString(",")
+    }
+
+    suspend fun setDefaultNavItem(item: String) = context.settingsDataStore.edit { preferences ->
+        val navItems = parseNavItems(preferences[Keys.bottomNavItems])
+        preferences[Keys.defaultNavItem] = sanitizeDefaultNavItem(item, navItems)
     }
 
     suspend fun setAgreementAccepted(accepted: Boolean) = context.settingsDataStore.edit {
@@ -236,14 +229,19 @@ class SettingsRepository(private val context: Context) {
         it[Keys.openPlayerOnTrackClick] = enabled
     }
 
-    private fun parseNavItems(raw: String?): List<String> =
-        raw?.split(',')
-            ?.let(::sanitizeNavItems)
-            ?.takeIf { it.isNotEmpty() }
-            ?: DEFAULT_BOTTOM_NAV_ITEMS
+    suspend fun setCustomSources(sources: List<CustomSourceSettings>) = context.settingsDataStore.edit {
+        it[Keys.customSources] = json.encodeToString(sources)
+    }
 
-    private fun sanitizeNavItems(items: List<String>): List<String> {
-        val known = BOTTOM_NAV_OPTIONS.map { it.id }.toSet()
-        return items.map { it.trim() }.filter { it in known }.distinct()
+    private fun parseCustomSources(raw: String?): List<CustomSourceSettings> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            json.decodeFromString<List<CustomSourceSettings>>(raw)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun parseNavItems(raw: String?): List<String> {
+        val parsed = raw?.split(',')?.let(::sanitizeNavItems)
+        return parsed?.takeIf { it.isNotEmpty() } ?: sanitizeNavItems(emptyList())
     }
 }

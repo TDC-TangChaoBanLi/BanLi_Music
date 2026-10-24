@@ -13,12 +13,14 @@
 - **懒加载播放地址**：媒体 URI 中只保存候选来源，ExoPlayer 在真正播放时解析 URL 并缓存 5 分钟；失败时按设置重试，不再自动切换来源。
 - **歌词**：全屏播放器左滑进入歌词页，取消独立歌词按钮；可设置默认显示歌词。
 - **用户协议**：首次启动必须阅读并同意用户协议及 GD 音乐台声明后才能进入主界面。
-- **个人音乐库**：Room 持久化收藏、播放历史、搜索历史；收藏支持新建分类文件夹、分类筛选、按名称/歌手/专辑升降排序、JSON 导入导出（覆盖或追加），收藏列表支持多选/全选下载。
+- **个人音乐库与搜索**：Room 持久化收藏、播放历史、搜索历史；收藏支持新建分类文件夹、分类筛选、按名称/歌手/专辑升降排序、JSON 导入导出（覆盖或追加）。音乐库右上角支持本地搜索，可搜索歌名、专辑名、歌手名，并按收藏/最近播放/本地与下载筛选；收藏夹、最近播放、本地与下载、搜索结果均提供右侧 #A-Z 索引，长按拖动可快速滚动到对应首字母。
 - **本地音乐**：通过 MediaStore 手动或按设置自动导入本地音频，不复制原始文件；已下载完成的歌曲自动加入本地列表，长按可查看所在目录或 URI。
-- **下载**：WorkManager + 断点续传（Range）、暂停/继续/取消/重试、进度持久化、前台进度通知、完成校验；Android 10+ 默认通过 MediaStore 写入系统 `Music/BanLiMusic`，可设置下载目录、按来源选择音质，以及是否同时下载歌词/海报；下载页分为“已下载”和“下载列表”两栏。
-- **桌面小组件**：Glance 3x1 与 4x1 两种可调单行尺寸；显示标题、歌手、封面（大号）、播放控制、进度条，支持黑色/白色/跟随系统的半透明磨砂风格。
+- **下载与缓存**：WorkManager + 断点续传（Range）、暂停/继续/取消/重试、进度持久化、前台进度通知、完成校验；Android 10+ 默认通过 MediaStore 写入系统 `Music/BanLiMusic`，可设置下载目录、默认下载音质，以及是否同时下载歌词/海报。播放缓存使用稳定 key + Room 索引，可分别查看歌曲、海报、歌词和其他缓存大小，自定义上限（50 MB–2 GB），查看缓存歌曲详细列表并转换为下载；下载完成后自动清除该歌曲的播放缓存。列表页默认只读取已缓存海报，可在“下载与缓存”设置中开启列表页主动请求海报。
+- **桌面小组件**：平台 `RemoteViews` 实现 3x1 与 4x1 两种可调单行尺寸；显示标题、歌手、封面（大号）、收藏（4x1）、播放控制，进度条固定在组件底部并留出圆角间距，支持黑色/白色/跟随系统的半透明磨砂风格。播放中按 0.5 秒采样并按经过时间插值进度，通过 `partiallyUpdateAppWidget` 局部刷新图标/文本/进度，避免整层 RemoteViews 替换造成的延迟；服务被回收后会尝试恢复上次队列。小组件按钮通过透明 Activity + MediaController 执行，兼容对 PendingIntent/Broadcast 支持不佳的启动器。
+- **系统媒体控制**：Media3 通知/任务栏播放控件通过自定义 SessionCommand 提供收藏按钮，图标随当前歌曲收藏状态切换。
 - **界面**：Jetpack Compose + Material 3，首页、搜索、音乐库、下载、设置、全屏播放器、歌词页；手机使用底部导航，平板使用 NavigationRail，播放器在平板上使用双栏布局。
-- **设置**：二级菜单分类为外观、播放、GD 音乐台、下载、缓存、音乐库与收藏、桌面小组件、关于；导航栏配置归入外观，GD 音质与下载默认音质归入来源模块，底部导航默认将主页放在中间，缓存上限默认 200 MB。
+- **设置**：二级菜单分类为外观、播放、播放源、下载与缓存、音乐库与收藏、关于；桌面小组件并入外观；底部导航 5 个栏目全部保留、仅可排序，并可设置默认栏目；GD 音乐台作为播放源模块，预留自定义 API 来源设置（名称/代码、曲目 ID、音质、搜索/取流/歌词/海报参数映射，暂不发起请求）；每个设置项均有图标。
+- **跨平台骨架**：新增 `shared/`（Kotlin Multiplatform：Android + JVM）与 `desktopApp/`（Compose Desktop）模块，模型、Provider、GD 客户端、限流、解析、排序等核心已下沉；桌面端当前提供可运行的最小窗口，播放/下载/本地库留待下一阶段。
 - **测试**：去重算法、限流器、LRC 解析、来源 URI 编解码、收藏 JSON 序列化、GD 响应解析与 MockWebServer 集成测试，共 37 个 JVM 单元测试。
 - **开发约束**：`AGENTS.md` 记录多来源扩展、包体积控制、限流、数据库迁移和 UI 约定。
 
@@ -291,35 +293,53 @@ apksigner sign \
 ```
 project.yaml                  Kotlin Toolchain 模块清单
 libs.versions.toml            依赖版本目录
+shared/                       KMP 共享核心（android + jvm）
+  module.yaml
+  src/
+    com/banlimusic/app/
+      core/model              Track、来源、播放/下载信息模型
+      core/common             错误、文本规范化、TTL 缓存、LRC、A-Z 首字母
+      core/limiter            滑动窗口限流、请求调度
+      core/datastore          设置模型、ProviderSettings、自定义来源预留模型
+      core/network            OkHttp + kotlinx.serialization
+      data/source             MusicProvider 接口、GD 适配器
+      domain/playback         候选来源 URI 编解码、LRC 解析
+      domain/search           标题版本识别与跨来源去重
+      domain/sort             名称/歌手/专辑排序与 A-Z 分组
+desktopApp/                   Compose Desktop 桌面端（当前为最小窗口）
+  module.yaml
+  src/main.kt
 androidApp/
   module.yaml                 android/app 构建配置
   src/
     AndroidManifest.xml
     com/banlimusic/app/
       core/
-        model/                统一歌曲、来源、播放/下载信息模型
-        network/              OkHttp + kotlinx.serialization，HTTP 错误映射
-        limiter/              滑动窗口限流、请求调度
-        database/             Room 实体、DAO、数据库
-        datastore/            DataStore 设置
-        common/               错误、文本规范化、TTL 缓存、LRC 行模型
+        database/             Room 实体、DAO、v3→v4 缓存索引迁移
+        datastore/            DataStore 设置存储与旧键迁移
+        cache/                播放缓存、元数据缓存、缓存索引与分类统计
       data/
-        source/               MusicProvider 接口与 GD 适配器
         repository/           搜索聚合、播放地址、收藏/历史、下载任务
       domain/
-        search/               标题版本识别与跨来源去重
-        playback/             LRC 解析、候选来源 URI 编解码、流地址解析
         download/             下载状态机与 WorkManager Worker
-      player/                 Media3 服务、MediaController 连接、MediaItem 映射
+        playback/             流地址解析
+      player/                 Media3 服务、队列持久化、收藏自定义命令
       feature/                Compose 页面与 ViewModel
-      widget/                 Glance 小组件与操作回调
-      ui/                     主题与通用组件
+      widget/                 RemoteViews 小组件、封面位图缓存
+      ui/                     主题、通用组件与 A-Z 索引条
   res/
   test/
   schemas/                    Room schema 历史
 ```
 
-未来若要支持 Windows/Linux，可把与平台无关的核心逻辑抽到 `shared/`（`kmp/lib` 或 `jvm/lib`），再新增 `desktopApp/`（`jvm/app` + Compose Desktop）或 `cli/`（`jvm/app`）。当前 Android 模块依赖 Media3、Room、WorkManager、Glance，不能直接编译为桌面应用。
+跨平台代码位于 `shared/`（`kmp/lib`，platforms `android` + `jvm`），与平台无关的模型、Provider、GD 客户端、限流、文本/歌词解析、去重、URI 编解码、排序与首字母索引已下沉。`desktopApp/`（`jvm/app` + Compose Desktop）复用共享核心，当前提供最小窗口；桌面播放、下载和 Room/DataStore 实现留待下一阶段。由于共享模块当前允许使用 `java.*` API，它面向 Android/JVM，不包含 iOS 目标。
+
+桌面端运行：
+
+```bash
+./kotlin build -m desktopApp
+./kotlin run -m desktopApp
+```
 
 关键原则：
 
@@ -340,7 +360,8 @@ androidApp/
 ## 已知限制
 
 - 尚未实现歌单、本地音乐扫描、账号体系与自建服务器适配器。
-- 列表页不主动请求专辑封面（播放页会加载并缓存），以避免很快耗尽 5 分钟 50 次的 API 请求额度。
+- 列表页默认不主动请求专辑封面（播放页会加载并缓存），可在“下载与缓存”设置中开启；开启后会占用 5 分钟 50 次的 API 请求额度。
 - Android 10+ 默认通过 MediaStore 写入系统 `Music/BanLiMusic`；自定义目录不可写或旧系统会回退到应用外部音乐目录。卸载应用不会自动删除已写入系统媒体库的文件。
-- 桌面小组件不展示封面（仅显示标题、歌手与播放控制），避免小组件侧额外请求封面接口。
-- 当前环境没有已连接的 Android 设备/模拟器，因此只完成了编译、单元测试与 APK 结构校验；真机安装验证待设备接入后进行。
+- 4x1 桌面小组件会加载封面；封面由服务端/播放页缓存提供，失败时显示占位图。
+- 中文 A-Z 首字母使用轻量 GB2312 映射，多音字和生僻字可能出现近似结果。
+- 已在真机验证主要播放、下载与小组件流程；不同厂商桌面和系统版本仍需分别验证。

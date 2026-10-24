@@ -12,8 +12,10 @@ fun interface TimeSource {
     fun nowMs(): Long
 }
 
+private val monotonicStart = kotlin.time.TimeSource.Monotonic.markNow()
+
 object SystemTimeSource : TimeSource {
-    override fun nowMs(): Long = System.nanoTime() / 1_000_000L
+    override fun nowMs(): Long = monotonicStart.elapsedNow().inWholeMilliseconds
 }
 
 data class RateLimitStatus(

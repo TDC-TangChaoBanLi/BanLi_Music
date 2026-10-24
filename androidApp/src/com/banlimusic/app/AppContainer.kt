@@ -6,10 +6,12 @@ import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.database.StandaloneDatabaseProvider
 import com.banlimusic.app.core.cache.CacheManager
+import com.banlimusic.app.core.cache.CacheRepository
 import com.banlimusic.app.core.cache.MediaMetadataCache
 import com.banlimusic.app.core.cache.PlaybackCache
 import com.banlimusic.app.core.database.MusicDatabase
 import com.banlimusic.app.core.datastore.MAX_API_LIMIT_PER_WINDOW
+import com.banlimusic.app.core.datastore.MAX_CACHE_MAX_BYTES
 import com.banlimusic.app.core.datastore.MIN_GD_REQUEST_INTERVAL_MS
 import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.limiter.RequestScheduler
@@ -117,10 +119,15 @@ class AppContainer(private val context: Context) {
     }
 
     val downloadRepository: DownloadRepository by lazy {
-        DownloadRepository(context, database.downloadDao(), json, settingsRepository)
+        DownloadRepository(
+            context = context,
+            dao = database.downloadDao(),
+            cacheDao = database.cacheDao(),
+            playbackCache = playbackCache,
+            json = json,
+            settings = settingsRepository,
+        )
     }
-
-    val cacheManager: CacheManager by lazy { CacheManager(context) }
 
     /** ExoPlayer writes streamed audio here so downloads can reuse it. */
     val playbackCache: PlaybackCache by lazy {
@@ -128,17 +135,25 @@ class AppContainer(private val context: Context) {
             context,
             SimpleCache(
                 File(context.cacheDir, "playback-media"),
-                LeastRecentlyUsedCacheEvictor(PLAYBACK_CACHE_MAX_BYTES),
+                LeastRecentlyUsedCacheEvictor(MAX_CACHE_MAX_BYTES),
                 StandaloneDatabaseProvider(context),
             ),
         )
     }
 
-    val playbackController: PlaybackController by lazy {
-        PlaybackController(context, json, settingsRepository, downloadRepository)
+    val cacheManager: CacheManager by lazy { CacheManager(context, playbackCache) }
+
+    val cacheRepository: CacheRepository by lazy {
+        CacheRepository(
+            dao = database.cacheDao(),
+            json = json,
+            playbackCache = playbackCache,
+            cacheManager = cacheManager,
+            downloads = downloadRepository,
+        )
     }
 
-    private companion object {
-        const val PLAYBACK_CACHE_MAX_BYTES = 256L * 1024 * 1024
+    val playbackController: PlaybackController by lazy {
+        PlaybackController(context, json, settingsRepository, downloadRepository)
     }
 }

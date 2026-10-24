@@ -1,8 +1,26 @@
 package com.banlimusic.app.widget
 
-import androidx.glance.appwidget.GlanceAppWidget
-import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
+import android.content.Context
+import android.os.Bundle
 
-class PlayerWidgetLargeReceiver : GlanceAppWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget = PlayerWidgetLarge()
+/** 4x1 player widget with artwork and favourite control. */
+class PlayerWidgetLargeReceiver : AppWidgetProvider() {
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray,
+    ) {
+        WidgetRenderer.updateAll(context, full = true)
+    }
+
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle,
+    ) {
+        WidgetRenderer.updateAll(context, full = true)
+    }
 }

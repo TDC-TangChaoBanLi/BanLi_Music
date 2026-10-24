@@ -53,9 +53,17 @@ class DownloadWorker(
         return try {
             val settings = container.settingsRepository.current()
             val quality = entity.qualityKbps.takeIf { it > 0 } ?: settings.qualityKbps
-            val stream = container.musicRepository.resolveStream(track, quality)
+            val cached = container.cacheRepository.findForTrack(track.id, quality)
+            val fullyCached = cached != null &&
+                container.playbackCache.isComplete(cached.cacheKey, cached.totalBytes)
+            // A complete cache can be copied without spending an API request.
+            val stream = if (fullyCached) null else {
+                container.musicRepository.resolveStream(track, quality)
+            }
+            val downloadUrl = stream?.url
+                ?: "https://banlimusic.invalid/cache/${cached?.cacheKey}.${cached?.fileExtension ?: "mp3"}"
             val target = repository.downloadTarget()
-            val fileName = repository.suggestedFileName(track, stream.url, entity.id)
+            val fileName = repository.suggestedFileName(track, downloadUrl, entity.id)
             val tempFile = tempFile(entity.id)
             repository.updateStatus(taskId, DownloadStatus.DOWNLOADING)
 
@@ -86,17 +94,27 @@ class DownloadWorker(
 
             // Playback already cached part or all of the stream. Converting the
             // cache avoids downloading the same bytes again.
-            val cachedBytes = runCatching {
-                container.playbackCache.cachedBytes(stream.url)
-            }.getOrDefault(0L)
-            if (cachedBytes > 0L) {
-                val expectedTotal = stream.sizeBytes?.takeIf { it > 0L }?.times(1024L) ?: 0L
+            val cachedBytes = cached?.let {
+                runCatching { container.playbackCache.cachedBytes(it.cacheKey) }.getOrDefault(0L)
+            } ?: 0L
+            if (cachedBytes > 0L && cached != null) {
+                val expectedTotal = cached.totalBytes
+                    .takeIf { it > 0L }
+                    ?: stream?.sizeBytes?.takeIf { it > 0L }
+                    ?: 0L
                 latestTotal = expectedTotal
-                copyCachedToFile(container, stream.url, tempFile, expectedTotal, onProgress)
+                copyCachedToFile(
+                    container = container,
+                    url = downloadUrl,
+                    cacheKey = cached.cacheKey,
+                    file = tempFile,
+                    expectedTotal = expectedTotal,
+                    onProgress = onProgress,
+                )
             } else {
                 downloadToFile(
                     client = container.downloadHttpClient,
-                    url = stream.url,
+                    url = downloadUrl,
                     file = tempFile,
                     onProgress = onProgress,
                 )
@@ -112,6 +130,8 @@ class DownloadWorker(
             tempFile.delete()
             repository.updateProgress(taskId, length, if (latestTotal > 0) latestTotal else length)
             writeSidecars(container, track, target, fileName, entity)
+            container.cacheRepository.removeTrack(track.id)
+            container.cacheRepository.trimTo(settings.cacheMaxBytes)
             repository.updateStatus(taskId, DownloadStatus.COMPLETED, filePath = location)
             Result.success()
         } catch (cancelled: CancellationException) {
@@ -277,6 +297,7 @@ class DownloadWorker(
     private suspend fun copyCachedToFile(
         container: AppContainer,
         url: String,
+        cacheKey: String?,
         file: File,
         expectedTotal: Long,
         onProgress: suspend (downloaded: Long, total: Long) -> Unit,
@@ -285,7 +306,7 @@ class DownloadWorker(
         val dataSource = playbackCache.readSource()
         var written = 0L
         try {
-            dataSource.open(playbackCache.dataSpec(url))
+            dataSource.open(playbackCache.dataSpec(url, cacheKey))
             FileOutputStream(file, false).use { output ->
                 val buffer = ByteArray(64 * 1024)
                 while (true) {

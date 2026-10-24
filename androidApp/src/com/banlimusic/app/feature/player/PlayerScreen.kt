@@ -316,6 +316,7 @@ private fun PosterPage(
                 TrackArtwork(
                     track = track,
                     artworkUrl = artworkUrl,
+                    requestRemoteArtwork = true,
                     modifier = Modifier
                         .weight(0.9f)
                         .fillMaxWidth()
@@ -358,6 +359,7 @@ private fun PosterPage(
                 TrackArtwork(
                     track = track,
                     artworkUrl = artworkUrl,
+                    requestRemoteArtwork = true,
                     modifier = Modifier
                         .fillMaxWidth(0.78f)
                         .aspectRatio(1f),

@@ -35,6 +35,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,8 +55,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
-import com.banlimusic.app.core.common.TextNormalizer
+import com.banlimusic.app.MusicApplication
 import com.banlimusic.app.core.model.Track
 
 fun providerLabel(providerId: String): String = when (providerId) {
@@ -99,13 +106,67 @@ fun formatPlaybackTime(millis: Long): String {
     return "%d:%02d".format(java.util.Locale.ROOT, total / 60, total % 60)
 }
 
+/** Allows track-list pages to fetch artwork from providers. Provided by the app root. */
+val LocalRequestListArtwork = staticCompositionLocalOf { false }
+
+private fun String.isLocalArtworkUri(): Boolean =
+    startsWith("file://") || startsWith("content://") || startsWith("android.resource://")
+
 @Composable
 fun TrackArtwork(
     track: Track,
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 12.dp,
-    artworkUrl: String? = track.artworkUrl,
+    artworkUrl: String? = track.artworkUrl ?: track.album?.artworkUrl,
+    /** The player page always resolves artwork regardless of the list setting. */
+    requestRemoteArtwork: Boolean = false,
 ) {
+    val context = LocalContext.current
+    val allowRemote = requestRemoteArtwork || LocalRequestListArtwork.current
+    var artworkModel by remember(track.id, artworkUrl, allowRemote) {
+        // Local files can be shown immediately; remote URLs only when allowed.
+        mutableStateOf(artworkUrl?.takeIf { it.isLocalArtworkUri() })
+    }
+    LaunchedEffect(track.id, artworkUrl, allowRemote) {
+        val container = (context.applicationContext as? MusicApplication)?.container
+            ?: return@LaunchedEffect
+        // Cached artwork wins even when list requests are disabled. This covers
+        // artwork produced by the player or by a completed download.
+        val cached = try {
+            container.mediaMetadataCache.artwork(track.id)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            null
+        }
+        if (!cached.isNullOrBlank()) {
+            artworkModel = cached
+            return@LaunchedEffect
+        }
+        val local = artworkUrl?.takeIf { it.isLocalArtworkUri() }
+        if (local != null) {
+            artworkModel = local
+            return@LaunchedEffect
+        }
+        if (!allowRemote) {
+            artworkModel = null
+            return@LaunchedEffect
+        }
+        if (!artworkUrl.isNullOrBlank()) {
+            artworkModel = artworkUrl
+            return@LaunchedEffect
+        }
+        // GD search results only carry an artwork key, not a URL. Resolve it lazily
+        // through the repository (which is rate-limited and caches the file).
+        val resolved = try {
+            container.musicRepository.artwork(track)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            null
+        }
+        if (!resolved.isNullOrBlank()) artworkModel = resolved
+    }
     val palettes = listOf(
         listOf(Color(0xFF0F766E), Color(0xFF134E4A)),
         listOf(Color(0xFF9A5B2C), Color(0xFF5C3317)),
@@ -126,9 +187,9 @@ fun TrackArtwork(
             tint = Color.White.copy(alpha = 0.88f),
             modifier = Modifier.fillMaxSize(0.42f),
         )
-        if (!artworkUrl.isNullOrBlank()) {
+        if (!artworkModel.isNullOrBlank()) {
             AsyncImage(
-                model = artworkUrl,
+                model = artworkModel,
                 contentDescription = track.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
@@ -466,7 +527,3 @@ fun SearchEntry(onClick: () -> Unit, modifier: Modifier = Modifier) {
         }
     }
 }
-
-fun trackSubtitle(track: Track): String =
-    listOfNotNull(track.artistLine, track.album?.title, track.durationMs?.let(TextNormalizer::formatDurationMs))
-        .joinToString(" · ")

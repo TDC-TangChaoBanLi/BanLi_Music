@@ -44,6 +44,12 @@ data class DownloadTask(
         ?.takeIf { !it.startsWith("content://") }
         ?.let(::File)
 
+    /** Optional artwork sidecar written next to the audio file. */
+    val localArtwork: File? get() = file?.let { audio ->
+        File(audio.parentFile, "${audio.nameWithoutExtension}.jpg")
+            .takeIf(File::exists)
+    }
+
     val isMediaStoreUri: Boolean get() = filePath?.startsWith("content://") == true
 
     val isActive: Boolean

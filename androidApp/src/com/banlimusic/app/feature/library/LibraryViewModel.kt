@@ -39,6 +39,10 @@ class LibraryViewModel(
         .flatMapLatest { category -> library.observeFavorites(category) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Unfiltered favourites used by the library search. */
+    val allFavorites: StateFlow<List<Track>> = library.observeFavorites()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val categories: StateFlow<List<String>> = library.observeFavoriteCategories()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -105,6 +109,12 @@ class LibraryViewModel(
 
     fun removeFavorite(track: Track) {
         viewModelScope.launch { library.removeFavorite(track.id) }
+    }
+
+    fun toggleFavorite(track: Track) {
+        viewModelScope.launch {
+            library.toggleFavorite(track, defaultCategory.value)
+        }
     }
 
     fun clearHistory() {

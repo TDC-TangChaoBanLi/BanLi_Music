@@ -30,6 +30,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -52,6 +53,7 @@ import com.banlimusic.app.feature.library.LibraryScreen
 import com.banlimusic.app.feature.player.PlayerScreen
 import com.banlimusic.app.feature.search.SearchScreen
 import com.banlimusic.app.feature.settings.SettingsScreen
+import com.banlimusic.app.ui.components.LocalRequestListArtwork
 import com.banlimusic.app.ui.components.MiniPlayer
 import kotlinx.coroutines.launch
 
@@ -86,6 +88,7 @@ private fun destinationsFor(ids: List<String>): List<BottomDestination> {
 @Composable
 fun AppRoot(
     container: AppContainer,
+    initialSettings: AppSettings = AppSettings(),
     onExitApp: () -> Unit = {},
     widgetRequested: Boolean = false,
     widgetOpenPlayer: Boolean = false,
@@ -93,12 +96,12 @@ fun AppRoot(
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = backStackEntry?.destination?.route ?: Routes.HOME
+    val currentRoute = backStackEntry?.destination?.route ?: initialSettings.defaultNavItem
     val playbackState by container.playbackController.state.collectAsStateWithLifecycle()
     val favoriteIds by container.libraryRepository.observeFavoriteIds()
         .collectAsStateWithLifecycle(initialValue = emptySet())
     val settings by container.settingsRepository.settings
-        .collectAsStateWithLifecycle(initialValue = AppSettings())
+        .collectAsStateWithLifecycle(initialValue = initialSettings)
     val destinations = remember(settings.bottomNavItems) {
         destinationsFor(settings.bottomNavItems)
     }
@@ -133,9 +136,12 @@ fun AppRoot(
         onWidgetRequestHandled()
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val isTablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
-        if (isTablet) {
+    CompositionLocalProvider(
+        LocalRequestListArtwork provides settings.requestListArtwork,
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val isTablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
+            if (isTablet) {
             Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
                 Row(
                     modifier = Modifier
@@ -190,6 +196,7 @@ fun AppRoot(
                             navigateTopLevel = ::navigateTo,
                             onExitApp = onExitApp,
                             navOrder = destinations.map { it.route },
+                            startDestination = settings.defaultNavItem,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
@@ -249,9 +256,11 @@ fun AppRoot(
                     navigateTopLevel = ::navigateTo,
                     onExitApp = onExitApp,
                     navOrder = destinations.map { it.route },
+                    startDestination = settings.defaultNavItem,
                     modifier = Modifier.padding(padding),
                 )
             }
+        }
         }
     }
 }
@@ -263,13 +272,14 @@ private fun AppNavHost(
     navigateTopLevel: (String) -> Unit,
     onExitApp: () -> Unit,
     navOrder: List<String>,
+    startDestination: String,
     modifier: Modifier = Modifier,
 ) {
     fun indexOf(route: String?): Int = navOrder.indexOf(route).takeIf { it >= 0 } ?: 0
 
     NavHost(
         navController = navController,
-        startDestination = Routes.HOME,
+        startDestination = startDestination,
         modifier = modifier,
         enterTransition = {
             val forward = indexOf(targetState.destination.route) >=

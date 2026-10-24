@@ -20,9 +20,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,9 +42,11 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -61,6 +65,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,8 +80,14 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.banlimusic.app.core.common.TextNormalizer
 import com.banlimusic.app.core.model.Track
+import com.banlimusic.app.domain.sort.AlphabetSection
+import com.banlimusic.app.domain.sort.TrackSort
+import com.banlimusic.app.domain.sort.TrackSorter
 import com.banlimusic.app.feature.common.AppViewModelProvider
+import com.banlimusic.app.ui.components.AlphabetDragBubble
+import com.banlimusic.app.ui.components.AlphabetIndex
 import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackRow
 import com.banlimusic.app.ui.components.dragSelect
@@ -87,16 +98,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private enum class LibrarySort(val label: String) {
-    TITLE("名称"),
-    ARTIST("歌手"),
-    ALBUM("专辑"),
-}
-
 private enum class LibraryTab(val label: String) {
     FAVORITES("收藏"),
     HISTORY("最近播放"),
     LOCAL("本地"),
+}
+
+private enum class LibrarySearchFilter(val label: String) {
+    ALL("全部"),
+    FAVORITES("收藏"),
+    HISTORY("最近播放"),
+    LOCAL("本地/下载"),
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -107,8 +119,15 @@ fun LibraryScreen(
     onExitApp: () -> Unit = {},
     viewModel: LibraryViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
-    BackHandler { onExitApp() }
+    var searchMode by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var searchFilter by rememberSaveable { mutableStateOf(LibrarySearchFilter.ALL) }
+    var searchCategory by rememberSaveable { mutableStateOf<String?>(null) }
+    BackHandler {
+        if (searchMode) searchMode = false else onExitApp()
+    }
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+    val allFavorites by viewModel.allFavorites.collectAsStateWithLifecycle()
     val history by viewModel.history.collectAsStateWithLifecycle()
     val localTracks by viewModel.localTracks.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
@@ -123,7 +142,7 @@ fun LibraryScreen(
 
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var libraryHeaderVisible by remember { mutableStateOf(true) }
-    var sort by rememberSaveable { mutableStateOf(LibrarySort.TITLE) }
+    var sort by rememberSaveable { mutableStateOf(TrackSort.TITLE) }
     var ascending by rememberSaveable { mutableStateOf(true) }
     var showNewCategory by rememberSaveable { mutableStateOf(false) }
     var newCategoryName by rememberSaveable { mutableStateOf("") }
@@ -135,13 +154,61 @@ fun LibraryScreen(
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { LibraryTab.entries.size })
     val sortedFavorites = remember(favorites, sort, ascending) {
-        sortTracks(favorites, sort, ascending)
+        TrackSorter.sort(favorites, sort, ascending)
     }
     val sortedHistory = remember(history, sort, ascending) {
-        sortTracks(history, sort, ascending)
+        TrackSorter.sort(history, sort, ascending)
     }
     val sortedLocal = remember(localTracks, sort, ascending) {
-        sortTracks(localTracks, sort, ascending)
+        TrackSorter.sort(localTracks, sort, ascending)
+    }
+    val favoriteSections = remember(sortedFavorites, sort) {
+        TrackSorter.sections(sortedFavorites, sort)
+    }
+    val historySections = remember(sortedHistory, sort) {
+        TrackSorter.sections(sortedHistory, sort)
+    }
+    val localSections = remember(sortedLocal, sort) {
+        TrackSorter.sections(sortedLocal, sort)
+    }
+    val normalizedSearch = remember(searchQuery) { TextNormalizer.normalize(searchQuery) }
+    val searchResults = remember(
+        normalizedSearch,
+        searchFilter,
+        searchCategory,
+        allFavorites,
+        history,
+        localTracks,
+        favoriteFolders,
+    ) {
+        if (normalizedSearch.isBlank()) {
+            emptyList()
+        } else {
+            fun matches(track: Track): Boolean {
+                val fields = listOfNotNull(
+                    track.title,
+                    track.album?.title,
+                    track.artistLine,
+                )
+                return fields.any { TextNormalizer.normalize(it).contains(normalizedSearch) }
+            }
+
+            val filtered = when (searchFilter) {
+                LibrarySearchFilter.ALL -> allFavorites + history + localTracks
+                LibrarySearchFilter.FAVORITES -> allFavorites.filter { track ->
+                    searchCategory == null || favoriteFolders[track.id] == searchCategory
+                }
+                LibrarySearchFilter.HISTORY -> history
+                LibrarySearchFilter.LOCAL -> localTracks
+            }
+            filtered.filter(::matches).distinctBy { it.id }
+        }
+    }
+    val sortedSearch = remember(searchResults, sort, ascending) {
+        TrackSorter.sort(searchResults, sort, ascending)
+    }
+    val searchSections = remember(sortedSearch, sort) {
+        TrackSorter.sections(sortedSearch, sort)
     }
 
     val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -205,20 +272,64 @@ fun LibraryScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            text = "音乐库",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp),
-        )
-        PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
-            LibraryTab.entries.forEachIndexed { index, tab ->
-                Tab(
-                    selected = pagerState.currentPage == index,
-                    onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                    text = { Text(tab.label) },
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 8.dp, top = 20.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "音乐库",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            IconButton(
+                onClick = {
+                    searchMode = !searchMode
+                    if (!searchMode) searchQuery = ""
+                },
+            ) {
+                Icon(
+                    imageVector = if (searchMode) Icons.Rounded.Close else Icons.Rounded.Search,
+                    contentDescription = if (searchMode) "关闭搜索" else "搜索音乐库",
                 )
             }
         }
+        if (searchMode) {
+            LibrarySearchContent(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                filter = searchFilter,
+                onFilterChange = {
+                    searchFilter = it
+                    if (it != LibrarySearchFilter.FAVORITES) searchCategory = null
+                },
+                categories = categories,
+                selectedCategory = searchCategory,
+                onCategoryChange = { searchCategory = it },
+                results = sortedSearch,
+                sections = searchSections,
+                sort = sort,
+                ascending = ascending,
+                onSort = { sort = it },
+                onToggleOrder = { ascending = !ascending },
+                favoriteIds = favoriteIds,
+                favoriteFolders = favoriteFolders,
+                downloadedIds = downloadedIds,
+                onPlayQueue = onPlayQueue,
+                onToggleFavorite = viewModel::toggleFavorite,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
+                LibraryTab.entries.forEachIndexed { index, tab ->
+                    Tab(
+                        selected = pagerState.currentPage == index,
+                        onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                        text = { Text(tab.label) },
+                    )
+                }
+            }
 
         AnimatedVisibility(
             visible = pagerState.currentPage != 0 || libraryHeaderVisible,
@@ -242,6 +353,7 @@ fun LibraryScreen(
             when (LibraryTab.entries[page]) {
                 LibraryTab.FAVORITES -> FavoritesTabContent(
                     favorites = sortedFavorites,
+                    sections = favoriteSections,
                     categories = categories,
                     selectedCategory = selectedCategory,
                     defaultCategory = defaultCategory,
@@ -282,6 +394,7 @@ fun LibraryScreen(
 
                 LibraryTab.HISTORY -> HistoryTabContent(
                     history = sortedHistory,
+                    sections = historySections,
                     categories = categories,
                     defaultCategory = defaultCategory,
                     favoriteFolders = favoriteFolders,
@@ -314,6 +427,7 @@ fun LibraryScreen(
 
                 LibraryTab.LOCAL -> LocalTabContent(
                     tracks = sortedLocal,
+                    sections = localSections,
                     favoriteIds = favoriteIds,
                     favoriteFolders = favoriteFolders,
                     downloadedIds = downloadedIds,
@@ -358,6 +472,7 @@ fun LibraryScreen(
                     modifier = Modifier.fillMaxSize(),
                 )
             }
+        }
         }
     }
 
@@ -437,12 +552,165 @@ fun LibraryScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun LibrarySearchContent(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    filter: LibrarySearchFilter,
+    onFilterChange: (LibrarySearchFilter) -> Unit,
+    categories: List<String>,
+    selectedCategory: String?,
+    onCategoryChange: (String?) -> Unit,
+    results: List<Track>,
+    sections: List<AlphabetSection>,
+    sort: TrackSort,
+    ascending: Boolean,
+    onSort: (TrackSort) -> Unit,
+    onToggleOrder: () -> Unit,
+    favoriteIds: Set<String>,
+    favoriteFolders: Map<String, String>,
+    downloadedIds: Set<String>,
+    onPlayQueue: (List<Track>, Int) -> Unit,
+    onToggleFavorite: (Track) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var dragLetter by remember { mutableStateOf<String?>(null) }
+    val currentSection by remember(listState, sections) {
+        derivedStateOf {
+            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
+        }
+    }
+    LaunchedEffect(query, filter, selectedCategory) {
+        if (results.isNotEmpty()) listState.scrollToItem(0)
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            placeholder = { Text("搜索歌名、专辑名或歌手名") },
+            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(Icons.Rounded.Close, contentDescription = "清除")
+                    }
+                }
+            },
+            singleLine = true,
+        )
+        FlowRow(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            LibrarySearchFilter.entries.forEach { option ->
+                FilterChip(
+                    selected = filter == option,
+                    onClick = { onFilterChange(option) },
+                    label = { Text(option.label) },
+                )
+            }
+        }
+        if (filter == LibrarySearchFilter.FAVORITES) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                item {
+                    FilterChip(
+                        selected = selectedCategory == null,
+                        onClick = { onCategoryChange(null) },
+                        label = { Text("全部收藏夹") },
+                    )
+                }
+                items(categories) { category ->
+                    FilterChip(
+                        selected = selectedCategory == category,
+                        onClick = { onCategoryChange(category) },
+                        label = { Text(category) },
+                    )
+                }
+            }
+        }
+        SortBar(
+            sort = sort,
+            ascending = ascending,
+            onSort = onSort,
+            onToggleOrder = onToggleOrder,
+        )
+        Text(
+            text = if (query.isBlank()) "输入关键词开始搜索" else "找到 ${results.size} 首",
+            modifier = Modifier.padding(horizontal = 16.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        when {
+            query.isBlank() -> EmptyState(
+                title = "搜索音乐库",
+                description = "可搜索歌名、专辑名和歌手名，并按收藏、最近播放或本地/下载筛选。",
+                icon = Icons.Rounded.Search,
+            )
+
+            results.isEmpty() -> EmptyState(
+                title = "没有找到相关歌曲",
+                description = "试试更短的关键词，或切换到其他筛选条件。",
+                icon = Icons.Rounded.Search,
+            )
+
+            else -> Box(modifier = Modifier.weight(1f)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 12.dp,
+                        end = 30.dp,
+                        bottom = 20.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    itemsIndexed(results, key = { _, track -> track.id }) { index, track ->
+                        TrackRow(
+                            track = track,
+                            onClick = { onPlayQueue(results, index) },
+                            isFavorite = track.id in favoriteIds,
+                            onToggleFavorite = { onToggleFavorite(track) },
+                            downloaded = track.id in downloadedIds,
+                            categoryLabel = favoriteFolders[track.id],
+                        )
+                    }
+                }
+                AlphabetIndex(
+                    sections = sections,
+                    currentSection = currentSection,
+                    onSelect = { section ->
+                        scope.launch { listState.scrollToItem(section.itemIndex) }
+                    },
+                    onDragLetter = { dragLetter = it },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxHeight()
+                        .padding(end = 2.dp),
+                )
+                AlphabetDragBubble(
+                    letter = dragLetter,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SortBar(
-    sort: LibrarySort,
+    sort: TrackSort,
     ascending: Boolean,
-    onSort: (LibrarySort) -> Unit,
+    onSort: (TrackSort) -> Unit,
     onToggleOrder: () -> Unit,
 ) {
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
@@ -459,7 +727,7 @@ private fun SortBar(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(4.dp))
-            LibrarySort.entries.forEach { option ->
+            TrackSort.entries.forEach { option ->
                 FilterChip(
                     selected = sort == option,
                     onClick = { onSort(option) },
@@ -489,6 +757,7 @@ private fun SortBar(
 @Composable
 private fun FavoritesTabContent(
     favorites: List<Track>,
+    sections: List<AlphabetSection>,
     categories: List<String>,
     selectedCategory: String?,
     defaultCategory: String,
@@ -511,6 +780,13 @@ private fun FavoritesTabContent(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var dragLetter by remember { mutableStateOf<String?>(null) }
+    val currentSection by remember(listState, sections) {
+        derivedStateOf {
+            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
+        }
+    }
     val validIds = remember(favorites) { favorites.map { it.id }.toSet() }
     var chosenCategory by remember(defaultCategory) { mutableStateOf(defaultCategory) }
     var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
@@ -648,7 +924,7 @@ private fun FavoritesTabContent(
                         ),
                     contentPadding = PaddingValues(
                         start = 12.dp,
-                        end = 12.dp,
+                        end = 30.dp,
                         bottom = if (selectionMode) 100.dp else 20.dp,
                     ),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -671,6 +947,21 @@ private fun FavoritesTabContent(
                 }
             }
         }
+
+        AlphabetIndex(
+            sections = sections,
+            currentSection = currentSection,
+            onSelect = { section -> scope.launch { listState.scrollToItem(section.itemIndex) } },
+            onDragLetter = { dragLetter = it },
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .padding(end = 2.dp),
+        )
+        AlphabetDragBubble(
+            letter = dragLetter,
+            modifier = Modifier.align(Alignment.Center),
+        )
 
         if (selectionMode) {
             TrackSelectionBar(
@@ -795,6 +1086,7 @@ private fun CompactTextButton(
 @Composable
 private fun HistoryTabContent(
     history: List<Track>,
+    sections: List<AlphabetSection>,
     categories: List<String>,
     defaultCategory: String,
     favoriteFolders: Map<String, String>,
@@ -813,6 +1105,13 @@ private fun HistoryTabContent(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var dragLetter by remember { mutableStateOf<String?>(null) }
+    val currentSection by remember(listState, sections) {
+        derivedStateOf {
+            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
+        }
+    }
     val validIds = remember(history) { history.map { it.id }.toSet() }
     val selectedTracks = remember(history, selectedIds) {
         history.filter { it.id in selectedIds }
@@ -892,7 +1191,7 @@ private fun HistoryTabContent(
                         ),
                     contentPadding = PaddingValues(
                         start = 12.dp,
-                        end = 12.dp,
+                        end = 30.dp,
                         bottom = if (selectionMode) 100.dp else 20.dp,
                     ),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -915,6 +1214,21 @@ private fun HistoryTabContent(
                 }
             }
         }
+
+        AlphabetIndex(
+            sections = sections,
+            currentSection = currentSection,
+            onSelect = { section -> scope.launch { listState.scrollToItem(section.itemIndex) } },
+            onDragLetter = { dragLetter = it },
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .padding(end = 2.dp),
+        )
+        AlphabetDragBubble(
+            letter = dragLetter,
+            modifier = Modifier.align(Alignment.Center),
+        )
 
         if (selectionMode) {
             TrackSelectionBar(
@@ -939,6 +1253,7 @@ private fun HistoryTabContent(
 @Composable
 private fun LocalTabContent(
     tracks: List<Track>,
+    sections: List<AlphabetSection>,
     favoriteIds: Set<String>,
     favoriteFolders: Map<String, String>,
     downloadedIds: Set<String>,
@@ -961,6 +1276,13 @@ private fun LocalTabContent(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var dragLetter by remember { mutableStateOf<String?>(null) }
+    val currentSection by remember(listState, sections) {
+        derivedStateOf {
+            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
+        }
+    }
     val validIds = remember(tracks) { tracks.map { it.id }.toSet() }
     val selectedTracks = remember(tracks, selectedIds) {
         tracks.filter { it.id in selectedIds }
@@ -1039,7 +1361,7 @@ private fun LocalTabContent(
                     ),
                 contentPadding = PaddingValues(
                     start = 12.dp,
-                    end = 12.dp,
+                    end = 30.dp,
                     bottom = if (selectionMode) 100.dp else 20.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -1066,6 +1388,20 @@ private fun LocalTabContent(
             }
         }
     }
+        AlphabetIndex(
+            sections = sections,
+            currentSection = currentSection,
+            onSelect = { section -> scope.launch { listState.scrollToItem(section.itemIndex) } },
+            onDragLetter = { dragLetter = it },
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .padding(end = 2.dp),
+        )
+        AlphabetDragBubble(
+            letter = dragLetter,
+            modifier = Modifier.align(Alignment.Center),
+        )
         if (selectionMode) {
             TrackSelectionBar(
                 count = selectedIds.size,
@@ -1084,19 +1420,6 @@ private fun LocalTabContent(
             )
         }
     }
-}
-
-private fun sortTracks(
-    tracks: List<Track>,
-    sort: LibrarySort,
-    ascending: Boolean,
-): List<Track> {
-    val comparator = when (sort) {
-        LibrarySort.TITLE -> compareBy<Track> { it.title.lowercase() }
-        LibrarySort.ARTIST -> compareBy<Track> { it.artistLine.lowercase() }
-        LibrarySort.ALBUM -> compareBy<Track> { it.album?.title.orEmpty().lowercase() }
-    }.thenBy { it.title.lowercase() }
-    return if (ascending) tracks.sortedWith(comparator) else tracks.sortedWith(comparator.reversed())
 }
 
 private fun resolveLocalLocation(context: Context, track: Track): String {

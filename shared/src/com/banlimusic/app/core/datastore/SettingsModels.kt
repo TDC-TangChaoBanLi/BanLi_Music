@@ -1,0 +1,143 @@
+package com.banlimusic.app.core.datastore
+
+import kotlinx.serialization.Serializable
+
+enum class ThemeMode { SYSTEM, LIGHT, DARK }
+
+enum class WidgetTheme { SYSTEM, BLACK, WHITE }
+
+const val DEFAULT_CACHE_MAX_BYTES = 200L * 1024L * 1024L
+const val MIN_CACHE_MAX_BYTES = 50L * 1024L * 1024L
+const val MAX_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L
+const val DEFAULT_FAVORITE_CATEGORY = "默认收藏"
+const val MAX_API_LIMIT_PER_WINDOW = 50
+const val MIN_GD_REQUEST_INTERVAL_MS = 1_000L
+
+/** Defaults for a single GD source backend. */
+@Serializable
+data class GdProviderSettings(
+    val enabledSourceKeys: Set<String> = setOf("netease"),
+    val playbackQualityKbps: Int = 128,
+    val apiLimitPerWindow: Int = 45,
+    val searchPageSize: Int = 20,
+)
+
+/** Placeholder model for user-defined API sources. Runtime requests are not implemented yet. */
+@Serializable
+data class CustomSourceSettings(
+    val id: String = "",
+    val displayName: String = "",
+    /** Secondary source name/code, e.g. the `source` query value of an API. */
+    val providerCode: String = "",
+    /** How a track id is represented, e.g. "{id}" or "{source}:{id}". */
+    val trackIdFormat: String = "",
+    val qualities: List<QualityOption> = emptyList(),
+    val enabled: Boolean = false,
+    val searchEndpoint: ApiEndpointSettings = ApiEndpointSettings(),
+    val streamEndpoint: ApiEndpointSettings = ApiEndpointSettings(),
+    val lyricsEndpoint: ApiEndpointSettings? = null,
+    val artworkEndpoint: ApiEndpointSettings? = null,
+)
+
+@Serializable
+data class QualityOption(
+    val code: String = "",
+    val kbps: Int = 0,
+    val label: String = "",
+)
+
+/** Reserved description of a request/response mapping for custom sources. */
+@Serializable
+data class ApiEndpointSettings(
+    val urlTemplate: String = "",
+    val method: String = "GET",
+    val queryParams: Map<String, String> = emptyMap(),
+    val headers: Map<String, String> = emptyMap(),
+    /** JSON path to a track object list, e.g. `data.songs`. */
+    val resultListPath: String = "",
+    /** JSON path to the track id inside a result item. */
+    val trackIdPath: String = "",
+    /** JSON path to the playable URL / lyric text / artwork URL. */
+    val urlPath: String = "",
+)
+
+@Serializable
+data class ProviderSettings(
+    val gd: GdProviderSettings = GdProviderSettings(),
+    val customSources: List<CustomSourceSettings> = emptyList(),
+)
+
+data class AppSettings(
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val dynamicColor: Boolean = true,
+    val providers: ProviderSettings = ProviderSettings(),
+    val allowMobileNetwork: Boolean = true,
+    val playbackRetryCount: Int = 3,
+    val consecutiveFailureLimit: Int = 3,
+    val defaultShowLyrics: Boolean = false,
+    val downloadDirectory: String = "",
+    val downloadQualityKbps: Int = 128,
+    val downloadLyrics: Boolean = false,
+    val downloadArtwork: Boolean = false,
+    /**
+     * Allows track-list pages to request artwork from providers on demand.
+     * When disabled, lists only read artwork that is already cached; the
+     * player page always resolves artwork normally.
+     */
+    val requestListArtwork: Boolean = false,
+    val cacheMaxBytes: Long = DEFAULT_CACHE_MAX_BYTES,
+    val bottomNavItems: List<String> = DEFAULT_BOTTOM_NAV_ITEMS,
+    val agreementAccepted: Boolean = false,
+    val defaultFavoriteCategory: String = DEFAULT_FAVORITE_CATEGORY,
+    val autoImportLocalMusic: Boolean = false,
+    val widgetTheme: WidgetTheme = WidgetTheme.SYSTEM,
+    /** Requests a ~90Hz display mode while browsing track lists. */
+    val highRefreshRateLists: Boolean = true,
+    /** Opens the full player when a track row is tapped; disable to stay on the list. */
+    val openPlayerOnTrackClick: Boolean = true,
+    /** Tab opened on a cold start. All navigation items always stay visible. */
+    val defaultNavItem: String = DEFAULT_NAV_ITEM,
+) {
+    val qualityKbps: Int get() = providers.gd.playbackQualityKbps
+    val enabledSources: Set<String> get() = providers.gd.enabledSourceKeys
+    val apiLimitPerWindow: Int get() = providers.gd.apiLimitPerWindow
+    val searchPageSize: Int get() = providers.gd.searchPageSize
+}
+
+data class SourceOption(val id: String, val label: String)
+
+val SUPPORTED_SOURCES = listOf(
+    SourceOption("netease", "GD网易云"),
+    SourceOption("joox", "GD JOOX"),
+    SourceOption("bilibili", "GD B站"),
+)
+
+data class NavOption(val id: String, val label: String)
+
+val BOTTOM_NAV_OPTIONS = listOf(
+    NavOption("home", "首页"),
+    NavOption("search", "搜索"),
+    NavOption("library", "音乐库"),
+    NavOption("downloads", "下载"),
+    NavOption("settings", "设置"),
+)
+
+/** Home sits in the middle of the default five-item navigation bar. */
+val DEFAULT_BOTTOM_NAV_ITEMS = listOf("search", "library", "home", "downloads", "settings")
+
+const val DEFAULT_NAV_ITEM = "home"
+
+/**
+ * All known navigation items must stay visible. Unknown ids are dropped and
+ * missing items are appended in their default relative order.
+ */
+fun sanitizeNavItems(items: List<String>): List<String> {
+    val known = BOTTOM_NAV_OPTIONS.map { it.id }.toSet()
+    val present = items.map { it.trim() }.filter { it in known }.distinct()
+    return present + DEFAULT_BOTTOM_NAV_ITEMS.filter { it !in present }
+}
+
+fun sanitizeDefaultNavItem(item: String?, navItems: List<String>): String {
+    val sanitizedItems = sanitizeNavItems(navItems)
+    return item?.takeIf { it in sanitizedItems } ?: DEFAULT_NAV_ITEM
+}

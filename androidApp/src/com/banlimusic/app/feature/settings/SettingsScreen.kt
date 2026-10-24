@@ -17,23 +17,64 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.AddLink
+import androidx.compose.material.icons.rounded.AudioFile
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.CloudQueue
+import androidx.compose.material.icons.rounded.ColorLens
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.FormatListNumbered
+import androidx.compose.material.icons.rounded.HighQuality
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.ImportExport
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.PieChart
+import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.Subtitles
+import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.ViewList
+import androidx.compose.material.icons.rounded.Widgets
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,36 +89,63 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.banlimusic.app.core.common.formatDuration
+import com.banlimusic.app.core.cache.CachedTrack
 import com.banlimusic.app.core.datastore.AppSettings
 import com.banlimusic.app.core.datastore.BOTTOM_NAV_OPTIONS
+import com.banlimusic.app.core.datastore.MAX_CACHE_MAX_BYTES
+import com.banlimusic.app.core.datastore.MIN_CACHE_MAX_BYTES
 import com.banlimusic.app.core.datastore.SUPPORTED_SOURCES
 import com.banlimusic.app.core.datastore.ThemeMode
 import com.banlimusic.app.core.datastore.WidgetTheme
+import com.banlimusic.app.core.datastore.sanitizeNavItems
 import com.banlimusic.app.core.limiter.RateLimitStatus
+import com.banlimusic.app.core.model.ProviderInfo
 import com.banlimusic.app.feature.common.AppViewModelProvider
+import com.banlimusic.app.ui.components.EmptyState
+import com.banlimusic.app.ui.components.TrackArtwork
 import com.banlimusic.app.ui.components.formatBytes
 import com.banlimusic.app.ui.components.qualityLabel
+import com.banlimusic.app.ui.components.qualityShortLabel
 import com.banlimusic.app.widget.PlayerWidgetUpdater
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class SettingsPage(val title: String, val description: String) {
-    APPEARANCE("外观", "主题、动态取色与底部导航栏"),
-    PLAYBACK("播放", "失败重试、歌词默认页与网络策略"),
-    GD("GD 音乐台", "音源、音质、请求频率与搜索分页"),
-    DOWNLOAD("下载", "下载目录、歌词与海报附带下载"),
-    CACHE("缓存", "缓存上限、当前大小与清理"),
-    LIBRARY("音乐库与收藏", "默认收藏夹与本地音乐"),
-    WIDGET("桌面小组件", "3x1 / 4x1 小组件主题"),
-    ABOUT("关于", "版本与来源声明"),
+private enum class SettingsPage(
+    val title: String,
+    val description: String,
+    val icon: ImageVector,
+) {
+    APPEARANCE("外观", "主题、导航栏与桌面小组件", Icons.Rounded.Palette),
+    PLAYBACK("播放", "失败重试、歌词默认页与网络策略", Icons.Rounded.PlayCircle),
+    SOURCE("播放源", "GD 音乐台与预留的自定义 API 来源", Icons.Rounded.CloudQueue),
+    DOWNLOAD_CACHE("下载与缓存", "下载目录、缓存上限与缓存歌曲", Icons.Rounded.Download),
+    LIBRARY("音乐库与收藏", "默认收藏夹与本地音乐", Icons.Rounded.LibraryMusic),
+    ABOUT("关于", "版本与来源声明", Icons.Rounded.Info),
+    CACHED_TRACKS("缓存歌曲", "查看缓存歌曲并转换为下载", Icons.Rounded.QueueMusic),
+}
+
+private val HOME_PAGES = SettingsPage.entries.filter { it != SettingsPage.CACHED_TRACKS }
+private val QUALITY_OPTIONS = listOf(128, 192, 320, 740, 999)
+private const val MIB = 1024L * 1024L
+
+private fun navLabel(id: String): String =
+    BOTTOM_NAV_OPTIONS.firstOrNull { it.id == id }?.label ?: id
+
+private fun navIcon(id: String): ImageVector = when (id) {
+    "home" -> Icons.Rounded.Home
+    "search" -> Icons.Rounded.Search
+    "library" -> Icons.Rounded.LibraryMusic
+    "downloads" -> Icons.Rounded.Download
+    "settings" -> Icons.Rounded.Settings
+    else -> Icons.Rounded.ViewList
 }
 
 @Composable
@@ -87,7 +155,9 @@ fun SettingsScreen(
 ) {
     val settings by viewModel.appSettings.collectAsStateWithLifecycle()
     val rateStatus by viewModel.rateStatus.collectAsStateWithLifecycle()
-    val cacheSize by viewModel.cacheSize.collectAsStateWithLifecycle()
+    val providers by viewModel.providers.collectAsStateWithLifecycle()
+    val cacheUsage by viewModel.cacheUsage.collectAsStateWithLifecycle()
+    val cachedTracks by viewModel.cachedTracks.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
 
@@ -100,7 +170,9 @@ fun SettingsScreen(
     }
 
     BackHandler(enabled = page == null) { onExitApp() }
-    BackHandler(enabled = page != null) { page = null }
+    BackHandler(enabled = page != null) {
+        page = if (page == SettingsPage.CACHED_TRACKS) SettingsPage.DOWNLOAD_CACHE else null
+    }
 
     if (page == null) {
         SettingsHome(onSelect = { page = it })
@@ -109,9 +181,18 @@ fun SettingsScreen(
             page = page ?: return,
             settings = settings,
             rateStatus = rateStatus,
-            cacheSize = cacheSize,
+            providers = providers,
+            cacheUsage = cacheUsage,
+            cachedTracks = cachedTracks,
             viewModel = viewModel,
-            onBack = { page = null },
+            onOpenCachedTracks = { page = SettingsPage.CACHED_TRACKS },
+            onBack = {
+                page = if (page == SettingsPage.CACHED_TRACKS) {
+                    SettingsPage.DOWNLOAD_CACHE
+                } else {
+                    null
+                }
+            },
         )
     }
 }
@@ -126,7 +207,7 @@ private fun SettingsHome(onSelect: (SettingsPage) -> Unit) {
         item {
             Text(text = "设置", style = MaterialTheme.typography.headlineSmall)
         }
-        items(SettingsPage.entries) { page ->
+        items(HOME_PAGES) { page ->
             SettingsNavRow(page = page, onClick = { onSelect(page) })
         }
     }
@@ -146,6 +227,8 @@ private fun SettingsNavRow(page: SettingsPage, onClick: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            SettingsIcon(page.icon)
+            Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = page.title,
@@ -173,12 +256,14 @@ private fun SettingsDetail(
     page: SettingsPage,
     settings: AppSettings,
     rateStatus: RateLimitStatus?,
-    cacheSize: Long,
+    providers: List<ProviderInfo>,
+    cacheUsage: com.banlimusic.app.core.cache.CacheUsage,
+    cachedTracks: List<CachedTrack>,
     viewModel: SettingsViewModel,
+    onOpenCachedTracks: () -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val versionName = remember(context) {
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
@@ -195,6 +280,8 @@ private fun SettingsDetail(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
             }
+            Icon(page.icon, contentDescription = null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
             Text(
                 text = page.title,
                 style = MaterialTheme.typography.titleLarge,
@@ -202,56 +289,49 @@ private fun SettingsDetail(
             )
         }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            when (page) {
-                SettingsPage.APPEARANCE -> item {
-                    AppearanceSettings(settings, viewModel)
-                }
+        when (page) {
+            SettingsPage.CACHED_TRACKS -> CachedTracksPage(
+                cachedTracks = cachedTracks,
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxSize(),
+            )
 
-                SettingsPage.PLAYBACK -> item {
-                    PlaybackSettings(settings, viewModel)
-                }
+            else -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                when (page) {
+                    SettingsPage.APPEARANCE -> item {
+                        AppearanceSettings(settings, viewModel)
+                    }
 
-                SettingsPage.GD -> item {
-                    GdSettings(settings, rateStatus, viewModel)
-                }
+                    SettingsPage.PLAYBACK -> item {
+                        PlaybackSettings(settings, viewModel)
+                    }
 
-                SettingsPage.DOWNLOAD -> item {
-                    DownloadSettings(settings, viewModel)
-                }
+                    SettingsPage.SOURCE -> item {
+                        SourceSettings(settings, rateStatus, providers, viewModel)
+                    }
 
-                SettingsPage.CACHE -> item {
-                    CacheSettings(
-                        settings = settings,
-                        cacheSize = cacheSize,
-                        viewModel = viewModel,
-                        context = context,
-                    )
-                }
+                    SettingsPage.DOWNLOAD_CACHE -> item {
+                        DownloadCacheSettings(
+                            settings = settings,
+                            cacheUsage = cacheUsage,
+                            viewModel = viewModel,
+                            onOpenCachedTracks = onOpenCachedTracks,
+                        )
+                    }
 
-                SettingsPage.LIBRARY -> item {
-                    LibrarySettings(settings, viewModel)
-                }
+                    SettingsPage.LIBRARY -> item {
+                        LibrarySettings(settings, viewModel)
+                    }
 
-                SettingsPage.WIDGET -> item {
-                    WidgetSettings(
-                        settings = settings,
-                        viewModel = viewModel,
-                        onThemeChanged = {
-                            scope.launch {
-                                delay(200L)
-                                PlayerWidgetUpdater.refresh(context)
-                            }
-                        },
-                    )
-                }
+                    SettingsPage.ABOUT -> item {
+                        AboutSettings(versionName)
+                    }
 
-                SettingsPage.ABOUT -> item {
-                    AboutSettings(versionName)
+                    SettingsPage.CACHED_TRACKS -> Unit
                 }
             }
         }
@@ -260,152 +340,197 @@ private fun SettingsDetail(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AppearanceSettings(
-    settings: AppSettings,
-    viewModel: SettingsViewModel,
-) {
-    SettingsCard(title = "外观与导航") {
-        Text(text = "主题", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(8.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ThemeMode.entries.forEach { mode ->
-                FilterChip(
-                    selected = settings.themeMode == mode,
-                    onClick = { viewModel.setThemeMode(mode) },
-                    label = {
-                        Text(
-                            when (mode) {
-                                ThemeMode.SYSTEM -> "跟随系统"
-                                ThemeMode.LIGHT -> "浅色"
-                                ThemeMode.DARK -> "深色"
-                            },
-                        )
-                    },
-                )
-            }
-        }
-        SettingsSwitchRow(
-            title = "动态取色",
-            description = "Android 12 及以上跟随系统壁纸配色",
-            checked = settings.dynamicColor,
-            onCheckedChange = viewModel::setDynamicColor,
-        )
-        SettingsSwitchRow(
-            title = "歌曲列表 90Hz 高刷新率",
-            description = "浏览收藏、搜索、下载等列表时请求 90Hz 显示模式；" +
-                "关闭后使用系统默认刷新率，可降低耗电",
-            checked = settings.highRefreshRateLists,
-            onCheckedChange = viewModel::setHighRefreshRateLists,
-        )
+private fun AppearanceSettings(settings: AppSettings, viewModel: SettingsViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var navItems by remember(settings.bottomNavItems) {
+        mutableStateOf(sanitizeNavItems(settings.bottomNavItems))
+    }
 
-        Spacer(Modifier.height(18.dp))
-        Text(
-            text = "底部导航栏",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            text = "选择显示的入口并调整顺序，主页默认位于中间，至少保留一项。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(6.dp))
-        var navItems by remember(settings.bottomNavItems) {
-            mutableStateOf(settings.bottomNavItems)
+    fun commitNav(updated: List<String>) {
+        navItems = updated
+        viewModel.setBottomNavItems(updated)
+    }
+
+    fun move(index: Int, delta: Int) {
+        val target = index + delta
+        if (target !in navItems.indices) return
+        val updated = navItems.toMutableList()
+        val item = updated.removeAt(index)
+        updated.add(target, item)
+        commitNav(updated)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SettingsCard(title = "主题与外观", icon = Icons.Rounded.Palette) {
+            Text("主题模式", style = MaterialTheme.typography.titleSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ThemeMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = settings.themeMode == mode,
+                        onClick = { viewModel.setThemeMode(mode) },
+                        label = { Text(themeLabel(mode)) },
+                    )
+                }
+            }
+            SettingsSwitchRow(
+                icon = Icons.Rounded.ColorLens,
+                title = "动态取色",
+                description = "Android 12+ 使用系统壁纸颜色生成主题",
+                checked = settings.dynamicColor,
+                onCheckedChange = viewModel::setDynamicColor,
+            )
+            SettingsSwitchRow(
+                icon = Icons.Rounded.Speed,
+                title = "列表高刷新率",
+                description = "浏览列表时尝试使用 90Hz 显示模式",
+                checked = settings.highRefreshRateLists,
+                onCheckedChange = viewModel::setHighRefreshRateLists,
+            )
         }
-        BOTTOM_NAV_OPTIONS.forEach { option ->
-            val enabled = option.id in navItems
+
+        SettingsCard(title = "底部导航栏", icon = Icons.Rounded.ViewList) {
+            Text(
+                "所有栏目始终显示，可调整左右顺序；默认栏目在下次启动时生效。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(
-                    checked = enabled,
-                    onCheckedChange = { checked ->
-                        val updated = if (checked) {
-                            navItems + option.id
-                        } else if (navItems.size > 1) {
-                            navItems - option.id
-                        } else {
-                            navItems
-                        }
-                        navItems = updated
-                        viewModel.setBottomNavItems(updated)
-                    },
-                )
-                Text(
-                    text = option.label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                if (enabled) {
-                    val index = navItems.indexOf(option.id)
+                navItems.forEach { id ->
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(navIcon(id), contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(
+                            text = navLabel(id),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            HorizontalDivider()
+            navItems.forEachIndexed { index, id ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${index + 1}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.width(22.dp),
+                    )
+                    Icon(navIcon(id), contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = navLabel(id),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                     TextButton(
                         enabled = index > 0,
-                        onClick = {
-                            val updated = navItems.toMutableList()
-                            updated.removeAt(index)
-                            updated.add(index - 1, option.id)
-                            navItems = updated
-                            viewModel.setBottomNavItems(updated)
-                        },
+                        onClick = { move(index, -1) },
+                        contentPadding = PaddingValues(horizontal = 6.dp),
                     ) { Text("上移") }
                     TextButton(
                         enabled = index < navItems.lastIndex,
-                        onClick = {
-                            val updated = navItems.toMutableList()
-                            updated.removeAt(index)
-                            updated.add(index + 1, option.id)
-                            navItems = updated
-                            viewModel.setBottomNavItems(updated)
-                        },
+                        onClick = { move(index, 1) },
+                        contentPadding = PaddingValues(horizontal = 6.dp),
                     ) { Text("下移") }
                 }
             }
+            HorizontalDivider()
+            Text("默认栏目", style = MaterialTheme.typography.titleSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                navItems.forEach { id ->
+                    FilterChip(
+                        selected = settings.defaultNavItem == id,
+                        onClick = { viewModel.setDefaultNavItem(id) },
+                        label = { Text(navLabel(id)) },
+                    )
+                }
+            }
+        }
+
+        SettingsCard(title = "桌面小组件", icon = Icons.Rounded.Widgets) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                WidgetTheme.entries.forEach { theme ->
+                    FilterChip(
+                        selected = settings.widgetTheme == theme,
+                        onClick = {
+                            viewModel.setWidgetTheme(theme)
+                            scope.launch {
+                                PlayerWidgetUpdater.setTheme(context, theme)
+                            }
+                        },
+                        label = { Text(widgetThemeLabel(theme)) },
+                    )
+                }
+            }
+            Text(
+                "3×1 显示歌名、歌手、播放控件与底部进度条；4×1 额外显示封面与收藏按钮。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
 
 @Composable
-private fun PlaybackSettings(
-    settings: AppSettings,
-    viewModel: SettingsViewModel,
-) {
-    SettingsCard(title = "播放") {
+private fun PlaybackSettings(settings: AppSettings, viewModel: SettingsViewModel) {
+    SettingsCard(title = "播放行为", icon = Icons.Rounded.PlayCircle) {
         SettingsSwitchRow(
+            icon = Icons.Rounded.Wifi,
             title = "允许移动网络播放",
-            description = "关闭后仅在 Wi-Fi 下播放和下载，搜索不受影响",
+            description = "关闭后仅在 Wi-Fi 等非计费网络下播放和下载",
             checked = settings.allowMobileNetwork,
             onCheckedChange = viewModel::setAllowMobileNetwork,
         )
         SettingsSwitchRow(
+            icon = Icons.Rounded.Lyrics,
             title = "单曲页默认显示歌词",
-            description = "开启后左滑页面初始停在歌词页",
+            description = "关闭时默认显示海报，可左滑切换到歌词",
             checked = settings.defaultShowLyrics,
             onCheckedChange = viewModel::setDefaultShowLyrics,
         )
         SettingsSwitchRow(
+            icon = Icons.Rounded.TouchApp,
             title = "点按歌曲进入播放页",
-            description = "关闭后点按列表中的歌曲只开始播放，停留在当前列表",
+            description = "关闭后点按列表只播放，不自动打开全屏播放器",
             checked = settings.openPlayerOnTrackClick,
             onCheckedChange = viewModel::setOpenPlayerOnTrackClick,
         )
         SettingsSlider(
-            title = "失败重试次数",
+            icon = Icons.Rounded.Replay,
+            title = "失败自动重试次数",
             valueText = "${settings.playbackRetryCount} 次",
             value = settings.playbackRetryCount.toFloat(),
             valueRange = 0f..10f,
             steps = 9,
-        ) { viewModel.setPlaybackRetryCount(it.toInt()) }
+            onValueChangeFinished = { viewModel.setPlaybackRetryCount(it.toInt()) },
+        )
+        Text(
+            "重试间隔依次为 2、4、8、16 秒。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         SettingsSlider(
+            icon = Icons.Rounded.ErrorOutline,
             title = "连续失败停止阈值",
             valueText = "${settings.consecutiveFailureLimit} 首",
             value = settings.consecutiveFailureLimit.toFloat(),
             valueRange = 1f..10f,
             steps = 8,
-        ) { viewModel.setConsecutiveFailureLimit(it.toInt()) }
+            onValueChangeFinished = { viewModel.setConsecutiveFailureLimit(it.toInt()) },
+        )
         Text(
-            text = "重试间隔依次为 2、4、8、16 秒；达到停止阈值后会发送系统通知并停止播放。",
+            "连续多首歌曲播放失败后会发送系统通知并停止播放。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -414,208 +539,430 @@ private fun PlaybackSettings(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GdSettings(
+private fun SourceSettings(
     settings: AppSettings,
     rateStatus: RateLimitStatus?,
+    providers: List<ProviderInfo>,
     viewModel: SettingsViewModel,
 ) {
-    SettingsCard(title = "GD 音乐台") {
-        Text(text = "启用音源", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(4.dp))
-        SUPPORTED_SOURCES.forEach { source ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(
-                    checked = source.id in settings.enabledSources,
-                    onCheckedChange = { checked ->
-                        viewModel.setSourceEnabled(source.id, checked)
-                    },
-                )
-                Text(
-                    text = source.label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-        Text(text = "播放音质", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(6.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(128, 192, 320, 740, 999).forEach { quality ->
-                FilterChip(
-                    selected = settings.qualityKbps == quality,
-                    onClick = { viewModel.setQuality(quality) },
-                    label = { Text(qualityLabel(quality)) },
-                )
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-        Text(text = "下载默认音质", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(6.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(128, 192, 320, 740, 999).forEach { quality ->
-                FilterChip(
-                    selected = settings.downloadQualityKbps == quality,
-                    onClick = { viewModel.setDownloadQuality(quality) },
-                    label = { Text(qualityLabel(quality)) },
-                )
-            }
-        }
-        Text(
-            text = "默认标准 128K。实际可选音质由歌曲来源决定，后续其他 API 可能不提供音质选择。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Spacer(Modifier.height(16.dp))
-        SettingsSlider(
-            title = "5 分钟请求上限",
-            valueText = "${settings.apiLimitPerWindow} 次",
-            value = settings.apiLimitPerWindow.toFloat(),
-            valueRange = 1f..50f,
-            steps = 48,
-        ) { viewModel.setApiLimit(it.toInt()) }
-        Text(
-            text = "不得超过 50 次；GD 音乐台请求之间强制间隔至少 1 秒。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Spacer(Modifier.height(14.dp))
-        Text(text = "每次搜索/加载数量", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(6.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(10, 20, 30, 50).forEach { size ->
-                FilterChip(
-                    selected = settings.searchPageSize == size,
-                    onClick = { viewModel.setSearchPageSize(size) },
-                    label = { Text("$size 首") },
-                )
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-        val status = rateStatus
-        if (status == null) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SettingsCard(title = "GD 音乐台", icon = Icons.Rounded.CloudQueue) {
             Text(
-                text = "还没有请求记录，或当前来源不提供状态。",
+                "GD 音乐台是当前内置播放源，多个二级音源共享同一后端限流额度。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        } else {
-            Text(
-                text = "5 分钟窗口内剩余 ${status.remaining} / ${status.limit} 次请求",
-                style = MaterialTheme.typography.bodyMedium,
+            val gdSources = providers
+                .filter { it.id.startsWith("gd-") }
+                .map { provider ->
+                    val sourceKey = provider.id.removePrefix("gd-")
+                    Triple(sourceKey, provider.name, provider.enabled)
+                }
+            val sourceRows = if (gdSources.isEmpty()) {
+                SUPPORTED_SOURCES.map { Triple(it.id, it.label, it.id in settings.enabledSources) }
+            } else {
+                gdSources
+            }
+            sourceRows.forEach { (sourceKey, label, _) ->
+                SettingsSwitchRow(
+                    icon = Icons.Rounded.CloudQueue,
+                    title = label,
+                    description = "二级音源标识：$sourceKey",
+                    checked = sourceKey in settings.enabledSources,
+                    onCheckedChange = { viewModel.setSourceEnabled(sourceKey, it) },
+                )
+            }
+            HorizontalDivider()
+            SettingsSectionLabel(Icons.Rounded.HighQuality, "播放音质")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QUALITY_OPTIONS.forEach { quality ->
+                    FilterChip(
+                        selected = settings.qualityKbps == quality,
+                        onClick = { viewModel.setQuality(quality) },
+                        label = { Text(qualityShortLabel(quality)) },
+                    )
+                }
+            }
+            SettingsSlider(
+                icon = Icons.Rounded.Speed,
+                title = "5 分钟请求上限",
+                valueText = "${settings.apiLimitPerWindow} 次",
+                value = settings.apiLimitPerWindow.toFloat(),
+                valueRange = 1f..50f,
+                steps = 48,
+                onValueChangeFinished = { viewModel.setApiLimit(it.toInt()) },
             )
             Text(
-                text = if (status.cooldownRemainingMs > 0) {
-                    "服务端要求冷却，约 ${formatDuration(status.cooldownRemainingMs / 1000)}后可重试。"
-                } else if (status.windowResetInMs > 0) {
-                    "约 ${formatDuration(status.windowResetInMs / 1000)}后释放一个请求额度。"
-                } else {
-                    "当前没有请求限额占用。"
+                "GD 音乐台强制每次请求间隔至少 1 秒，服务端上限为 50 次/5 分钟。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SettingsSectionLabel(Icons.Rounded.FormatListNumbered, "每次搜索/加载数量")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(10, 20, 30, 50).forEach { size ->
+                    FilterChip(
+                        selected = settings.searchPageSize == size,
+                        onClick = { viewModel.setSearchPageSize(size) },
+                        label = { Text("$size 首") },
+                    )
+                }
+            }
+            HorizontalDivider()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = rateStatusText(rateStatus),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = viewModel::refreshRateStatus) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("刷新状态")
+                }
+            }
+        }
+
+        SettingsCard(title = "自定义 API 来源（预留）", icon = Icons.Rounded.AddLink) {
+            Text(
+                "该模块为后续接入自建音乐服务器预留，当前不会发起任何自定义请求。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val futureItems = listOf(
+                "二级音乐源名称与对应代码",
+                "自定义曲目 ID 表示方式",
+                "自定义音质代码及显示名称",
+                "自定义搜索、获取音乐、歌词与海报 API 格式及参数映射",
+            )
+            futureItems.forEach { text ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.Checklist,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(text, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                Text("添加自定义来源（暂未开放）")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DownloadCacheSettings(
+    settings: AppSettings,
+    cacheUsage: com.banlimusic.app.core.cache.CacheUsage,
+    viewModel: SettingsViewModel,
+    onOpenCachedTracks: () -> Unit,
+) {
+    val context = LocalContext.current
+    var directory by remember(settings.downloadDirectory) {
+        mutableStateOf(settings.downloadDirectory)
+    }
+    var cacheMbText by remember(settings.cacheMaxBytes) {
+        mutableStateOf((settings.cacheMaxBytes / MIB).toString())
+    }
+    var cacheMbValue by remember(settings.cacheMaxBytes) {
+        mutableFloatStateOf(settings.cacheMaxBytes.toFloat() / MIB)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SettingsCard(title = "下载", icon = Icons.Rounded.Download) {
+            OutlinedTextField(
+                value = directory,
+                onValueChange = { directory = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("下载目录（留空使用系统音乐目录）") },
+                leadingIcon = { Icon(Icons.Rounded.Folder, contentDescription = null) },
+                singleLine = true,
+            )
+            TextButton(onClick = { viewModel.setDownloadDirectory(directory) }) {
+                Text("保存路径")
+            }
+            SettingsSectionLabel(Icons.Rounded.HighQuality, "默认下载音质")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QUALITY_OPTIONS.forEach { quality ->
+                    FilterChip(
+                        selected = settings.downloadQualityKbps == quality,
+                        onClick = { viewModel.setDownloadQuality(quality) },
+                        label = { Text(qualityShortLabel(quality)) },
+                    )
+                }
+            }
+            SettingsSwitchRow(
+                icon = Icons.Rounded.Subtitles,
+                title = "同时下载歌词",
+                description = "保存为与歌曲同名的 .lrc 文件",
+                checked = settings.downloadLyrics,
+                onCheckedChange = viewModel::setDownloadLyrics,
+            )
+            SettingsSwitchRow(
+                icon = Icons.Rounded.Image,
+                title = "同时下载海报",
+                description = "保存为与歌曲同名的 .jpg 文件",
+                checked = settings.downloadArtwork,
+                onCheckedChange = viewModel::setDownloadArtwork,
+            )
+        }
+
+        SettingsCard(title = "缓存", icon = Icons.Rounded.Storage) {
+            SettingsSwitchRow(
+                icon = Icons.Rounded.Image,
+                title = "列表页请求海报",
+                description = "关闭时列表只读取已缓存海报；播放页始终加载",
+                checked = settings.requestListArtwork,
+                onCheckedChange = viewModel::setRequestListArtwork,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    SettingsSectionLabel(Icons.Rounded.Storage, "缓存上限")
+                    Text(
+                        formatBytes(cacheUsage.totalBytes) + " / " + formatBytes(settings.cacheMaxBytes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                OutlinedTextField(
+                    value = cacheMbText,
+                    onValueChange = { cacheMbText = it.filter(Char::isDigit) },
+                    modifier = Modifier.width(96.dp),
+                    label = { Text("MB") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                Spacer(Modifier.width(4.dp))
+                TextButton(
+                    onClick = {
+                        val mb = cacheMbText.toLongOrNull() ?: return@TextButton
+                        val bytes = (mb * MIB).coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES)
+                        cacheMbValue = bytes.toFloat() / MIB
+                        cacheMbText = (bytes / MIB).toString()
+                        viewModel.setCacheMaxBytes(bytes)
+                    },
+                ) { Text("应用") }
+            }
+            Slider(
+                value = cacheMbValue.coerceIn(
+                    MIN_CACHE_MAX_BYTES.toFloat() / MIB,
+                    MAX_CACHE_MAX_BYTES.toFloat() / MIB,
+                ),
+                onValueChange = {
+                    cacheMbValue = it
+                    cacheMbText = it.toLong().toString()
+                },
+                valueRange = 50f..2048f,
+                steps = 38,
+                onValueChangeFinished = {
+                    val bytes = (cacheMbValue.toLong() * MIB)
+                        .coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES)
+                    viewModel.setCacheMaxBytes(bytes)
+                },
+            )
+            SettingsValueRow(
+                icon = Icons.Rounded.MusicNote,
+                title = "歌曲缓存",
+                value = formatBytes(cacheUsage.audioBytes),
+                onClear = viewModel::clearAudioCache,
+            )
+            SettingsValueRow(
+                icon = Icons.Rounded.Image,
+                title = "海报缓存",
+                value = formatBytes(cacheUsage.artworkBytes),
+                onClear = viewModel::clearArtworkCache,
+            )
+            SettingsValueRow(
+                icon = Icons.Rounded.Lyrics,
+                title = "歌词缓存",
+                value = formatBytes(cacheUsage.lyricsBytes),
+                onClear = viewModel::clearLyricsCache,
+            )
+            SettingsValueRow(
+                icon = Icons.Rounded.PieChart,
+                title = "其他缓存",
+                value = formatBytes(cacheUsage.otherBytes),
+                onClear = viewModel::clearOtherCache,
+            )
+            SettingsActionRow(
+                icon = Icons.Rounded.QueueMusic,
+                title = "缓存歌曲",
+                description = "查看详细列表并转换为已下载歌曲",
+                actionText = "查看",
+                onClick = onOpenCachedTracks,
+            )
+            SettingsActionRow(
+                icon = Icons.Rounded.DeleteOutline,
+                title = "清理全部缓存",
+                description = "不会删除已下载文件；正在下载的临时文件会保留",
+                actionText = "清理",
+                onClick = {
+                    viewModel.clearCaches()
+                    Toast.makeText(context, "已清理缓存", Toast.LENGTH_SHORT).show()
+                },
+            )
+            TextButton(onClick = viewModel::refreshCacheUsage) {
+                Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("刷新缓存大小")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CachedTracksPage(
+    cachedTracks: List<CachedTrack>,
+    viewModel: SettingsViewModel,
+    modifier: Modifier = Modifier,
+) {
+    var selected by remember { mutableStateOf(emptySet<String>()) }
+    val totalBytes = cachedTracks.sumOf { it.cachedBytes }
+
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "已缓存 ${cachedTracks.size} 首 · ${formatBytes(totalBytes)}",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = {
+                    selected = if (selected.size == cachedTracks.size) {
+                        emptySet()
+                    } else {
+                        cachedTracks.map { it.cacheKey }.toSet()
+                    }
+                },
+            ) {
+                Icon(Icons.Rounded.SelectAll, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(if (selected.size == cachedTracks.size) "取消全选" else "全选")
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextButton(
+                enabled = selected.isNotEmpty(),
+                onClick = {
+                    val entries = cachedTracks.filter { it.cacheKey in selected }
+                    viewModel.convertCachedToDownloads(entries)
+                    selected = emptySet()
+                },
+            ) { Text("转为下载") }
+            TextButton(
+                enabled = selected.isNotEmpty(),
+                onClick = {
+                    cachedTracks.filter { it.cacheKey in selected }.forEach {
+                        viewModel.removeCachedTrack(it.cacheKey)
+                    }
+                    selected = emptySet()
+                },
+            ) { Text("删除缓存") }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = viewModel::refreshCacheUsage) {
+                Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text("刷新")
+            }
+        }
+        if (cachedTracks.isEmpty()) {
+            EmptyState(
+                title = "还没有缓存歌曲",
+                description = "播放过的歌曲会出现在这里，可转换为已下载歌曲。",
+                icon = Icons.Rounded.QueueMusic,
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                items(cachedTracks, key = { it.cacheKey }) { entry ->
+                    CachedTrackRow(
+                        entry = entry,
+                        selected = entry.cacheKey in selected,
+                        onToggle = {
+                            selected = if (entry.cacheKey in selected) {
+                                selected - entry.cacheKey
+                            } else {
+                                selected + entry.cacheKey
+                            }
+                        },
+                        onDelete = { viewModel.removeCachedTrack(entry.cacheKey) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CachedTrackRow(
+    entry: CachedTrack,
+    selected: Boolean,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = selected, onCheckedChange = { onToggle() })
+        TrackArtwork(track = entry.track, modifier = Modifier.size(46.dp), cornerRadius = 9.dp)
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.track.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+            )
+            Text(
+                text = entry.track.artistLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            Text(
+                text = buildString {
+                    append(
+                        if (entry.qualityKbps > 0) qualityLabel(entry.qualityKbps) else "音质未知",
+                    )
+                    append(" · ")
+                    append(formatBytes(entry.cachedBytes))
+                    if (!entry.isComplete) append(" · 部分缓存")
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        TextButton(onClick = viewModel::refreshRateStatus) { Text("刷新状态") }
+        IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+            Icon(
+                Icons.Rounded.DeleteOutline,
+                contentDescription = "删除缓存",
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 
 @Composable
-private fun DownloadSettings(
-    settings: AppSettings,
-    viewModel: SettingsViewModel,
-) {
-    SettingsCard(title = "下载") {
-        var downloadDirectory by remember(settings.downloadDirectory) {
-            mutableStateOf(settings.downloadDirectory)
-        }
-        OutlinedTextField(
-            value = downloadDirectory,
-            onValueChange = { downloadDirectory = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("下载目录") },
-            placeholder = { Text("留空使用系统音乐/BanLiMusic") },
-            singleLine = true,
-        )
-        TextButton(onClick = { viewModel.setDownloadDirectory(downloadDirectory) }) {
-            Text("保存路径")
-        }
-        Text(
-            text = "留空时在 Android 10+ 使用 MediaStore 的 Music/BanLiMusic 目录；自定义目录不可写时会自动回退。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        SettingsSwitchRow(
-            title = "同时下载歌词",
-            description = "保存同名 .lrc；MediaStore 模式下保存在应用私有目录",
-            checked = settings.downloadLyrics,
-            onCheckedChange = viewModel::setDownloadLyrics,
-        )
-        SettingsSwitchRow(
-            title = "同时下载海报",
-            description = "保存同名 .jpg；MediaStore 模式下保存在应用私有目录",
-            checked = settings.downloadArtwork,
-            onCheckedChange = viewModel::setDownloadArtwork,
-        )
-    }
-}
-
-@Composable
-private fun CacheSettings(
-    settings: AppSettings,
-    cacheSize: Long,
-    viewModel: SettingsViewModel,
-    context: android.content.Context,
-) {
-    SettingsCard(title = "缓存") {
-        Text(
-            text = "当前缓存：${formatBytes(cacheSize)}",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(text = "最大缓存大小", style = MaterialTheme.typography.bodyMedium)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(
-                100L * 1024 * 1024,
-                200L * 1024 * 1024,
-                500L * 1024 * 1024,
-                1024L * 1024 * 1024,
-            ).forEach { bytes ->
-                FilterChip(
-                    selected = settings.cacheMaxBytes == bytes,
-                    onClick = { viewModel.setCacheMaxBytes(bytes) },
-                    label = { Text(formatBytes(bytes)) },
-                )
-            }
-        }
-        TextButton(
-            onClick = {
-                viewModel.clearCaches()
-                Toast.makeText(context, "已清理缓存", Toast.LENGTH_SHORT).show()
-            },
-        ) { Text("清理缓存") }
-        TextButton(
-            onClick = {
-                viewModel.clearSearchHistory()
-                Toast.makeText(context, "已清空搜索历史", Toast.LENGTH_SHORT).show()
-            },
-        ) { Text("清空搜索历史") }
-        TextButton(onClick = viewModel::refreshCacheSize) { Text("刷新缓存大小") }
-    }
-}
-
-@Composable
-private fun LibrarySettings(
-    settings: AppSettings,
-    viewModel: SettingsViewModel,
-) {
+private fun LibrarySettings(settings: AppSettings, viewModel: SettingsViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pendingImport by remember { mutableStateOf<String?>(null) }
@@ -658,45 +1005,62 @@ private fun LibrarySettings(
         }
     }
 
-    SettingsCard(title = "音乐库与收藏") {
-        var defaultCategory by remember(settings.defaultFavoriteCategory) {
-            mutableStateOf(settings.defaultFavoriteCategory)
-        }
-        OutlinedTextField(
-            value = defaultCategory,
-            onValueChange = { defaultCategory = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("默认收藏夹") },
-            singleLine = true,
-        )
-        TextButton(onClick = { viewModel.setDefaultFavoriteCategory(defaultCategory) }) {
-            Text("保存默认收藏夹")
-        }
-        SettingsSwitchRow(
-            title = "启动时自动导入本地音乐",
-            description = "需要媒体读取权限；只记录系统媒体库中的音频，不复制文件",
-            checked = settings.autoImportLocalMusic,
-            onCheckedChange = viewModel::setAutoImportLocalMusic,
-        )
-        Text(
-            text = "收藏备份",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { exportLauncher.launch("banlimusic-favorites.json") }) {
-                Text("导出收藏")
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SettingsCard(title = "音乐库与收藏", icon = Icons.Rounded.LibraryMusic) {
+            var defaultCategory by remember(settings.defaultFavoriteCategory) {
+                mutableStateOf(settings.defaultFavoriteCategory)
             }
-            TextButton(
+            OutlinedTextField(
+                value = defaultCategory,
+                onValueChange = { defaultCategory = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("默认收藏夹") },
+                leadingIcon = { Icon(Icons.Rounded.FavoriteBorder, contentDescription = null) },
+                singleLine = true,
+            )
+            TextButton(onClick = { viewModel.setDefaultFavoriteCategory(defaultCategory) }) {
+                Text("保存默认收藏夹")
+            }
+            SettingsSwitchRow(
+                icon = Icons.Rounded.AudioFile,
+                title = "启动时自动导入本地音乐",
+                description = "需要媒体读取权限；只记录系统媒体库中的音频，不复制文件",
+                checked = settings.autoImportLocalMusic,
+                onCheckedChange = viewModel::setAutoImportLocalMusic,
+            )
+            Text(
+                text = "收藏备份",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { exportLauncher.launch("banlimusic-favorites.json") }) {
+                    Icon(Icons.Rounded.ImportExport, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("导出收藏")
+                }
+                TextButton(
+                    onClick = {
+                        importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    },
+                ) { Text("导入收藏") }
+            }
+            Text(
+                "导出文件包含收藏夹、添加时间与曲目元数据。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            HorizontalDivider()
+            SettingsActionRow(
+                icon = Icons.Rounded.Search,
+                title = "清空搜索历史",
+                description = "只清除搜索建议，不影响收藏和播放记录",
+                actionText = "清空",
                 onClick = {
-                    importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                    viewModel.clearSearchHistory()
+                    Toast.makeText(context, "已清空搜索历史", Toast.LENGTH_SHORT).show()
                 },
-            ) { Text("导入收藏") }
+            )
         }
-        Text(
-            text = "收藏夹可在音乐库页新建；导出文件包含收藏夹、添加时间与曲目元数据。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 
     pendingImport?.let { raw ->
@@ -731,75 +1095,26 @@ private fun LibrarySettings(
 }
 
 @Composable
-private fun WidgetSettings(
-    settings: AppSettings,
-    viewModel: SettingsViewModel,
-    onThemeChanged: () -> Unit,
-) {
-    SettingsCard(title = "桌面小组件") {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            WidgetTheme.entries.forEach { theme ->
-                FilterChip(
-                    selected = settings.widgetTheme == theme,
-                    onClick = {
-                        viewModel.setWidgetTheme(theme)
-                        onThemeChanged()
-                    },
-                    label = {
-                        Text(
-                            when (theme) {
-                                WidgetTheme.SYSTEM -> "跟随系统"
-                                WidgetTheme.BLACK -> "黑色"
-                                WidgetTheme.WHITE -> "白色"
-                            },
-                        )
-                    },
-                )
-            }
-        }
-        Text(
-            text = "提供 3x1 与 4x1 两种单行布局，可调整大小；磨砂效果使用半透明背景近似实现。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
 private fun AboutSettings(versionName: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            ),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Rounded.Info,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                    Spacer(Modifier.size(6.dp))
-                    Text(
-                        text = "来源与声明",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "音乐数据来自 GD 音乐台（music.gdstudio.xyz），API 由 GD Studio 提供，遵循 CC BY-NC 4.0。本站资源仅限个人学习参考，请勿下载、传播或用于商业用途。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-            }
-        }
+    SettingsCard(title = "关于 BanLiMusic", icon = Icons.Rounded.Info) {
         Text(
             text = "BanLiMusic $versionName",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "音乐数据来自 GD 音乐台（music.gdstudio.xyz）。该来源仅用于学习参考，不得用于商业用途。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = "请遵守服务端限流、鉴权与版权要求；播放地址仅做短时缓存，下载内容请自行确认授权。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = "未来将支持自建音乐服务器与本地音乐；桌面端共享核心已接入。",
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -808,58 +1123,98 @@ private fun AboutSettings(versionName: String) {
 @Composable
 private fun SettingsCard(
     title: String,
+    icon: ImageVector,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(10.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SettingsIcon(icon)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
             content()
         }
     }
 }
 
 @Composable
-private fun SettingsSwitchRow(
-    title: String,
-    description: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    enabled: Boolean = true,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+private fun SettingsIcon(icon: ImageVector, size: Int = 34) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.size(size.dp),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                text = description,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            enabled = enabled,
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.padding(8.dp),
         )
     }
 }
 
 @Composable
+private fun SettingsSectionLabel(icon: ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(text = text, style = MaterialTheme.typography.titleSmall)
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
 private fun SettingsSlider(
+    icon: ImageVector,
     title: String,
     valueText: String,
     value: Float,
@@ -868,19 +1223,127 @@ private fun SettingsSlider(
     onValueChangeFinished: (Float) -> Unit,
 ) {
     var current by remember(value) { mutableFloatStateOf(value) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(text = title, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Text(
-            text = valueText,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = valueText,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Slider(
+            value = current,
+            onValueChange = { current = it },
+            valueRange = valueRange,
+            steps = steps,
+            onValueChangeFinished = { onValueChangeFinished(current) },
         )
     }
-    Slider(
-        value = current,
-        onValueChange = { current = it },
-        valueRange = valueRange,
-        steps = steps,
-        onValueChangeFinished = { onValueChangeFinished(current) },
-    )
+}
+
+@Composable
+private fun SettingsValueRow(
+    icon: ImageVector,
+    title: String,
+    value: String,
+    onClear: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = title,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (onClear != null) {
+            IconButton(onClick = onClear, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    Icons.Rounded.DeleteOutline,
+                    contentDescription = "清理$title",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsActionRow(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    actionText: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = onClick) { Text(actionText) }
+    }
+}
+
+private fun themeLabel(mode: ThemeMode): String = when (mode) {
+    ThemeMode.SYSTEM -> "跟随系统"
+    ThemeMode.LIGHT -> "浅色"
+    ThemeMode.DARK -> "深色"
+}
+
+private fun widgetThemeLabel(theme: WidgetTheme): String = when (theme) {
+    WidgetTheme.SYSTEM -> "跟随系统"
+    WidgetTheme.BLACK -> "黑色磨砂"
+    WidgetTheme.WHITE -> "白色磨砂"
+}
+
+private fun rateStatusText(status: RateLimitStatus?): String {
+    if (status == null) return "限流状态：暂无数据"
+    val resetSeconds = (status.windowResetInMs / 1000L).coerceAtLeast(0L)
+    val cooldown = (status.cooldownRemainingMs / 1000L).coerceAtLeast(0L)
+    return buildString {
+        append("限流：${status.used}/${status.limit} 次")
+        append("，剩余 ${status.remaining} 次")
+        if (resetSeconds > 0) append("，${resetSeconds}s 后重置")
+        if (cooldown > 0) append("，冷却 ${cooldown}s")
+    }
 }

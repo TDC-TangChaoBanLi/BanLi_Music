@@ -8,6 +8,11 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
 
 ## 核心架构约束
 
+0. **共享核心与桌面端边界**
+   - 与平台无关的模型、Provider 接口、GD 客户端、限流、解析、去重、排序放在 `shared/`（KMP，platforms `android` + `jvm`）。
+   - `shared/` 当前允许使用 `java.*` API，但不得引入 Android SDK、Media3、Room Android、WorkManager、Glance、RemoteViews；这些实现留在 `androidApp/`。
+   - `desktopApp/` 只通过 `//shared` 复用核心，桌面端播放/下载/本地库实现尚未接入。
+
 1. **UI 不直接访问具体音乐 API**
    - Compose 页面和 ViewModel 只依赖 `MusicRepository`、`LibraryRepository`、`DownloadRepository` 等领域接口。
    - 具体来源实现放在 `data/source/<source>/`，并通过 `MusicProvider` 暴露能力。
@@ -51,7 +56,7 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
 - 不要为了一个小功能引入整套 UI 框架、图片库、数据库或网络库。
 - 图标优先使用 `material-icons-extended` 中已有图标；避免引入图标资源包。
 - 本地音乐扫描使用 `MediaStore`，不要引入文件选择/媒体扫描第三方库。
-- 小组件继续使用 Glance，不要引入远程视图布局框架。
+- 桌面小组件使用平台 `AppWidgetProvider` + `RemoteViews`，状态持久化在 `PlayerWidgetUpdater`，播放中通过 `partiallyUpdateAppWidget` 局部刷新进度/图标/文本；不要引入第三方远程视图框架。
 
 ## UI 约束
 
@@ -114,7 +119,7 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
 - 新增功能或较大范围重构：`0.3.1` → `0.4.0`（MINOR）。
 - 第一位版本号变化必须先获得用户明确指令，不得自动修改。
 
-当前版本为 `0.4.1`，`versionCode` 为 6。
+当前版本为 `0.5.0`，`versionCode` 为 7。
 
 ## 不要提交的文件
 

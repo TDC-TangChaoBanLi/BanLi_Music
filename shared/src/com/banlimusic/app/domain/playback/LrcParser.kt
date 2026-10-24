@@ -1,7 +1,6 @@
 package com.banlimusic.app.domain.playback
 
 import com.banlimusic.app.core.common.LrcLine
-import java.util.Locale
 
 object LrcParser {
     private val timeTag = Regex("\\[(\\d{1,2}):(\\d{1,2})(?:[.:](\\d{1,3}))?]")
@@ -34,11 +33,3 @@ fun String.stripTimestamps(): String = lineSequence()
     .map { it.replace(Regex("\\[(\\d{1,2}):(\\d{1,2})(?:[.:](\\d{1,3}))?]"), "").trim() }
     .filter { it.isNotEmpty() }
     .joinToString("\n")
-
-fun LrcLine.isNear(positionMs: Long, windowMs: Long = 500L): Boolean =
-    timeMs <= positionMs && positionMs - timeMs < windowMs
-
-fun formatLyricTime(timeMs: Long): String {
-    val totalSeconds = timeMs / 1000
-    return String.format(Locale.ROOT, "%02d:%02d", totalSeconds / 60, totalSeconds % 60)
-}

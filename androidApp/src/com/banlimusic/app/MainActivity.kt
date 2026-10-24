@@ -10,12 +10,16 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import com.banlimusic.app.core.datastore.ThemeMode
@@ -43,9 +47,10 @@ class MainActivity : ComponentActivity() {
         val container = (application as MusicApplication).container
 
         setContent {
-            val settings by container.settingsRepository.settings
-                .collectAsStateWithLifecycle(initialValue = AppSettings())
-            val darkTheme = when (settings.themeMode) {
+            val settingsState by container.settingsRepository.settings
+                .collectAsStateWithLifecycle<AppSettings?>(initialValue = null)
+            val settings = settingsState
+            val darkTheme = when (settings?.themeMode ?: ThemeMode.SYSTEM) {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
@@ -56,35 +61,42 @@ class MainActivity : ComponentActivity() {
                     isAppearanceLightNavigationBars = !darkTheme
                 }
             }
-            LaunchedEffect(settings.highRefreshRateLists) {
-                applyListRefreshRate(settings.highRefreshRateLists)
+            LaunchedEffect(settings?.highRefreshRateLists ?: true) {
+                applyListRefreshRate(settings?.highRefreshRateLists ?: true)
             }
             BanLiMusicTheme(
-                themeMode = settings.themeMode,
-                dynamicColor = settings.dynamicColor,
+                themeMode = settings?.themeMode ?: ThemeMode.SYSTEM,
+                dynamicColor = settings?.dynamicColor ?: true,
             ) {
                 val scope = rememberCoroutineScope()
-                if (!settings.agreementAccepted) {
-                    AgreementScreen(
+                when {
+                    settings == null -> Surface(modifier = Modifier.fillMaxSize()) {
+                        Box(modifier = Modifier.fillMaxSize())
+                    }
+
+                    !settings.agreementAccepted -> AgreementScreen(
                         onAccept = {
                             scope.launch {
                                 container.settingsRepository.setAgreementAccepted(true)
                             }
                         },
                     )
-                } else {
-                    LaunchedEffect(settings.autoImportLocalMusic) {
-                        if (settings.autoImportLocalMusic && hasAudioPermission()) {
-                            container.localMusicRepository.importAll()
+
+                    else -> {
+                        LaunchedEffect(settings.autoImportLocalMusic) {
+                            if (settings.autoImportLocalMusic && hasAudioPermission()) {
+                                container.localMusicRepository.importAll()
+                            }
                         }
+                        AppRoot(
+                            container = container,
+                            initialSettings = settings,
+                            onExitApp = { finish() },
+                            widgetRequested = widgetRequested,
+                            widgetOpenPlayer = widgetOpenPlayer,
+                            onWidgetRequestHandled = { widgetRequested = false },
+                        )
                     }
-                    AppRoot(
-                        container = container,
-                        onExitApp = { finish() },
-                        widgetRequested = widgetRequested,
-                        widgetOpenPlayer = widgetOpenPlayer,
-                        onWidgetRequestHandled = { widgetRequested = false },
-                    )
                 }
             }
         }

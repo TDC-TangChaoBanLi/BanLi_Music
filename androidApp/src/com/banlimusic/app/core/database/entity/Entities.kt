@@ -74,3 +74,19 @@ data class LocalTrackEntity(
     val durationMs: Long,
     val addedAt: Long,
 )
+
+/** Index of audio kept in the Media3 playback cache, keyed by a stable app-level cache key. */
+@Entity(
+    tableName = "cached_tracks",
+    indices = [Index("trackId"), Index("lastAccessAt")],
+)
+data class CachedTrackEntity(
+    @PrimaryKey val cacheKey: String,
+    val trackId: String,
+    val trackJson: String,
+    val qualityKbps: Int,
+    val totalBytes: Long = 0L,
+    val fileExtension: String = "mp3",
+    val createdAt: Long,
+    val lastAccessAt: Long,
+)

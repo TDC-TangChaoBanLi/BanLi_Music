@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">BanLiMusic</string>
+    <string name="widget_label_small">BanLiMusic 3×1</string>
+    <string name="widget_label_large">BanLiMusic 4×1</string>
+    <string name="widget_description_small">歌名、歌手、播放控件与进度条</string>
+    <string name="widget_description_large">封面、歌名、收藏、播放控件与进度条</string>
+    <string name="widget_empty_artist">还没有播放歌曲</string>
+    <string name="widget_previous">上一首</string>
+    <string name="widget_play">播放</string>
+    <string name="widget_pause">暂停</string>
+    <string name="widget_next">下一首</string>
+    <string name="widget_favorite">收藏</string>
+    <string name="widget_artwork">专辑封面</string>
 </resources>
