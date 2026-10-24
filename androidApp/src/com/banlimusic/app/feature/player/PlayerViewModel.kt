@@ -81,7 +81,6 @@ class PlayerViewModel(
 
     private fun loadArtwork(track: Track) {
         artworkJob = viewModelScope.launch {
-            if (track.artworkUrl != null) return@launch
             try {
                 val url = music.artwork(track) ?: return@launch
                 _artworkUrl.value = url
@@ -163,6 +162,8 @@ class PlayerViewModel(
     fun toggleShuffle() = playback.toggleShuffle()
 
     fun cycleRepeatMode() = playback.cycleRepeatMode()
+
+    fun cyclePlayMode() = playback.cyclePlayMode()
 
     fun clearError() = playback.clearError()
 }

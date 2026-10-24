@@ -47,12 +47,16 @@ data class AppSettings(
     val defaultFavoriteCategory: String = DEFAULT_FAVORITE_CATEGORY,
     val autoImportLocalMusic: Boolean = false,
     val widgetTheme: WidgetTheme = WidgetTheme.SYSTEM,
+    /** Requests a ~90Hz display mode while browsing track lists. */
+    val highRefreshRateLists: Boolean = true,
+    /** Opens the full player when a track row is tapped; disable to stay on the list. */
+    val openPlayerOnTrackClick: Boolean = true,
 )
 
 val SUPPORTED_SOURCES = listOf(
-    SourceOption("netease", "网易云音乐"),
-    SourceOption("joox", "JOOX"),
-    SourceOption("bilibili", "哔哩哔哩"),
+    SourceOption("netease", "GD网易云"),
+    SourceOption("joox", "GD JOOX"),
+    SourceOption("bilibili", "GD B站"),
 )
 
 data class SourceOption(val id: String, val label: String)
@@ -95,6 +99,8 @@ class SettingsRepository(private val context: Context) {
         val defaultFavoriteCategory = stringPreferencesKey("default_favorite_category")
         val autoImportLocalMusic = booleanPreferencesKey("auto_import_local_music")
         val widgetTheme = stringPreferencesKey("widget_theme")
+        val highRefreshRateLists = booleanPreferencesKey("high_refresh_rate_lists")
+        val openPlayerOnTrackClick = booleanPreferencesKey("open_player_on_track_click")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data
@@ -132,6 +138,8 @@ class SettingsRepository(private val context: Context) {
                 widgetTheme = preferences[Keys.widgetTheme]
                     ?.let { runCatching { WidgetTheme.valueOf(it) }.getOrNull() }
                     ?: WidgetTheme.SYSTEM,
+                highRefreshRateLists = preferences[Keys.highRefreshRateLists] ?: true,
+                openPlayerOnTrackClick = preferences[Keys.openPlayerOnTrackClick] ?: true,
             )
         }
 
@@ -218,6 +226,14 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setWidgetTheme(theme: WidgetTheme) = context.settingsDataStore.edit {
         it[Keys.widgetTheme] = theme.name
+    }
+
+    suspend fun setHighRefreshRateLists(enabled: Boolean) = context.settingsDataStore.edit {
+        it[Keys.highRefreshRateLists] = enabled
+    }
+
+    suspend fun setOpenPlayerOnTrackClick(enabled: Boolean) = context.settingsDataStore.edit {
+        it[Keys.openPlayerOnTrackClick] = enabled
     }
 
     private fun parseNavItems(raw: String?): List<String> =

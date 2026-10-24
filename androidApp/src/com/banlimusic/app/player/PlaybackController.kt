@@ -160,6 +160,10 @@ class PlaybackController(
             val index = items.indexOfFirst { it.mediaId == track.id }.coerceAtLeast(0)
             withController { player ->
                 player.setMediaItems(items, index, 0L)
+                // The UI's "列表循环" mode must actually loop the whole queue.
+                if (!player.shuffleModeEnabled && player.repeatMode == Player.REPEAT_MODE_OFF) {
+                    player.repeatMode = Player.REPEAT_MODE_ALL
+                }
                 player.prepare()
                 player.play()
             }
@@ -195,13 +199,29 @@ class PlaybackController(
     }
 
     fun next() {
-        withController { player -> if (player.hasNextMediaItem()) player.seekToNextMediaItem() }
+        withController { player ->
+            if (player.mediaItemCount == 0) return@withController
+            if (player.hasNextMediaItem()) {
+                player.seekToNextMediaItem()
+            } else {
+                // List loop: wrap from the last track to the first.
+                player.seekTo(0, 0L)
+                player.play()
+            }
+        }
     }
 
     fun previous() {
         withController { player ->
-            if (player.currentPosition > 3_000L) player.seekTo(0L)
-            else if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem()
+            when {
+                player.currentPosition > 3_000L -> player.seekTo(0L)
+                player.hasPreviousMediaItem() -> player.seekToPreviousMediaItem()
+                player.mediaItemCount > 0 -> {
+                    // List loop: wrap from the first track to the last.
+                    player.seekTo(player.mediaItemCount - 1, 0L)
+                    player.play()
+                }
+            }
         }
     }
 
@@ -226,6 +246,28 @@ class PlaybackController(
                 Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
                 Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
                 else -> Player.REPEAT_MODE_OFF
+            }
+        }
+    }
+
+    /**
+     * Single-button play mode: shuffle → list repeat → single repeat → shuffle.
+     * Keeping both flags in one cycle avoids the confusing two-button layout.
+     */
+    fun cyclePlayMode() {
+        withController { player ->
+            when {
+                player.shuffleModeEnabled -> {
+                    player.shuffleModeEnabled = false
+                    player.repeatMode = Player.REPEAT_MODE_ALL
+                }
+
+                player.repeatMode == Player.REPEAT_MODE_ONE -> {
+                    player.repeatMode = Player.REPEAT_MODE_OFF
+                    player.shuffleModeEnabled = true
+                }
+
+                else -> player.repeatMode = Player.REPEAT_MODE_ONE
             }
         }
     }

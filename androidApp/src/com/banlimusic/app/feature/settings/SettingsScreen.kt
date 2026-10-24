@@ -2,6 +2,8 @@ package com.banlimusic.app.feature.settings
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -35,6 +38,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,8 +64,10 @@ import com.banlimusic.app.feature.common.AppViewModelProvider
 import com.banlimusic.app.ui.components.formatBytes
 import com.banlimusic.app.ui.components.qualityLabel
 import com.banlimusic.app.widget.PlayerWidgetUpdater
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class SettingsPage(val title: String, val description: String) {
     APPEARANCE("外观", "主题、动态取色与底部导航栏"),
@@ -76,13 +82,24 @@ private enum class SettingsPage(val title: String, val description: String) {
 
 @Composable
 fun SettingsScreen(
+    onExitApp: () -> Unit = {},
     viewModel: SettingsViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val settings by viewModel.appSettings.collectAsStateWithLifecycle()
     val rateStatus by viewModel.rateStatus.collectAsStateWithLifecycle()
     val cacheSize by viewModel.cacheSize.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
 
+    val context = LocalContext.current
+    LaunchedEffect(message) {
+        message?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.consumeMessage()
+        }
+    }
+
+    BackHandler(enabled = page == null) { onExitApp() }
     BackHandler(enabled = page != null) { page = null }
 
     if (page == null) {
@@ -273,6 +290,13 @@ private fun AppearanceSettings(
             checked = settings.dynamicColor,
             onCheckedChange = viewModel::setDynamicColor,
         )
+        SettingsSwitchRow(
+            title = "歌曲列表 90Hz 高刷新率",
+            description = "浏览收藏、搜索、下载等列表时请求 90Hz 显示模式；" +
+                "关闭后使用系统默认刷新率，可降低耗电",
+            checked = settings.highRefreshRateLists,
+            onCheckedChange = viewModel::setHighRefreshRateLists,
+        )
 
         Spacer(Modifier.height(18.dp))
         Text(
@@ -359,6 +383,12 @@ private fun PlaybackSettings(
             description = "开启后左滑页面初始停在歌词页",
             checked = settings.defaultShowLyrics,
             onCheckedChange = viewModel::setDefaultShowLyrics,
+        )
+        SettingsSwitchRow(
+            title = "点按歌曲进入播放页",
+            description = "关闭后点按列表中的歌曲只开始播放，停留在当前列表",
+            checked = settings.openPlayerOnTrackClick,
+            onCheckedChange = viewModel::setOpenPlayerOnTrackClick,
         )
         SettingsSlider(
             title = "失败重试次数",
@@ -586,6 +616,48 @@ private fun LibrarySettings(
     settings: AppSettings,
     viewModel: SettingsViewModel,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pendingImport by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val raw = runCatching { viewModel.exportFavoritesJson() }.getOrNull()
+                val ok = raw != null && withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use {
+                            it.write(raw.toByteArray())
+                        } != null
+                    }.getOrDefault(false)
+                }
+                Toast.makeText(context, if (ok) "收藏已导出" else "导出失败", Toast.LENGTH_SHORT)
+                    .show()
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val raw = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openInputStream(uri)?.bufferedReader()?.use {
+                            it.readText()
+                        }
+                    }.getOrNull()
+                }
+                if (raw.isNullOrBlank()) {
+                    Toast.makeText(context, "无法读取收藏文件", Toast.LENGTH_SHORT).show()
+                } else {
+                    pendingImport = raw
+                }
+            }
+        }
+    }
+
     SettingsCard(title = "音乐库与收藏") {
         var defaultCategory by remember(settings.defaultFavoriteCategory) {
             mutableStateOf(settings.defaultFavoriteCategory)
@@ -607,9 +679,53 @@ private fun LibrarySettings(
             onCheckedChange = viewModel::setAutoImportLocalMusic,
         )
         Text(
-            text = "收藏夹支持在音乐库页新建；收藏 JSON 可在音乐库页导入导出。",
+            text = "收藏备份",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { exportLauncher.launch("banlimusic-favorites.json") }) {
+                Text("导出收藏")
+            }
+            TextButton(
+                onClick = {
+                    importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                },
+            ) { Text("导入收藏") }
+        }
+        Text(
+            text = "收藏夹可在音乐库页新建；导出文件包含收藏夹、添加时间与曲目元数据。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    pendingImport?.let { raw ->
+        AlertDialog(
+            onDismissRequest = { pendingImport = null },
+            title = { Text("导入收藏") },
+            text = {
+                Column {
+                    Text("选择“覆盖导入”会清空当前收藏；选择“仅追加”会保留现有收藏。")
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            viewModel.importFavoritesJson(raw, replace = true)
+                            pendingImport = null
+                        },
+                    ) { Text("覆盖导入") }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.importFavoritesJson(raw, replace = false)
+                        pendingImport = null
+                    },
+                ) { Text("仅追加") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingImport = null }) { Text("取消") }
+            },
         )
     }
 }

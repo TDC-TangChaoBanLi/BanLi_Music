@@ -3,6 +3,7 @@ package com.banlimusic.app.domain.download
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -61,11 +62,7 @@ class DownloadWorker(
             var lastDbUpdate = 0L
             var lastNotificationUpdate = 0L
             var latestTotal = 0L
-            downloadToFile(
-                client = container.downloadHttpClient,
-                url = stream.url,
-                file = tempFile,
-            ) { bytes, total ->
+            val onProgress: suspend (Long, Long) -> Unit = { bytes, total ->
                 latestTotal = total
                 val now = System.currentTimeMillis()
                 if (now - lastDbUpdate >= 750L) {
@@ -76,9 +73,33 @@ class DownloadWorker(
                     lastNotificationUpdate = now
                     val percent = if (total > 0) ((bytes * 100) / total).toInt() else null
                     runCatching {
-                        setForeground(foregroundInfo(track.title, percent ?: 0, indeterminate = percent == null))
+                        setForeground(
+                            foregroundInfo(
+                                track.title,
+                                percent ?: 0,
+                                indeterminate = percent == null,
+                            ),
+                        )
                     }
                 }
+            }
+
+            // Playback already cached part or all of the stream. Converting the
+            // cache avoids downloading the same bytes again.
+            val cachedBytes = runCatching {
+                container.playbackCache.cachedBytes(stream.url)
+            }.getOrDefault(0L)
+            if (cachedBytes > 0L) {
+                val expectedTotal = stream.sizeBytes?.takeIf { it > 0L }?.times(1024L) ?: 0L
+                latestTotal = expectedTotal
+                copyCachedToFile(container, stream.url, tempFile, expectedTotal, onProgress)
+            } else {
+                downloadToFile(
+                    client = container.downloadHttpClient,
+                    url = stream.url,
+                    file = tempFile,
+                    onProgress = onProgress,
+                )
             }
 
             repository.updateStatus(taskId, DownloadStatus.VERIFYING)
@@ -219,15 +240,23 @@ class DownloadWorker(
             try {
                 val artworkUrl = container.musicRepository.artwork(track)
                 if (!artworkUrl.isNullOrBlank()) {
-                    val request = Request.Builder()
-                        .url(artworkUrl)
-                        .header("User-Agent", JsonHttpClient.USER_AGENT)
-                        .build()
-                    container.downloadHttpClient.newCall(request).execute().use { response ->
-                        if (response.isSuccessful) {
-                            response.body.byteStream().use { input ->
-                                File(directory, "$baseName.jpg").outputStream().use { output ->
-                                    input.copyTo(output)
+                    val target = File(directory, "$baseName.jpg")
+                    if (artworkUrl.startsWith("file://")) {
+                        val cached = Uri.parse(artworkUrl).path?.let(::File)
+                        if (cached != null && cached.exists()) {
+                            cached.copyTo(target, overwrite = true)
+                        }
+                    } else {
+                        val request = Request.Builder()
+                            .url(artworkUrl)
+                            .header("User-Agent", JsonHttpClient.USER_AGENT)
+                            .build()
+                        container.downloadHttpClient.newCall(request).execute().use { response ->
+                            if (response.isSuccessful) {
+                                response.body.byteStream().use { input ->
+                                    target.outputStream().use { output ->
+                                        input.copyTo(output)
+                                    }
                                 }
                             }
                         }
@@ -239,6 +268,40 @@ class DownloadWorker(
                 // Sidecar files are optional.
             }
         }
+    }
+
+    /**
+     * Copies the stream through the playback cache. Fully cached tracks never hit
+     * the network; partially cached ones only fetch the missing ranges.
+     */
+    private suspend fun copyCachedToFile(
+        container: AppContainer,
+        url: String,
+        file: File,
+        expectedTotal: Long,
+        onProgress: suspend (downloaded: Long, total: Long) -> Unit,
+    ): Long = withContext(Dispatchers.IO) {
+        val playbackCache = container.playbackCache
+        val dataSource = playbackCache.readSource()
+        var written = 0L
+        try {
+            dataSource.open(playbackCache.dataSpec(url))
+            FileOutputStream(file, false).use { output ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    if (isStopped) throw CancellationException("download stopped")
+                    val read = dataSource.read(buffer, 0, buffer.size)
+                    if (read == -1) break
+                    output.write(buffer, 0, read)
+                    written += read
+                    onProgress(written, expectedTotal.takeIf { it > 0L } ?: written)
+                }
+                output.flush()
+            }
+        } finally {
+            runCatching { dataSource.close() }
+        }
+        written
     }
 
     private suspend fun downloadToFile(

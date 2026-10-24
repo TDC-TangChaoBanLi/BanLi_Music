@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Upsert
 import com.banlimusic.app.core.database.entity.FavoriteCategoryEntity
+import com.banlimusic.app.core.database.entity.FavoriteFolderRow
 import com.banlimusic.app.core.database.entity.FavoriteTrackEntity
 import com.banlimusic.app.core.database.entity.PlayHistoryEntity
 import com.banlimusic.app.core.database.entity.SearchHistoryEntity
@@ -46,6 +47,9 @@ interface LibraryDao {
 
     @Query("SELECT trackId FROM favorites")
     fun observeFavoriteIds(): Flow<List<String>>
+
+    @Query("SELECT trackId, category FROM favorites")
+    fun observeFavoriteFolders(): Flow<List<FavoriteFolderRow>>
 
     @Query("SELECT EXISTS(SELECT 1 FROM favorites WHERE trackId = :trackId)")
     suspend fun isFavorite(trackId: String): Boolean

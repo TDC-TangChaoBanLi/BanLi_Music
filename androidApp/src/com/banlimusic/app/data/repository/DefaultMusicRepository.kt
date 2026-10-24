@@ -2,6 +2,7 @@ package com.banlimusic.app.data.repository
 
 import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.common.TtlCache
+import com.banlimusic.app.core.cache.MediaMetadataCache
 import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.limiter.RateLimitStatus
 import com.banlimusic.app.core.model.DownloadInfo
@@ -24,6 +25,7 @@ class DefaultMusicRepository(
     private val settings: SettingsRepository,
     private val merger: TrackMerger,
     private val streamResolver: StreamResolver,
+    private val metadataCache: MediaMetadataCache,
 ) : MusicRepository {
 
     private val providersById = providers.associateBy { it.providerId }
@@ -92,6 +94,10 @@ class DefaultMusicRepository(
 
     override suspend fun lyrics(track: Track): Lyrics? {
         lyricsCache.get(track.id)?.let { return it }
+        metadataCache.lyrics(track.id)?.let { cached ->
+            lyricsCache.put(track.id, cached)
+            return cached
+        }
         for (source in track.sources) {
             val provider = providersById[source.providerId] ?: continue
             if (!provider.capabilities.lyrics) continue
@@ -99,6 +105,7 @@ class DefaultMusicRepository(
                 val lyrics = provider.getLyrics(source.providerTrackId, source.lyricKey)
                 if (lyrics != null && !lyrics.isEmpty) {
                     lyricsCache.put(track.id, lyrics)
+                    metadataCache.putLyrics(track.id, lyrics)
                     return lyrics
                 }
             } catch (cancelled: CancellationException) {
@@ -113,8 +120,20 @@ class DefaultMusicRepository(
     }
 
     override suspend fun artwork(track: Track): String? {
-        track.artworkUrl?.let { return it }
+        // Check the disk first: it validates that a previously returned file URI
+        // still exists after the user trims or clears the cache.
+        metadataCache.artwork(track.id)?.let { cached ->
+            artworkCache.put(track.id, cached)
+            return cached
+        }
         artworkCache.get(track.id)?.let { return it }
+        track.artworkUrl?.let { url ->
+            metadataCache.putArtwork(track.id, url)?.let { local ->
+                artworkCache.put(track.id, local)
+                return local
+            }
+            return url
+        }
 
         for (source in track.sources) {
             val provider = providersById[source.providerId] ?: continue
@@ -122,8 +141,9 @@ class DefaultMusicRepository(
             if (!provider.capabilities.artwork) continue
             try {
                 val url = provider.getArtworkUrl(key) ?: continue
-                artworkCache.put(track.id, url)
-                return url
+                val resolved = metadataCache.putArtwork(track.id, url) ?: url
+                artworkCache.put(track.id, resolved)
+                return resolved
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (rateLimited: MusicException.RateLimited) {

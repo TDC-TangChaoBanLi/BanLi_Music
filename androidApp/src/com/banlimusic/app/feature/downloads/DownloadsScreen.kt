@@ -1,6 +1,7 @@
 package com.banlimusic.app.feature.downloads
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.Delete
@@ -33,10 +36,12 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,14 +58,18 @@ import com.banlimusic.app.ui.components.TrackArtwork
 import com.banlimusic.app.ui.components.TrackRow
 import com.banlimusic.app.ui.components.formatBytes
 import com.banlimusic.app.ui.components.qualityLabel
+import kotlinx.coroutines.launch
 
 @Composable
 fun DownloadsScreen(
     onOpenPlayer: () -> Unit,
+    onExitApp: () -> Unit = {},
     viewModel: DownloadsViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
+    BackHandler { onExitApp() }
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    val pagerState = rememberPagerState(pageCount = { 2 })
+    val scope = rememberCoroutineScope()
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -68,6 +77,11 @@ fun DownloadsScreen(
     val completed = tasks.filter { it.status == DownloadStatus.COMPLETED }
     val active = tasks.filter { it.status != DownloadStatus.COMPLETED }
     val completedBytes = completed.sumOf { it.totalBytes }
+
+    LaunchedEffect(pagerState.currentPage) {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -84,70 +98,71 @@ fun DownloadsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (selectedTab == 0 && completed.isNotEmpty() && !selectionMode) {
+            if (pagerState.currentPage == 0 && completed.isNotEmpty() && !selectionMode) {
                 TextButton(onClick = { selectionMode = true }) { Text("选择") }
             }
         }
 
-        PrimaryTabRow(selectedTabIndex = selectedTab) {
+        PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
             Tab(
-                selected = selectedTab == 0,
-                onClick = {
-                    selectedTab = 0
-                    selectionMode = false
-                    selectedIds = emptySet()
-                },
+                selected = pagerState.currentPage == 0,
+                onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
                 text = { Text("已下载") },
             )
             Tab(
-                selected = selectedTab == 1,
-                onClick = {
-                    selectedTab = 1
-                    selectionMode = false
-                    selectedIds = emptySet()
-                },
+                selected = pagerState.currentPage == 1,
+                onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                 text = { Text("下载列表") },
             )
         }
 
-        if (selectedTab == 0) {
-            DownloadedList(
-                tasks = completed,
-                selectionMode = selectionMode,
-                selectedIds = selectedIds,
-                onPlay = { task ->
-                    viewModel.play(task)
-                    onOpenPlayer()
-                },
-                onToggleSelection = { id ->
-                    selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
-                },
-                onEnterSelection = { id ->
-                    selectionMode = true
-                    selectedIds = selectedIds + id
-                },
-                modifier = Modifier.weight(1f),
-            )
-            if (selectionMode) {
-                DeleteSelectionBar(
-                    count = selectedIds.size,
-                    onSelectAll = { selectedIds = completed.map { it.id }.toSet() },
-                    onDelete = { if (selectedIds.isNotEmpty()) showDeleteConfirm = true },
-                    onCancel = {
-                        selectionMode = false
-                        selectedIds = emptySet()
-                    },
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) { page ->
+            if (page == 0) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    DownloadedList(
+                        tasks = completed,
+                        selectionMode = selectionMode,
+                        selectedIds = selectedIds,
+                        onPlay = { index ->
+                            viewModel.play(completed, index)
+                            onOpenPlayer()
+                        },
+                        onToggleSelection = { id ->
+                            selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+                        },
+                        onEnterSelection = { id ->
+                            selectionMode = true
+                            selectedIds = selectedIds + id
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (selectionMode) {
+                        DeleteSelectionBar(
+                            count = selectedIds.size,
+                            onSelectAll = { selectedIds = completed.map { it.id }.toSet() },
+                            onDelete = { if (selectedIds.isNotEmpty()) showDeleteConfirm = true },
+                            onCancel = {
+                                selectionMode = false
+                                selectedIds = emptySet()
+                            },
+                        )
+                    }
+                }
+            } else {
+                DownloadQueueList(
+                    tasks = active,
+                    onPause = viewModel::pause,
+                    onResume = viewModel::resume,
+                    onCancel = viewModel::cancel,
+                    onDelete = viewModel::remove,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
-        } else {
-            DownloadQueueList(
-                tasks = active,
-                onPause = viewModel::pause,
-                onResume = viewModel::resume,
-                onCancel = viewModel::cancel,
-                onDelete = viewModel::remove,
-                modifier = Modifier.weight(1f),
-            )
         }
     }
 
@@ -180,7 +195,7 @@ private fun DownloadedList(
     tasks: List<DownloadTask>,
     selectionMode: Boolean,
     selectedIds: Set<String>,
-    onPlay: (DownloadTask) -> Unit,
+    onPlay: (Int) -> Unit,
     onToggleSelection: (String) -> Unit,
     onEnterSelection: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -200,11 +215,11 @@ private fun DownloadedList(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        itemsIndexed(tasks, key = { _, task -> task.id }) { _, task ->
+        itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
             TrackRow(
                 track = task.track,
                 onClick = {
-                    if (selectionMode) onToggleSelection(task.id) else onPlay(task)
+                    if (selectionMode) onToggleSelection(task.id) else onPlay(index)
                 },
                 isFavorite = false,
                 selected = if (selectionMode) task.id in selectedIds else null,

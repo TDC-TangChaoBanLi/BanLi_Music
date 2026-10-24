@@ -8,6 +8,7 @@ import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.MusicRepository
+import com.banlimusic.app.domain.download.DownloadStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +30,7 @@ data class SearchUiState(
     val hasMore: Boolean = false,
     val error: String? = null,
     val favoriteIds: Set<String> = emptySet(),
+    val favoriteFolders: Map<String, String> = emptyMap(),
     val selectionMode: Boolean = false,
     val selectedIds: Set<String> = emptySet(),
 )
@@ -60,12 +62,27 @@ class SearchViewModel(
     val favoriteCategories: StateFlow<List<String>> = library.observeFavoriteCategories()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Application track ids whose audio is already downloaded. */
+    val downloadedIds: StateFlow<Set<String>> = downloads.observeTasks()
+        .map { tasks ->
+            tasks
+                .filter { it.status == DownloadStatus.COMPLETED && !it.filePath.isNullOrBlank() }
+                .map { it.track.id }
+                .toSet()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
     private var searchJob: Job? = null
 
     init {
         viewModelScope.launch {
             library.observeFavoriteIds().collect { ids ->
                 _uiState.update { it.copy(favoriteIds = ids) }
+            }
+        }
+        viewModelScope.launch {
+            library.observeFavoriteFolders().collect { folders ->
+                _uiState.update { it.copy(favoriteFolders = folders) }
             }
         }
     }

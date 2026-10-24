@@ -1,6 +1,7 @@
 package com.banlimusic.app.widget
 
 import android.content.Context
+import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
 import androidx.compose.runtime.Composable
@@ -17,7 +18,8 @@ import androidx.glance.action.Action
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.LinearProgressIndicator
-import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.action.actionStartActivity
+import androidx.glance.appwidget.action.actionStartService
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.updateAll
@@ -38,10 +40,12 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import com.banlimusic.app.MainActivity
 import com.banlimusic.app.MusicApplication
 import com.banlimusic.app.R
 import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.core.network.JsonHttpClient
+import com.banlimusic.app.player.MusicPlaybackService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -96,12 +100,22 @@ private suspend fun GlanceAppWidget.provideWidget(context: Context, isLarge: Boo
         dark = dark,
     )
     provideContent {
-        WidgetContent(state = state, isLarge = isLarge)
+        WidgetContent(state = state, isLarge = isLarge, context = context)
     }
 }
 
+private fun serviceIntent(context: Context, action: String): Intent =
+    Intent(context, MusicPlaybackService::class.java).setAction(action)
+
+private fun openAppIntent(context: Context, hasMedia: Boolean): Intent =
+    Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        putExtra(MainActivity.EXTRA_FROM_WIDGET, true)
+        putExtra(MainActivity.EXTRA_WIDGET_OPEN_PLAYER, hasMedia)
+    }
+
 @Composable
-private fun WidgetContent(state: WidgetState, isLarge: Boolean) {
+private fun WidgetContent(state: WidgetState, isLarge: Boolean, context: Context) {
     val background = ColorProvider(Color(if (state.dark) 0xCC111111 else 0xCCF7F7F7))
     val foreground = ColorProvider(Color(if (state.dark) 0xFFF5F5F5 else 0xFF111111))
     val muted = ColorProvider(Color(if (state.dark) 0xFFBFBFBF else 0xFF666666))
@@ -113,6 +127,7 @@ private fun WidgetContent(state: WidgetState, isLarge: Boolean) {
         0f
     }
 
+    val openAppAction = actionStartActivity(openAppIntent(context, state.hasMedia))
     Row(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -129,7 +144,8 @@ private fun WidgetContent(state: WidgetState, isLarge: Boolean) {
                     contentScale = ContentScale.Crop,
                     modifier = GlanceModifier
                         .size(30.dp)
-                        .cornerRadius(7.dp),
+                        .cornerRadius(7.dp)
+                        .clickable(openAppAction),
                 )
             } else {
                 Box(
@@ -149,7 +165,11 @@ private fun WidgetContent(state: WidgetState, isLarge: Boolean) {
             Spacer(GlanceModifier.width(8.dp))
         }
 
-        Column(modifier = GlanceModifier.defaultWeight()) {
+        Column(
+            modifier = GlanceModifier
+                .defaultWeight()
+                .clickable(openAppAction),
+        ) {
             Text(
                 text = state.title,
                 maxLines = 1,
@@ -182,18 +202,24 @@ private fun WidgetContent(state: WidgetState, isLarge: Boolean) {
             WidgetButton(
                 iconRes = R.drawable.ic_skip_previous,
                 description = "上一首",
-                action = actionRunCallback<PreviousTrackAction>(),
+                action = actionStartService(
+                    serviceIntent(context, MusicPlaybackService.ACTION_PREVIOUS),
+                ),
             )
             WidgetButton(
                 iconRes = if (state.isPlaying) R.drawable.ic_pause else R.drawable.ic_play,
                 description = if (state.isPlaying) "暂停" else "播放",
-                action = actionRunCallback<TogglePlaybackAction>(),
+                action = actionStartService(
+                    serviceIntent(context, MusicPlaybackService.ACTION_TOGGLE_PLAY),
+                ),
                 size = 30.dp,
             )
             WidgetButton(
                 iconRes = R.drawable.ic_skip_next,
                 description = "下一首",
-                action = actionRunCallback<NextTrackAction>(),
+                action = actionStartService(
+                    serviceIntent(context, MusicPlaybackService.ACTION_NEXT),
+                ),
             )
         }
     }
@@ -263,6 +289,14 @@ object WidgetArtworkStore {
         val file = File(context.cacheDir, FILE_NAME)
         if (file.exists() && System.currentTimeMillis() - file.lastModified() < MAX_AGE_MS) {
             return@withContext fileUri(context, file)
+        }
+        if (artworkUrl.startsWith("file://") || artworkUrl.startsWith("content://")) {
+            val cached = Uri.parse(artworkUrl).path?.let(::File)
+            if (cached != null && cached.exists()) {
+                runCatching { cached.copyTo(file, overwrite = true) }
+                return@withContext fileUri(context, file)
+            }
+            return@withContext null
         }
         val app = context.applicationContext as? MusicApplication ?: return@withContext null
         val request = Request.Builder()

@@ -1,6 +1,9 @@
 package com.banlimusic.app.feature.player
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,6 +68,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -88,8 +95,14 @@ import com.banlimusic.app.player.PlaybackUiState
 import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackArtwork
 import com.banlimusic.app.ui.components.formatPlaybackTime
-import com.banlimusic.app.ui.components.providerLabel
 import com.banlimusic.app.ui.components.qualityLabel
+import com.banlimusic.app.ui.components.sourceDisplayNameAnnotated
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,6 +129,8 @@ fun PlayerScreen(
     }
     var downloadQualities by remember { mutableStateOf<List<Int>>(emptyList()) }
     val track = state.currentTrack
+
+    BackHandler { onBack() }
 
     LaunchedEffect(track?.id) {
         downloadQualities = if (track == null) emptyList() else viewModel.downloadQualities()
@@ -216,13 +231,13 @@ fun PlayerScreen(
                                 onTogglePlayPause = viewModel::togglePlayPause,
                                 onPrevious = viewModel::previous,
                                 onNext = viewModel::next,
-                                onToggleShuffle = viewModel::toggleShuffle,
-                                onCycleRepeat = viewModel::cycleRepeatMode,
+                                onCyclePlayMode = viewModel::cyclePlayMode,
                             )
                         } else {
                             LyricsPage(
                                 lyricsState = lyricsState,
                                 playbackState = state,
+                                onSeek = viewModel::seekTo,
                                 onReload = viewModel::reloadLyrics,
                                 modifier = Modifier.fillMaxSize(),
                             )
@@ -287,8 +302,7 @@ private fun PosterPage(
     onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onToggleShuffle: () -> Unit,
-    onCycleRepeat: () -> Unit,
+    onCyclePlayMode: () -> Unit,
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isWide = LocalConfiguration.current.smallestScreenWidthDp >= 600
@@ -326,8 +340,7 @@ private fun PosterPage(
                     onTogglePlayPause = onTogglePlayPause,
                     onPrevious = onPrevious,
                     onNext = onNext,
-                    onToggleShuffle = onToggleShuffle,
-                    onCycleRepeat = onCycleRepeat,
+                    onCyclePlayMode = onCyclePlayMode,
                     modifier = Modifier
                         .weight(1.1f)
                         .verticalScroll(rememberScrollState()),
@@ -368,8 +381,7 @@ private fun PosterPage(
                     onTogglePlayPause = onTogglePlayPause,
                     onPrevious = onPrevious,
                     onNext = onNext,
-                    onToggleShuffle = onToggleShuffle,
-                    onCycleRepeat = onCycleRepeat,
+                    onCyclePlayMode = onCyclePlayMode,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
@@ -401,8 +413,7 @@ private fun PlayerDetails(
     onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onToggleShuffle: () -> Unit,
-    onCycleRepeat: () -> Unit,
+    onCyclePlayMode: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var favoriteMenu by remember { mutableStateOf(false) }
@@ -434,7 +445,7 @@ private fun PlayerDetails(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 ) {
                     Text(
-                        text = providerLabel(source.providerId),
+                        text = sourceDisplayNameAnnotated(source.providerId),
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -463,8 +474,7 @@ private fun PlayerDetails(
             onTogglePlayPause = onTogglePlayPause,
             onPrevious = onPrevious,
             onNext = onNext,
-            onToggleShuffle = onToggleShuffle,
-            onCycleRepeat = onCycleRepeat,
+            onCyclePlayMode = onCyclePlayMode,
         )
         Spacer(Modifier.height(14.dp))
         Row(
@@ -658,22 +668,34 @@ private fun ControlsSection(
     onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onToggleShuffle: () -> Unit,
-    onCycleRepeat: () -> Unit,
+    onCyclePlayMode: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onToggleShuffle) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // 随机播放 → 列表循环 → 单曲循环，固定在左侧以避免影响居中的传输控制键
+        val singleRepeat = state.repeatMode == Player.REPEAT_MODE_ONE
+        IconButton(
+            onClick = onCyclePlayMode,
+            modifier = Modifier.align(Alignment.CenterStart),
+        ) {
             Icon(
-                Icons.Rounded.Shuffle,
-                contentDescription = "随机播放",
-                tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
+                imageVector = when {
+                    singleRepeat -> Icons.Rounded.RepeatOne
+                    state.shuffleEnabled -> Icons.Rounded.Shuffle
+                    else -> Icons.Rounded.Repeat
+                },
+                contentDescription = when {
+                    singleRepeat -> "单曲循环"
+                    state.shuffleEnabled -> "随机播放"
+                    else -> "列表循环"
+                },
+                tint = MaterialTheme.colorScheme.primary,
             )
         }
+        Row(
+            modifier = Modifier.align(Alignment.Center),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
         IconButton(onClick = onPrevious, modifier = Modifier.size(52.dp)) {
             Icon(
                 Icons.Rounded.SkipPrevious,
@@ -714,20 +736,6 @@ private fun ControlsSection(
                 modifier = Modifier.size(34.dp),
             )
         }
-        IconButton(onClick = onCycleRepeat) {
-            Icon(
-                imageVector = if (state.repeatMode == Player.REPEAT_MODE_ONE) {
-                    Icons.Rounded.RepeatOne
-                } else {
-                    Icons.Rounded.Repeat
-                },
-                contentDescription = "循环模式",
-                tint = if (state.repeatMode == Player.REPEAT_MODE_OFF) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-            )
         }
     }
 }
@@ -736,115 +744,269 @@ private fun ControlsSection(
 private fun LyricsPage(
     lyricsState: LyricsUiState,
     playbackState: PlaybackUiState,
+    onSeek: (Long) -> Unit,
     onReload: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 28.dp),
-    ) {
-        val lyrics: Lyrics? = lyricsState.lyrics
-        var showTranslation by rememberSaveable { mutableStateOf(true) }
-        val lines = remember(lyrics?.raw) { lyrics?.raw?.let(LrcParser::parse).orEmpty() }
-        val translatedLines = remember(lyrics?.translated) {
-            lyrics?.translated?.let(LrcParser::parse).orEmpty().associateBy { it.timeMs }
-        }
-        val hasTranslation = !lyrics?.translated.isNullOrBlank()
-        val listState = rememberLazyListState()
+    val lyrics: Lyrics? = lyricsState.lyrics
+    var showTranslation by rememberSaveable { mutableStateOf(true) }
+    val lines = remember(lyrics?.raw) { lyrics?.raw?.let(LrcParser::parse).orEmpty() }
+    val translatedLines = remember(lyrics?.translated) {
+        lyrics?.translated?.let(LrcParser::parse).orEmpty().associateBy { it.timeMs }
+    }
+    val hasTranslation = !lyrics?.translated.isNullOrBlank()
+    val listState = rememberLazyListState()
+    val duration = playbackState.durationMs.coerceAtLeast(0L)
+    var scrubIndex by remember { mutableStateOf<Int?>(null) }
+    var scrubMs by remember { mutableStateOf<Long?>(null) }
+    var boxTopInWindow by remember { mutableFloatStateOf(0f) }
+    var listTopInWindow by remember { mutableFloatStateOf(0f) }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "歌词",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.weight(1f),
-            )
-            if (hasTranslation && !lyricsState.loading) {
-                TextButton(onClick = { showTranslation = !showTranslation }) {
-                    Text(if (showTranslation) "隐藏翻译" else "显示翻译")
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-
-        when {
-            lyricsState.loading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(220.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(30.dp), strokeWidth = 3.dp)
-                }
-            }
-
-            lyricsState.error != null -> {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = lyricsState.error.orEmpty(),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    TextButton(onClick = onReload) { Text("重试") }
-                }
-            }
-
-            lyrics == null -> {
-                EmptyState(
-                    title = "暂无歌词",
-                    description = "当前音乐源没有返回这首歌的歌词。",
-                    icon = Icons.Rounded.Lyrics,
-                )
-            }
-
-            lines.isEmpty() -> {
-                Text(
-                    text = lyrics.raw.stripTimestamps(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState()),
-                )
-            }
-
-            else -> {
-                val currentIndex = lines
-                    .indexOfLast { it.timeMs <= playbackState.positionMs }
-                    .coerceAtLeast(0)
-                LaunchedEffect(currentIndex, showTranslation) {
-                    if (currentIndex in lines.indices) {
-                        runCatching { listState.animateScrollToItem(currentIndex) }
+    Box(
+        modifier = modifier
+            .onGloballyPositioned { boxTopInWindow = it.positionInWindow().y }
+            .pointerInput(lines) {
+                fun updateTarget(windowY: Float) {
+                    val listY = windowY - listTopInWindow
+                    val visible = listState.layoutInfo.visibleItemsInfo
+                    if (visible.isEmpty()) return
+                    val item = visible.firstOrNull {
+                        listY.toInt() in it.offset until (it.offset + it.size)
+                    } ?: visible.minByOrNull {
+                        abs(it.offset + it.size / 2 - listY)
+                    } ?: return
+                    val index = item.index
+                    if (index in lines.indices) {
+                        scrubIndex = index
+                        scrubMs = lines[index].timeMs
                     }
                 }
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                ) {
-                    itemsIndexed(lines) { index, line ->
-                        val translated = translatedLines[line.timeMs]?.text
-                        val text = if (showTranslation && !translated.isNullOrBlank()) {
-                            translated
-                        } else {
-                            line.text
+                coroutineScope {
+                    val edgeThreshold = 72.dp.toPx()
+                    val scrollStep = 12.dp.toPx()
+                    var pointerWindowY = 0f
+                    var autoScroll: Job? = null
+
+                    fun stopAutoScroll() {
+                        autoScroll?.cancel()
+                        autoScroll = null
+                    }
+
+                    fun startAutoScroll() {
+                        if (autoScroll != null) return
+                        autoScroll = launch {
+                            while (isActive) {
+                                val info = listState.layoutInfo
+                                val viewportTop = listTopInWindow + info.viewportStartOffset
+                                val viewportBottom = listTopInWindow + info.viewportEndOffset
+                                val delta = when {
+                                    pointerWindowY < viewportTop + edgeThreshold -> -scrollStep
+                                    pointerWindowY > viewportBottom - edgeThreshold -> scrollStep
+                                    else -> 0f
+                                }
+                                if (delta == 0f) {
+                                    stopAutoScroll()
+                                    break
+                                }
+                                listState.scrollBy(delta)
+                                updateTarget(pointerWindowY)
+                                delay(16)
+                            }
                         }
+                    }
+
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { offset ->
+                            pointerWindowY = boxTopInWindow + offset.y
+                            updateTarget(pointerWindowY)
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            pointerWindowY = boxTopInWindow + change.position.y
+                            updateTarget(pointerWindowY)
+                            val info = listState.layoutInfo
+                            val viewportTop = listTopInWindow + info.viewportStartOffset
+                            val viewportBottom = listTopInWindow + info.viewportEndOffset
+                            val nearEdge = pointerWindowY < viewportTop + edgeThreshold ||
+                                pointerWindowY > viewportBottom - edgeThreshold
+                            if (nearEdge) startAutoScroll() else stopAutoScroll()
+                        },
+                        onDragEnd = {
+                            stopAutoScroll()
+                            scrubMs?.let(onSeek)
+                            scrubIndex = null
+                            scrubMs = null
+                        },
+                        onDragCancel = {
+                            stopAutoScroll()
+                            scrubIndex = null
+                            scrubMs = null
+                        },
+                    )
+                }
+            },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 28.dp),
+        ) {
+            val track = playbackState.currentTrack
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = track?.title ?: playbackState.title ?: "未知歌曲",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val subtitle = listOfNotNull(
+                        track?.album?.title?.takeIf { it.isNotBlank() },
+                        track?.artistLine ?: playbackState.artist,
+                    ).joinToString("·")
+                    if (subtitle.isNotBlank()) {
                         Text(
-                            text = text,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 7.dp),
-                            textAlign = TextAlign.Center,
-                            fontSize = if (index == currentIndex) 17.sp else 15.sp,
-                            fontWeight = if (index == currentIndex) FontWeight.Bold else FontWeight.Normal,
-                            color = if (index == currentIndex) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
+                if (hasTranslation && !lyricsState.loading) {
+                    TextButton(onClick = { showTranslation = !showTranslation }) {
+                        Text(if (showTranslation) "隐藏翻译" else "显示翻译")
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            when {
+                lyricsState.loading -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(220.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(30.dp),
+                            strokeWidth = 3.dp,
+                        )
+                    }
+                }
+
+                lyricsState.error != null -> {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = lyricsState.error.orEmpty(),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        TextButton(onClick = onReload) { Text("重试") }
+                    }
+                }
+
+                lyrics == null -> {
+                    EmptyState(
+                        title = "暂无歌词",
+                        description = "当前音乐源没有返回这首歌的歌词。",
+                        icon = Icons.Rounded.Lyrics,
+                    )
+                }
+
+                lines.isEmpty() -> {
+                    Text(
+                        text = lyrics.raw.stripTimestamps(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
+
+                else -> {
+                    val currentIndex = lines
+                        .indexOfLast { it.timeMs <= playbackState.positionMs }
+                        .coerceAtLeast(0)
+                    val activeIndex = scrubIndex ?: currentIndex
+                    LaunchedEffect(currentIndex, showTranslation, scrubIndex) {
+                        if (scrubIndex == null && currentIndex in lines.indices) {
+                            // Keep the active line on the third visible row.
+                            val targetIndex = (currentIndex - 2).coerceAtLeast(0)
+                            runCatching { listState.animateScrollToItem(targetIndex) }
+                        }
+                    }
+                    LazyColumn(
+                        state = listState,
+                        userScrollEnabled = scrubIndex == null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .onGloballyPositioned { listTopInWindow = it.positionInWindow().y },
+                    ) {
+                        itemsIndexed(lines) { index, line ->
+                            val translated = translatedLines[line.timeMs]?.text
+                            val text = if (showTranslation && !translated.isNullOrBlank()) {
+                                translated
+                            } else {
+                                line.text
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (index == scrubIndex) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(3.dp)
+                                            .height(18.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.primary,
+                                                RoundedCornerShape(2.dp),
+                                            ),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                Text(
+                                    text = text,
+                                    modifier = Modifier.weight(1f),
+                                    textAlign = TextAlign.Center,
+                                    fontSize = if (index == activeIndex) 17.sp else 15.sp,
+                                    fontWeight = if (index == activeIndex) {
+                                        FontWeight.Bold
+                                    } else {
+                                        FontWeight.Normal
+                                    },
+                                    color = if (index == activeIndex) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        scrubMs?.let { target ->
+            Surface(
+                modifier = Modifier.align(Alignment.Center),
+                shape = RoundedCornerShape(12.dp),
+                tonalElevation = 6.dp,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(
+                    text = "${formatPlaybackTime(target)} / ${formatPlaybackTime(duration)}",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                )
             }
         }
     }

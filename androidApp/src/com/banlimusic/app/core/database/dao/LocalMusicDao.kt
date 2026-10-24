@@ -18,6 +18,9 @@ interface LocalMusicDao {
     @Query("DELETE FROM local_tracks WHERE trackId = :trackId")
     suspend fun delete(trackId: String)
 
+    @Query("DELETE FROM local_tracks WHERE trackId IN (:trackIds)")
+    suspend fun deleteAll(trackIds: Collection<String>)
+
     @Query("DELETE FROM local_tracks")
     suspend fun clear()
 }

@@ -2,11 +2,13 @@ package com.banlimusic.app.feature.library
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -18,20 +20,23 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
@@ -39,12 +44,13 @@ import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
@@ -53,9 +59,9 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -87,13 +93,21 @@ private enum class LibrarySort(val label: String) {
     ALBUM("专辑"),
 }
 
+private enum class LibraryTab(val label: String) {
+    FAVORITES("收藏"),
+    HISTORY("最近播放"),
+    LOCAL("本地"),
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LibraryScreen(
     onPlayQueue: (List<Track>, Int) -> Unit,
     onOpenDownloads: () -> Unit,
+    onExitApp: () -> Unit = {},
     viewModel: LibraryViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
+    BackHandler { onExitApp() }
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val history by viewModel.history.collectAsStateWithLifecycle()
     val localTracks by viewModel.localTracks.collectAsStateWithLifecycle()
@@ -103,19 +117,23 @@ fun LibraryScreen(
     val defaultCategory by viewModel.defaultCategory.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
 
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    val favoriteIds by viewModel.favoriteIds.collectAsStateWithLifecycle()
+    val favoriteFolders by viewModel.favoriteFolders.collectAsStateWithLifecycle()
+    val downloadedIds by viewModel.downloadedIds.collectAsStateWithLifecycle()
+
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var libraryHeaderVisible by remember { mutableStateOf(true) }
     var sort by rememberSaveable { mutableStateOf(LibrarySort.TITLE) }
     var ascending by rememberSaveable { mutableStateOf(true) }
     var showNewCategory by rememberSaveable { mutableStateOf(false) }
     var newCategoryName by rememberSaveable { mutableStateOf("") }
-    var pendingImportJson by remember { mutableStateOf<String?>(null) }
+    var showImportOptions by rememberSaveable { mutableStateOf(false) }
     var localInfoTrack by remember { mutableStateOf<Track?>(null) }
     var localInfoLocation by remember { mutableStateOf("") }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(pageCount = { LibraryTab.entries.size })
     val sortedFavorites = remember(favorites, sort, ascending) {
         sortTracks(favorites, sort, ascending)
     }
@@ -131,61 +149,52 @@ fun LibraryScreen(
     } else {
         Manifest.permission.READ_EXTERNAL_STORAGE
     }
-    val importLauncher = rememberLauncherForActivityResult(
+    val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
             viewModel.importLocalMusic()
         } else {
-            Toast.makeText(context, "需要媒体读取权限才能导入本地音乐", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "需要媒体读取权限才能扫描本地音乐", Toast.LENGTH_SHORT).show()
         }
     }
-    val exportJsonLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json"),
-    ) { uri ->
-        if (uri != null) {
-            scope.launch {
-                val raw = runCatching { viewModel.exportFavoritesJson() }.getOrNull()
-                val ok = raw != null && withContext(Dispatchers.IO) {
-                    runCatching {
-                        context.contentResolver.openOutputStream(uri)?.use {
-                            it.write(raw.toByteArray())
-                        } != null
-                    }.getOrDefault(false)
-                }
-                Toast.makeText(
-                    context,
-                    if (ok) "收藏已导出" else "导出失败",
-                    Toast.LENGTH_SHORT,
-                ).show()
+    val importFilesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        uris.forEach { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
             }
         }
+        viewModel.importLocalFiles(uris)
     }
-    val importJsonLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
+    val importFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri != null) {
-            scope.launch {
-                val raw = withContext(Dispatchers.IO) {
-                    runCatching {
-                        context.contentResolver.openInputStream(uri)?.bufferedReader()?.use {
-                            it.readText()
-                        }
-                    }.getOrNull()
-                }
-                if (raw.isNullOrBlank()) {
-                    Toast.makeText(context, "无法读取收藏文件", Toast.LENGTH_SHORT).show()
-                } else {
-                    pendingImportJson = raw
-                }
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
             }
+            viewModel.importLocalFolder(uri)
         }
     }
 
-    fun requestLocalImport() {
+    fun requestQuickImport() {
         val granted = ContextCompat.checkSelfPermission(context, permission) ==
             PackageManager.PERMISSION_GRANTED
-        if (granted) viewModel.importLocalMusic() else importLauncher.launch(permission)
+        if (granted) viewModel.importLocalMusic() else permissionLauncher.launch(permission)
+    }
+
+    LaunchedEffect(pagerState.currentPage) {
+        selectionMode = false
+        libraryHeaderVisible = true
+        viewModel.clearSelection()
     }
 
     LaunchedEffect(message) {
@@ -201,23 +210,18 @@ fun LibraryScreen(
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp),
         )
-        PrimaryTabRow(selectedTabIndex = selectedTab) {
-            listOf("收藏", "最近播放", "本地").forEachIndexed { index, label ->
+        PrimaryTabRow(selectedTabIndex = pagerState.currentPage) {
+            LibraryTab.entries.forEachIndexed { index, tab ->
                 Tab(
-                    selected = selectedTab == index,
-                    onClick = {
-                        selectedTab = index
-                        selectionMode = false
-                        libraryHeaderVisible = true
-                        viewModel.clearSelection()
-                    },
-                    text = { Text(label) },
+                    selected = pagerState.currentPage == index,
+                    onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                    text = { Text(tab.label) },
                 )
             }
         }
 
         AnimatedVisibility(
-            visible = selectedTab != 0 || libraryHeaderVisible,
+            visible = pagerState.currentPage != 0 || libraryHeaderVisible,
             enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
             exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
         ) {
@@ -229,74 +233,166 @@ fun LibraryScreen(
             )
         }
 
-        when (selectedTab) {
-            0 -> FavoritesTabContent(
-                favorites = sortedFavorites,
-                categories = categories,
-                selectedCategory = selectedCategory,
-                defaultCategory = defaultCategory,
-                selectionMode = selectionMode,
-                selectedIds = selectedIds,
-                selectedTracks = sortedFavorites.filter { it.id in selectedIds },
-                onSelectCategory = { category ->
-                    selectionMode = false
-                    viewModel.clearSelection()
-                    viewModel.setCategory(category)
-                },
-                onCreateCategory = { showNewCategory = true },
-                onPlayQueue = onPlayQueue,
-                onRemoveFavorite = viewModel::removeFavorite,
-                onSelectionModeChange = {
-                    selectionMode = it
-                    if (!it) viewModel.clearSelection()
-                },
-                onToggleSelection = viewModel::toggleSelection,
-                onSelectAll = { viewModel.selectAll(sortedFavorites) },
-                onClearSelection = {
-                    selectionMode = false
-                    viewModel.clearSelection()
-                },
-                onAddFavorites = { tracks, category ->
-                    viewModel.addFavorites(tracks, category)
-                    selectionMode = false
-                },
-                onDownloadSelected = { tracks, quality ->
-                    viewModel.downloadSelected(tracks, quality)
-                    selectionMode = false
-                },
-                downloadQualities = viewModel::downloadQualities,
-                onExport = { exportJsonLauncher.launch("banlimusic-favorites.json") },
-                onImport = {
-                    importJsonLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
-                },
-                onHeaderVisibilityChange = { libraryHeaderVisible = it },
-                modifier = Modifier.weight(1f),
-            )
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        ) { page ->
+            when (LibraryTab.entries[page]) {
+                LibraryTab.FAVORITES -> FavoritesTabContent(
+                    favorites = sortedFavorites,
+                    categories = categories,
+                    selectedCategory = selectedCategory,
+                    defaultCategory = defaultCategory,
+                    favoriteFolders = favoriteFolders,
+                    downloadedIds = downloadedIds,
+                    selectionMode = selectionMode,
+                    selectedIds = selectedIds,
+                    selectedTracks = sortedFavorites.filter { it.id in selectedIds },
+                    onSelectCategory = { category ->
+                        selectionMode = false
+                        viewModel.clearSelection()
+                        viewModel.setCategory(category)
+                    },
+                    onCreateCategory = { showNewCategory = true },
+                    onPlayQueue = onPlayQueue,
+                    onSelectionModeChange = {
+                        selectionMode = it
+                        if (!it) viewModel.clearSelection()
+                    },
+                    onToggleSelection = viewModel::toggleSelection,
+                    onSelectAll = { viewModel.selectAll(sortedFavorites) },
+                    onClearSelection = {
+                        selectionMode = false
+                        viewModel.clearSelection()
+                    },
+                    onAddFavorites = { tracks, category ->
+                        viewModel.addFavorites(tracks, category)
+                        selectionMode = false
+                    },
+                    onDownloadSelected = { tracks, quality ->
+                        viewModel.downloadSelected(tracks, quality)
+                        selectionMode = false
+                    },
+                    downloadQualities = viewModel::downloadQualities,
+                    onHeaderVisibilityChange = { libraryHeaderVisible = it },
+                    modifier = Modifier.fillMaxSize(),
+                )
 
-            1 -> HistoryTabContent(
-                history = sortedHistory,
-                onPlayQueue = onPlayQueue,
-                onClearHistory = viewModel::clearHistory,
-                modifier = Modifier.weight(1f),
-            )
+                LibraryTab.HISTORY -> HistoryTabContent(
+                    history = sortedHistory,
+                    categories = categories,
+                    defaultCategory = defaultCategory,
+                    favoriteFolders = favoriteFolders,
+                    downloadedIds = downloadedIds,
+                    selectionMode = selectionMode,
+                    selectedIds = selectedIds,
+                    onSelectionModeChange = {
+                        selectionMode = it
+                        if (!it) viewModel.clearSelection()
+                    },
+                    onToggleSelection = viewModel::toggleSelection,
+                    onSelectAll = { viewModel.selectAll(sortedHistory) },
+                    onClearSelection = {
+                        selectionMode = false
+                        viewModel.clearSelection()
+                    },
+                    onAddFavorites = { tracks, category ->
+                        viewModel.addFavorites(tracks, category)
+                        selectionMode = false
+                    },
+                    onDownloadSelected = { tracks, quality ->
+                        viewModel.downloadSelected(tracks, quality)
+                        selectionMode = false
+                    },
+                    downloadQualities = viewModel::downloadQualities,
+                    onPlayQueue = onPlayQueue,
+                    onClearHistory = viewModel::clearHistory,
+                    modifier = Modifier.fillMaxSize(),
+                )
 
-            else -> LocalTabContent(
-                tracks = sortedLocal,
-                onPlayQueue = onPlayQueue,
-                onImport = ::requestLocalImport,
-                onOpenDownloads = onOpenDownloads,
-                onClearImported = viewModel::clearLocalMusic,
-                onShowLocation = { track ->
-                    scope.launch {
-                        localInfoLocation = withContext(Dispatchers.IO) {
-                            resolveLocalLocation(context, track)
+                LibraryTab.LOCAL -> LocalTabContent(
+                    tracks = sortedLocal,
+                    favoriteIds = favoriteIds,
+                    favoriteFolders = favoriteFolders,
+                    downloadedIds = downloadedIds,
+                    categories = categories,
+                    defaultCategory = defaultCategory,
+                    selectionMode = selectionMode,
+                    selectedIds = selectedIds,
+                    onSelectionModeChange = {
+                        selectionMode = it
+                        if (!it) viewModel.clearSelection()
+                    },
+                    onToggleSelection = viewModel::toggleSelection,
+                    onSelectAll = { viewModel.selectAll(sortedLocal) },
+                    onClearSelection = {
+                        selectionMode = false
+                        viewModel.clearSelection()
+                    },
+                    onAddFavorites = { tracks, category ->
+                        viewModel.addFavorites(tracks, category)
+                        selectionMode = false
+                    },
+                    onDownloadSelected = { tracks, quality ->
+                        viewModel.downloadSelected(tracks, quality)
+                        selectionMode = false
+                    },
+                    onDeleteSelected = {
+                        viewModel.deleteLocalSelection(sortedLocal)
+                        selectionMode = false
+                    },
+                    downloadQualities = viewModel::downloadQualities,
+                    onPlayQueue = onPlayQueue,
+                    onRequestImport = { showImportOptions = true },
+                    onOpenDownloads = onOpenDownloads,
+                    onShowLocation = { track ->
+                        scope.launch {
+                            localInfoLocation = withContext(Dispatchers.IO) {
+                                resolveLocalLocation(context, track)
+                            }
+                            localInfoTrack = track
                         }
-                        localInfoTrack = track
-                    }
-                },
-                modifier = Modifier.weight(1f),
-            )
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
+    }
+
+    if (showImportOptions) {
+        AlertDialog(
+            onDismissRequest = { showImportOptions = false },
+            title = { Text("导入本地音乐") },
+            text = {
+                Column {
+                    Text("自动识别会扫描系统媒体库，并过滤时长过短的提示音与铃声。")
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        onClick = {
+                            showImportOptions = false
+                            requestQuickImport()
+                        },
+                    ) { Text("一键导入（自动识别歌曲）") }
+                    TextButton(
+                        onClick = {
+                            showImportOptions = false
+                            importFilesLauncher.launch(arrayOf("audio/*"))
+                        },
+                    ) { Text("选择文件导入") }
+                    TextButton(
+                        onClick = {
+                            showImportOptions = false
+                            importFolderLauncher.launch(null)
+                        },
+                    ) { Text("选择文件夹导入") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showImportOptions = false }) { Text("取消") }
+            },
+        )
     }
 
     if (showNewCategory) {
@@ -329,36 +425,6 @@ fun LibraryScreen(
         )
     }
 
-    pendingImportJson?.let { raw ->
-        AlertDialog(
-            onDismissRequest = { pendingImportJson = null },
-            title = { Text("导入收藏") },
-            text = {
-                Column {
-                    Text("选择“覆盖导入”会清空当前收藏；选择“仅追加”会保留现有收藏。")
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(
-                        onClick = {
-                            viewModel.importFavoritesJson(raw, replace = true)
-                            pendingImportJson = null
-                        },
-                    ) { Text("覆盖导入") }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.importFavoritesJson(raw, replace = false)
-                        pendingImportJson = null
-                    },
-                ) { Text("仅追加") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingImportJson = null }) { Text("取消") }
-            },
-        )
-    }
-
     localInfoTrack?.let { track ->
         AlertDialog(
             onDismissRequest = { localInfoTrack = null },
@@ -371,6 +437,7 @@ fun LibraryScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SortBar(
     sort: LibrarySort,
@@ -378,50 +445,61 @@ private fun SortBar(
     onSort: (LibrarySort) -> Unit,
     onToggleOrder: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "排序",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(4.dp))
-        LibrarySort.entries.forEach { option ->
-            FilterChip(
-                selected = sort == option,
-                onClick = { onSort(option) },
-                label = { Text(option.label) },
-                modifier = Modifier.padding(end = 4.dp),
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 30.dp)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "排序",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        Spacer(Modifier.weight(1f))
-        IconButton(onClick = onToggleOrder) {
-            Icon(
-                imageVector = if (ascending) Icons.Rounded.ArrowUpward else Icons.Rounded.ArrowDownward,
-                contentDescription = if (ascending) "升序" else "降序",
-            )
+            Spacer(Modifier.width(4.dp))
+            LibrarySort.entries.forEach { option ->
+                FilterChip(
+                    selected = sort == option,
+                    onClick = { onSort(option) },
+                    label = { Text(option.label, style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier
+                        .height(28.dp)
+                        .padding(end = 4.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onToggleOrder, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    imageVector = if (ascending) {
+                        Icons.Rounded.ArrowUpward
+                    } else {
+                        Icons.Rounded.ArrowDownward
+                    },
+                    contentDescription = if (ascending) "升序" else "降序",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun FavoritesTabContent(
     favorites: List<Track>,
     categories: List<String>,
     selectedCategory: String?,
     defaultCategory: String,
+    favoriteFolders: Map<String, String>,
+    downloadedIds: Set<String>,
     selectionMode: Boolean,
     selectedIds: Set<String>,
     selectedTracks: List<Track>,
     onSelectCategory: (String?) -> Unit,
     onCreateCategory: () -> Unit,
     onPlayQueue: (List<Track>, Int) -> Unit,
-    onRemoveFavorite: (Track) -> Unit,
     onSelectionModeChange: (Boolean) -> Unit,
     onToggleSelection: (String) -> Unit,
     onSelectAll: () -> Unit,
@@ -429,8 +507,6 @@ private fun FavoritesTabContent(
     onAddFavorites: (List<Track>, String) -> Unit,
     onDownloadSelected: (List<Track>, Int?) -> Unit,
     downloadQualities: suspend (List<Track>) -> List<Int>,
-    onExport: () -> Unit,
-    onImport: () -> Unit,
     onHeaderVisibilityChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -469,70 +545,78 @@ private fun FavoritesTabContent(
                 enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
                 exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
             ) {
-                Column {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        item {
-                            FilterChip(
-                                selected = selectedCategory == null,
-                                onClick = { onSelectCategory(null) },
-                                label = { Text("全部") },
-                            )
-                        }
-                        items(categories) { category ->
-                            FilterChip(
-                                selected = selectedCategory == category,
-                                onClick = { onSelectCategory(category) },
-                                label = { Text(category) },
-                            )
-                        }
-                        item {
-                            FilterChip(
-                                selected = false,
-                                onClick = onCreateCategory,
-                                label = { Text("+ 新建") },
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = if (selectionMode) {
-                                "已选 ${selectedIds.size} 首"
-                            } else {
-                                "共 ${favorites.size} 首"
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        if (!selectionMode) {
-                            TextButton(
-                                enabled = favorites.isNotEmpty(),
-                                onClick = { onPlayQueue(favorites, 0) },
-                            ) { Text("播放全部") }
-                            TextButton(onClick = { onSelectionModeChange(true) }) {
-                                Text("选择")
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                    Column {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            item {
+                                FilterChip(
+                                    selected = selectedCategory == null,
+                                    onClick = { onSelectCategory(null) },
+                                    label = {
+                                        Text("全部", style = MaterialTheme.typography.labelSmall)
+                                    },
+                                    modifier = Modifier.height(28.dp),
+                                )
+                            }
+                            items(categories) { category ->
+                                FilterChip(
+                                    selected = selectedCategory == category,
+                                    onClick = { onSelectCategory(category) },
+                                    label = {
+                                        Text(
+                                            category,
+                                            style = MaterialTheme.typography.labelSmall,
+                                        )
+                                    },
+                                    modifier = Modifier.height(28.dp),
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = false,
+                                    onClick = onCreateCategory,
+                                    label = {
+                                        Text("+ 新建", style = MaterialTheme.typography.labelSmall)
+                                    },
+                                    modifier = Modifier.height(28.dp),
+                                )
                             }
                         }
-                    }
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        AssistChip(onClick = onExport, label = { Text("导出") })
-                        AssistChip(onClick = onImport, label = { Text("导入") })
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 30.dp)
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = if (selectionMode) {
+                                    "已选 ${selectedIds.size} 首"
+                                } else {
+                                    "共 ${favorites.size} 首"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            if (!selectionMode) {
+                                TextButton(
+                                    enabled = favorites.isNotEmpty(),
+                                    onClick = { onPlayQueue(favorites, 0) },
+                                    modifier = Modifier.height(30.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                ) { Text("播放全部", style = MaterialTheme.typography.labelMedium) }
+                                TextButton(
+                                    onClick = { onSelectionModeChange(true) },
+                                    modifier = Modifier.height(30.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp),
+                                ) { Text("选择", style = MaterialTheme.typography.labelMedium) }
+                            }
+                        }
                     }
                 }
             }
@@ -551,7 +635,17 @@ private fun FavoritesTabContent(
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .dragSelect(
+                            enabled = true,
+                            listState = listState,
+                            validKeys = validIds,
+                            onSelect = { id ->
+                                if (!selectionMode) onSelectionModeChange(true)
+                                onToggleSelection(id)
+                            },
+                        ),
                     contentPadding = PaddingValues(
                         start = 12.dp,
                         end = 12.dp,
@@ -567,30 +661,11 @@ private fun FavoritesTabContent(
                                 else onPlayQueue(favorites, index)
                             },
                             isFavorite = true,
-                            onToggleFavorite = if (selectionMode) {
-                                null
-                            } else {
-                                { onRemoveFavorite(track) }
-                            },
+                            showFavoriteState = false,
+                            onToggleFavorite = null,
+                            downloaded = track.id in downloadedIds,
+                            categoryLabel = favoriteFolders[track.id],
                             selected = if (selectionMode) track.id in selectedIds else null,
-                            onLongClick = if (selectionMode) {
-                                null
-                            } else {
-                                {
-                                    onSelectionModeChange(true)
-                                    onToggleSelection(track.id)
-                                }
-                            },
-                            selectionDragModifier = if (selectionMode) {
-                                Modifier.dragSelect(
-                                    enabled = true,
-                                    listState = listState,
-                                    validKeys = validIds,
-                                    onSelect = onToggleSelection,
-                                )
-                            } else {
-                                Modifier
-                            },
                         )
                     }
                 }
@@ -598,7 +673,7 @@ private fun FavoritesTabContent(
         }
 
         if (selectionMode) {
-            FavoritesSelectionBar(
+            TrackSelectionBar(
                 count = selectedIds.size,
                 categories = (categories + defaultCategory).distinct(),
                 chosenCategory = chosenCategory,
@@ -617,7 +692,7 @@ private fun FavoritesTabContent(
 }
 
 @Composable
-private fun FavoritesSelectionBar(
+private fun TrackSelectionBar(
     count: Int,
     categories: List<String>,
     chosenCategory: String,
@@ -630,6 +705,7 @@ private fun FavoritesSelectionBar(
     onSelectAll: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
+    onDelete: (() -> Unit)? = null,
 ) {
     var categoryMenu by remember { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
@@ -692,6 +768,9 @@ private fun FavoritesSelectionBar(
             }
             CompactTextButton(text = "下载", onClick = onDownload, enabled = count > 0)
             CompactTextButton(text = "全选", onClick = onSelectAll, enabled = count > 0)
+            if (onDelete != null) {
+                CompactTextButton(text = "删除", onClick = onDelete, enabled = count > 0)
+            }
             CompactTextButton(text = "取消", onClick = onCancel)
         }
     }
@@ -712,102 +791,297 @@ private fun CompactTextButton(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HistoryTabContent(
     history: List<Track>,
+    categories: List<String>,
+    defaultCategory: String,
+    favoriteFolders: Map<String, String>,
+    downloadedIds: Set<String>,
+    selectionMode: Boolean,
+    selectedIds: Set<String>,
+    onSelectionModeChange: (Boolean) -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onAddFavorites: (List<Track>, String) -> Unit,
+    onDownloadSelected: (List<Track>, Int?) -> Unit,
+    downloadQualities: suspend (List<Track>) -> List<Int>,
     onPlayQueue: (List<Track>, Int) -> Unit,
     onClearHistory: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "最近播放 ${history.size} 首",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onClearHistory) { Text("清空记录") }
-        }
-        if (history.isEmpty()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                EmptyState(
-                    title = "还没有播放记录",
-                    description = "播放过的歌曲会自动记录在这里。",
-                    icon = Icons.Rounded.History,
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                itemsIndexed(history, key = { _, track -> track.id }) { index, track ->
-                    TrackRow(
-                        track = track,
-                        onClick = { onPlayQueue(history, index) },
+    val listState = rememberLazyListState()
+    val validIds = remember(history) { history.map { it.id }.toSet() }
+    val selectedTracks = remember(history, selectedIds) {
+        history.filter { it.id in selectedIds }
+    }
+    var chosenCategory by remember(defaultCategory) { mutableStateOf(defaultCategory) }
+    var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var chosenQuality by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(selectedIds, history) {
+        qualities = if (selectedIds.isEmpty()) emptyList() else downloadQualities(selectedTracks)
+        if (chosenQuality !in qualities) chosenQuality = qualities.firstOrNull()
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 32.dp)
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (selectionMode) {
+                            "已选 ${selectedIds.size} 首"
+                        } else {
+                            "最近播放 ${history.size} 首"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
                     )
+                    if (selectionMode) {
+                        TextButton(
+                            onClick = onClearSelection,
+                            modifier = Modifier.height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) { Text("取消", style = MaterialTheme.typography.labelMedium) }
+                    } else {
+                        TextButton(
+                            onClick = onClearHistory,
+                            modifier = Modifier.height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) { Text("清空记录", style = MaterialTheme.typography.labelMedium) }
+                        if (history.isNotEmpty()) {
+                            TextButton(
+                                onClick = { onSelectionModeChange(true) },
+                                modifier = Modifier.height(30.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                            ) { Text("选择", style = MaterialTheme.typography.labelMedium) }
+                        }
+                    }
                 }
             }
+            if (history.isEmpty()) {
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    EmptyState(
+                        title = "还没有播放记录",
+                        description = "播放过的歌曲会自动记录在这里。",
+                        icon = Icons.Rounded.History,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .dragSelect(
+                            enabled = true,
+                            listState = listState,
+                            validKeys = validIds,
+                            onSelect = { id ->
+                                if (!selectionMode) onSelectionModeChange(true)
+                                onToggleSelection(id)
+                            },
+                        ),
+                    contentPadding = PaddingValues(
+                        start = 12.dp,
+                        end = 12.dp,
+                        bottom = if (selectionMode) 100.dp else 20.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    itemsIndexed(history, key = { _, track -> track.id }) { index, track ->
+                        TrackRow(
+                            track = track,
+                            onClick = {
+                                if (selectionMode) onToggleSelection(track.id)
+                                else onPlayQueue(history, index)
+                            },
+                            isFavorite = track.id in favoriteFolders,
+                            showFavoriteState = false,
+                            onToggleFavorite = null,
+                            downloaded = track.id in downloadedIds,
+                            categoryLabel = favoriteFolders[track.id],
+                            selected = if (selectionMode) track.id in selectedIds else null,
+                        )
+                    }
+                }
+            }
+        }
+
+        if (selectionMode) {
+            TrackSelectionBar(
+                count = selectedIds.size,
+                categories = (categories + defaultCategory).distinct(),
+                chosenCategory = chosenCategory,
+                onCategoryChange = { chosenCategory = it },
+                qualities = qualities,
+                chosenQuality = chosenQuality,
+                onQualityChange = { chosenQuality = it },
+                onFavorite = { onAddFavorites(history, chosenCategory) },
+                onDownload = { onDownloadSelected(history, chosenQuality) },
+                onSelectAll = onSelectAll,
+                onCancel = onClearSelection,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LocalTabContent(
     tracks: List<Track>,
+    favoriteIds: Set<String>,
+    favoriteFolders: Map<String, String>,
+    downloadedIds: Set<String>,
+    categories: List<String>,
+    defaultCategory: String,
+    selectionMode: Boolean,
+    selectedIds: Set<String>,
+    onSelectionModeChange: (Boolean) -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onAddFavorites: (List<Track>, String) -> Unit,
+    onDownloadSelected: (List<Track>, Int?) -> Unit,
+    onDeleteSelected: () -> Unit,
+    downloadQualities: suspend (List<Track>) -> List<Int>,
     onPlayQueue: (List<Track>, Int) -> Unit,
-    onImport: () -> Unit,
+    onRequestImport: () -> Unit,
     onOpenDownloads: () -> Unit,
-    onClearImported: () -> Unit,
     onShowLocation: (Track) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "本地与已下载 ${tracks.size} 首",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onImport) { Text("导入") }
-            TextButton(onClick = onOpenDownloads) { Text("下载") }
-            TextButton(onClick = onClearImported) { Text("清空导入") }
+    val listState = rememberLazyListState()
+    val validIds = remember(tracks) { tracks.map { it.id }.toSet() }
+    val selectedTracks = remember(tracks, selectedIds) {
+        tracks.filter { it.id in selectedIds }
+    }
+    var chosenCategory by remember(defaultCategory) { mutableStateOf(defaultCategory) }
+    var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var chosenQuality by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(selectedIds, tracks) {
+        qualities = if (selectedIds.isEmpty()) emptyList() else downloadQualities(selectedTracks)
+        if (chosenQuality !in qualities) chosenQuality = qualities.firstOrNull()
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 30.dp)
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (selectionMode) {
+                        "已选 ${selectedIds.size} 首"
+                    } else {
+                        "本地与已下载 ${tracks.size} 首"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (!selectionMode) {
+                    TextButton(
+                        onClick = onRequestImport,
+                        modifier = Modifier.height(30.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("导入", style = MaterialTheme.typography.labelMedium) }
+                    TextButton(
+                        onClick = onOpenDownloads,
+                        modifier = Modifier.height(30.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text("下载", style = MaterialTheme.typography.labelMedium) }
+                    if (tracks.isNotEmpty()) {
+                        TextButton(
+                            onClick = { onSelectionModeChange(true) },
+                            modifier = Modifier.height(30.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) { Text("选择", style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
+            }
         }
         if (tracks.isEmpty()) {
             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 EmptyState(
                     title = "导入或下载音乐",
-                    description = "扫描系统媒体库中的音频；已下载完成的歌曲会自动加入这里。长按可查看位置。",
+                    description = "点击导入可一键扫描媒体库，或手动选择文件/文件夹；已下载完成的歌曲会自动加入这里。",
                     icon = Icons.Rounded.LibraryMusic,
                 )
             }
         } else {
             LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .dragSelect(
+                        enabled = true,
+                        listState = listState,
+                        validKeys = validIds,
+                        onSelect = { id ->
+                            if (!selectionMode) onSelectionModeChange(true)
+                            onToggleSelection(id)
+                        },
+                    ),
+                contentPadding = PaddingValues(
+                    start = 12.dp,
+                    end = 12.dp,
+                    bottom = if (selectionMode) 100.dp else 20.dp,
+                ),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
                     TrackRow(
                         track = track,
-                        onClick = { onPlayQueue(tracks, index) },
-                        onLongClick = { onShowLocation(track) },
+                        onClick = {
+                            if (selectionMode) {
+                                onToggleSelection(track.id)
+                            } else {
+                                onPlayQueue(tracks, index)
+                            }
+                        },
+                        isFavorite = track.id in favoriteIds,
+                        showFavoriteState = false,
+                        onToggleFavorite = null,
+                        downloaded = track.id in downloadedIds,
+                        categoryLabel = favoriteFolders[track.id],
+                        infoAction = if (selectionMode) null else ({ onShowLocation(track) }),
+                        selected = if (selectionMode) track.id in selectedIds else null,
                     )
                 }
             }
+        }
+    }
+        if (selectionMode) {
+            TrackSelectionBar(
+                count = selectedIds.size,
+                categories = (categories + defaultCategory).distinct(),
+                chosenCategory = chosenCategory,
+                onCategoryChange = { chosenCategory = it },
+                qualities = qualities,
+                chosenQuality = chosenQuality,
+                onQualityChange = { chosenQuality = it },
+                onFavorite = { onAddFavorites(tracks, chosenCategory) },
+                onDownload = { onDownloadSelected(tracks, chosenQuality) },
+                onSelectAll = onSelectAll,
+                onCancel = onClearSelection,
+                onDelete = onDeleteSelected,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
     }
 }

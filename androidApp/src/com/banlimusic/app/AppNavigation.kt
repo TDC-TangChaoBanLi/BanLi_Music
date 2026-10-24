@@ -1,5 +1,12 @@
 package com.banlimusic.app
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,8 +29,10 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
@@ -43,6 +52,7 @@ import com.banlimusic.app.feature.player.PlayerScreen
 import com.banlimusic.app.feature.search.SearchScreen
 import com.banlimusic.app.feature.settings.SettingsScreen
 import com.banlimusic.app.ui.components.MiniPlayer
+import kotlinx.coroutines.launch
 
 object Routes {
     const val HOME = "home"
@@ -73,17 +83,26 @@ private fun destinationsFor(ids: List<String>): List<BottomDestination> {
 }
 
 @Composable
-fun AppRoot(container: AppContainer) {
+fun AppRoot(
+    container: AppContainer,
+    onExitApp: () -> Unit = {},
+    widgetRequested: Boolean = false,
+    widgetOpenPlayer: Boolean = false,
+    onWidgetRequestHandled: () -> Unit = {},
+) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: Routes.HOME
     val playbackState by container.playbackController.state.collectAsStateWithLifecycle()
+    val favoriteIds by container.libraryRepository.observeFavoriteIds()
+        .collectAsStateWithLifecycle(initialValue = emptySet())
     val settings by container.settingsRepository.settings
         .collectAsStateWithLifecycle(initialValue = AppSettings())
     val destinations = remember(settings.bottomNavItems) {
         destinationsFor(settings.bottomNavItems)
     }
     val playback = container.playbackController
+    val scope = rememberCoroutineScope()
     val showNavigation = currentRoute != Routes.PLAYER
 
     fun navigateTo(route: String) {
@@ -98,7 +117,19 @@ fun AppRoot(container: AppContainer) {
         if (tracks.isEmpty()) return
         val safeIndex = index.coerceIn(tracks.indices)
         playback.play(tracks[safeIndex], tracks)
-        navController.navigate(Routes.PLAYER) { launchSingleTop = true }
+        if (settings.openPlayerOnTrackClick) {
+            navController.navigate(Routes.PLAYER) { launchSingleTop = true }
+        }
+    }
+
+    LaunchedEffect(widgetRequested, widgetOpenPlayer) {
+        if (!widgetRequested) return@LaunchedEffect
+        if (widgetOpenPlayer) {
+            navController.navigate(Routes.PLAYER) { launchSingleTop = true }
+        } else {
+            navigateTo(Routes.HOME)
+        }
+        onWidgetRequestHandled()
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -137,12 +168,26 @@ fun AppRoot(container: AppContainer) {
                                 },
                                 onTogglePlayPause = playback::togglePlayPause,
                                 onNext = playback::next,
+                                onPrevious = playback::previous,
+                                isFavorite = playbackState.currentTrack?.id in favoriteIds,
+                                onToggleFavorite = {
+                                    val current = playbackState.currentTrack
+                                    if (current != null) {
+                                        scope.launch {
+                                            container.libraryRepository.toggleFavorite(
+                                                current,
+                                                settings.defaultFavoriteCategory,
+                                            )
+                                        }
+                                    }
+                                },
                             )
                         }
                         AppNavHost(
                             navController = navController,
                             playQueue = ::playQueue,
                             navigateTopLevel = ::navigateTo,
+                            onExitApp = onExitApp,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
@@ -163,6 +208,19 @@ fun AppRoot(container: AppContainer) {
                                 },
                                 onTogglePlayPause = playback::togglePlayPause,
                                 onNext = playback::next,
+                                onPrevious = playback::previous,
+                                isFavorite = playbackState.currentTrack?.id in favoriteIds,
+                                onToggleFavorite = {
+                                    val current = playbackState.currentTrack
+                                    if (current != null) {
+                                        scope.launch {
+                                            container.libraryRepository.toggleFavorite(
+                                                current,
+                                                settings.defaultFavoriteCategory,
+                                            )
+                                        }
+                                    }
+                                },
                             )
                             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                                 destinations.forEach { destination ->
@@ -187,6 +245,7 @@ fun AppRoot(container: AppContainer) {
                     navController = navController,
                     playQueue = ::playQueue,
                     navigateTopLevel = ::navigateTo,
+                    onExitApp = onExitApp,
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -199,12 +258,25 @@ private fun AppNavHost(
     navController: NavHostController,
     playQueue: (List<Track>, Int) -> Unit,
     navigateTopLevel: (String) -> Unit,
+    onExitApp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
         navController = navController,
         startDestination = Routes.HOME,
         modifier = modifier,
+        enterTransition = {
+            slideInHorizontally(animationSpec = tween(220)) { it } 
+        },
+        exitTransition = {
+            ExitTransition.None
+        },
+        popEnterTransition = {
+            EnterTransition.None
+        },
+        popExitTransition = {
+            slideOutHorizontally(animationSpec = tween(220)) { it }
+        },
     ) {
         composable(Routes.HOME) {
             HomeScreen(
@@ -214,12 +286,13 @@ private fun AppNavHost(
             )
         }
         composable(Routes.SEARCH) {
-            SearchScreen(onPlayQueue = playQueue)
+            SearchScreen(onPlayQueue = playQueue, onExitApp = onExitApp)
         }
         composable(Routes.LIBRARY) {
             LibraryScreen(
                 onPlayQueue = playQueue,
                 onOpenDownloads = { navigateTopLevel(Routes.DOWNLOADS) },
+                onExitApp = onExitApp,
             )
         }
         composable(Routes.DOWNLOADS) {
@@ -227,12 +300,27 @@ private fun AppNavHost(
                 onOpenPlayer = {
                     navController.navigate(Routes.PLAYER) { launchSingleTop = true }
                 },
+                onExitApp = onExitApp,
             )
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen()
+            SettingsScreen(onExitApp = onExitApp)
         }
-        composable(Routes.PLAYER) {
+        composable(
+            route = Routes.PLAYER,
+            enterTransition = {
+                slideInVertically(animationSpec = tween(260)) { it }
+            },
+            exitTransition = {
+                slideOutVertically(animationSpec = tween(260)) { it }
+            },
+            popEnterTransition = {
+                slideInVertically(animationSpec = tween(260)) { it }
+            },
+            popExitTransition = {
+                slideOutVertically(animationSpec = tween(260)) { it }
+            },
+        ) {
             PlayerScreen(
                 onBack = {
                     if (!navController.popBackStack()) {

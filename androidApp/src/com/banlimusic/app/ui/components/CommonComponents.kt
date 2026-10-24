@@ -2,10 +2,12 @@ package com.banlimusic.app.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,10 +17,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Card
@@ -37,8 +41,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -137,12 +144,68 @@ fun SourceBadge(providerId: String) {
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Text(
-            text = providerLabel(providerId),
+            text = sourceDisplayNameAnnotated(providerId),
             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 10.sp,
         )
+    }
+}
+
+/** API prefix shown before the provider name, e.g. "GD" for GD Music Station. */
+fun sourcePrefix(providerId: String): String? = when {
+    providerId.startsWith("gd-") -> "GD"
+    else -> null
+}
+
+/** Full display name: API prefix + short provider name, e.g. "GD网易云". */
+fun sourceDisplayName(providerId: String): String {
+    val prefix = sourcePrefix(providerId) ?: return providerLabel(providerId)
+    val label = providerLabel(providerId)
+    val latin = label.firstOrNull()?.code?.let { it < 128 } == true
+    return if (latin) "$prefix $label" else "$prefix$label"
+}
+
+/** Same as [sourceDisplayName] but with the API prefix rendered in bold. */
+fun sourceDisplayNameAnnotated(providerId: String): androidx.compose.ui.text.AnnotatedString =
+    buildAnnotatedString {
+        val prefix = sourcePrefix(providerId)
+        val label = providerLabel(providerId)
+        if (prefix != null) {
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(prefix) }
+            if (label.firstOrNull()?.code?.let { it < 128 } == true) append(" ")
+        }
+        append(label)
+    }
+
+private val NON_PROVIDER_SOURCE_IDS = setOf("local", "download")
+
+/**
+ * Renders every meaningful source for a track: the API provider, a "本地" badge for
+ * imported files and an extra "已下载" badge for downloaded copies.
+ */
+@Composable
+fun TrackSourceBadges(track: Track, downloaded: Boolean = false) {
+    val providerSources = track.sources.filterNot { it.providerId in NON_PROVIDER_SOURCE_IDS }
+    val hasLocalImport = track.sources.any { it.providerId == "local" }
+    val hasDownload = downloaded || track.sources.any { it.providerId == "download" }
+    if (hasLocalImport) {
+        SourceBadge("local")
+    } else {
+        providerSources.firstOrNull()?.let { SourceBadge(it.providerId) }
+        if (providerSources.size > 1) {
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = "+${providerSources.size - 1}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+    if (hasDownload) {
+        Spacer(Modifier.width(4.dp))
+        SourceBadge("download")
     }
 }
 
@@ -153,7 +216,16 @@ fun TrackRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     isFavorite: Boolean = false,
+    /** Renders a read-only heart when the row has no favourite toggle. */
+    showFavoriteState: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
+    /** Extra badge shown after the source badge, e.g. the containing favourite folder. */
+    categoryLabel: String? = null,
+    /** Marks tracks that already have a completed download, even if the saved
+     * favourite JSON has no download source. */
+    downloaded: Boolean = false,
+    /** Optional info action rendered as a trailing icon (e.g. local file location). */
+    infoAction: (() -> Unit)? = null,
     selected: Boolean? = null,
     onLongClick: (() -> Unit)? = null,
     selectionDragModifier: Modifier = Modifier,
@@ -191,30 +263,72 @@ fun TrackRow(
                 .weight(1f)
                 .padding(horizontal = 12.dp),
         ) {
-            Text(
-                text = track.title,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                track.primarySource?.let { SourceBadge(it.providerId) }
-                if (track.sources.size > 1) {
-                    Spacer(modifier = Modifier.width(4.dp))
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val titleMaxWidth = maxWidth * 0.66f
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = "+${track.sources.size - 1}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        text = track.title,
+                        modifier = Modifier
+                            .widthIn(max = titleMaxWidth)
+                            .basicMarquee(),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
                     )
+                    Spacer(Modifier.weight(1f))
+                    val subtitle = listOfNotNull(
+                        track.album?.title?.takeIf { it.isNotBlank() },
+                        track.artistLine,
+                    ).joinToString("·")
+                    if (subtitle.isNotBlank()) {
+                        Text(
+                            text = subtitle,
+                            modifier = Modifier.basicMarquee(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip,
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = listOfNotNull(track.artistLine, track.album?.title).joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TrackSourceBadges(track, downloaded = downloaded)
+                if (!categoryLabel.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Text(
+                            text = categoryLabel,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+        if (infoAction != null) {
+            IconButton(onClick = infoAction, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    imageVector = Icons.Rounded.Info,
+                    contentDescription = "查看信息",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }
@@ -228,6 +342,15 @@ fun TrackRow(
                     modifier = Modifier.size(20.dp),
                 )
             }
+        } else if (showFavoriteState && isFavorite) {
+            Icon(
+                imageVector = Icons.Rounded.Favorite,
+                contentDescription = "已收藏",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .padding(horizontal = 8.dp)
+                    .size(16.dp),
+            )
         }
         trailing?.invoke()
     }

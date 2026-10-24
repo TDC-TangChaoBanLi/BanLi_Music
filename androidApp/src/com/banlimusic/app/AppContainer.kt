@@ -1,7 +1,13 @@
 package com.banlimusic.app
 
 import android.content.Context
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.database.StandaloneDatabaseProvider
 import com.banlimusic.app.core.cache.CacheManager
+import com.banlimusic.app.core.cache.MediaMetadataCache
+import com.banlimusic.app.core.cache.PlaybackCache
 import com.banlimusic.app.core.database.MusicDatabase
 import com.banlimusic.app.core.datastore.MAX_API_LIMIT_PER_WINDOW
 import com.banlimusic.app.core.datastore.MIN_GD_REQUEST_INTERVAL_MS
@@ -22,11 +28,13 @@ import com.banlimusic.app.domain.playback.StreamResolver
 import com.banlimusic.app.domain.search.TrackMerger
 import com.banlimusic.app.player.PlaybackController
 import kotlinx.serialization.json.Json
+import java.io.File
 
 /**
  * Manual dependency container. Keeping construction explicit makes the ownership
  * of rate limiting, caches and the Media3 connection obvious.
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 class AppContainer(private val context: Context) {
 
     val json: Json = Json {
@@ -68,9 +76,9 @@ class AppContainer(private val context: Context) {
 
     val providers: List<MusicProvider> by lazy {
         listOf(
-            GdMusicProvider(gdApiClient, "netease", "网易云音乐"),
-            GdMusicProvider(gdApiClient, "joox", "JOOX"),
-            GdMusicProvider(gdApiClient, "bilibili", "哔哩哔哩"),
+            GdMusicProvider(gdApiClient, "netease", "GD网易云"),
+            GdMusicProvider(gdApiClient, "joox", "GD JOOX"),
+            GdMusicProvider(gdApiClient, "bilibili", "GD B站"),
         )
     }
 
@@ -87,7 +95,17 @@ class AppContainer(private val context: Context) {
     }
 
     val musicRepository: MusicRepository by lazy {
-        DefaultMusicRepository(providers, settingsRepository, trackMerger, streamResolver)
+        DefaultMusicRepository(
+            providers = providers,
+            settings = settingsRepository,
+            merger = trackMerger,
+            streamResolver = streamResolver,
+            metadataCache = mediaMetadataCache,
+        )
+    }
+
+    val mediaMetadataCache: MediaMetadataCache by lazy {
+        MediaMetadataCache(context, json, downloadHttpClient)
     }
 
     val libraryRepository: LibraryRepository by lazy {
@@ -104,7 +122,23 @@ class AppContainer(private val context: Context) {
 
     val cacheManager: CacheManager by lazy { CacheManager(context) }
 
+    /** ExoPlayer writes streamed audio here so downloads can reuse it. */
+    val playbackCache: PlaybackCache by lazy {
+        PlaybackCache(
+            context,
+            SimpleCache(
+                File(context.cacheDir, "playback-media"),
+                LeastRecentlyUsedCacheEvictor(PLAYBACK_CACHE_MAX_BYTES),
+                StandaloneDatabaseProvider(context),
+            ),
+        )
+    }
+
     val playbackController: PlaybackController by lazy {
         PlaybackController(context, json, settingsRepository, downloadRepository)
+    }
+
+    private companion object {
+        const val PLAYBACK_CACHE_MAX_BYTES = 256L * 1024 * 1024
     }
 }

@@ -50,6 +50,10 @@ class LibraryRepository(
 
     fun observeFavoriteIds(): Flow<Set<String>> = dao.observeFavoriteIds().map { it.toSet() }
 
+    /** Maps application-level track ids to the favourite folder they live in. */
+    fun observeFavoriteFolders(): Flow<Map<String, String>> = dao.observeFavoriteFolders()
+        .map { rows -> rows.associate { it.trackId to it.category } }
+
     fun observeHistory(limit: Int = 100): Flow<List<Track>> = dao.observeHistory(limit).map { entities ->
         entities.mapNotNull { decode(it.trackJson) }
     }

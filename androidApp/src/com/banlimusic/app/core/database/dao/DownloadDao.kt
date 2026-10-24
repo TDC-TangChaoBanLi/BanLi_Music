@@ -45,6 +45,9 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads WHERE status = 'COMPLETED'")
     suspend fun getCompleted(): List<DownloadTaskEntity>
 
+    @Query("SELECT * FROM downloads WHERE trackId = :trackId AND status = 'COMPLETED'")
+    suspend fun getCompletedForTrack(trackId: String): List<DownloadTaskEntity>
+
     @Query("DELETE FROM downloads WHERE status = 'COMPLETED'")
     suspend fun deleteCompleted()
 

@@ -35,6 +35,9 @@ class SettingsViewModel(
     private val _cacheSize = MutableStateFlow(0L)
     val cacheSize: StateFlow<Long> = _cacheSize.asStateFlow()
 
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
+
     init {
         refreshRateStatus()
         refreshCacheSize()
@@ -114,7 +117,31 @@ class SettingsViewModel(
     fun setWidgetTheme(theme: WidgetTheme) =
         viewModelScope.launch { settings.setWidgetTheme(theme) }
 
+    fun setHighRefreshRateLists(enabled: Boolean) =
+        viewModelScope.launch { settings.setHighRefreshRateLists(enabled) }
+
+    fun setOpenPlayerOnTrackClick(enabled: Boolean) =
+        viewModelScope.launch { settings.setOpenPlayerOnTrackClick(enabled) }
+
     fun clearSearchHistory() = viewModelScope.launch { library.clearSearchHistory() }
+
+    suspend fun exportFavoritesJson(): String = library.exportFavoritesJson()
+
+    fun importFavoritesJson(raw: String, replace: Boolean) {
+        viewModelScope.launch {
+            val count = runCatching { library.importFavoritesJson(raw, replace) }
+                .getOrDefault(0)
+            _message.value = if (replace) {
+                "已覆盖导入 $count 首收藏"
+            } else {
+                "已追加 $count 首收藏"
+            }
+        }
+    }
+
+    fun consumeMessage() {
+        _message.value = null
+    }
 
     fun clearCaches() {
         viewModelScope.launch {

@@ -63,6 +63,37 @@ class DownloadRepository(
             if (locationExists(existing.filePath)) return@runCatching
         }
 
+        // A finished copy of the same track exists (maybe at another quality).
+        // Reuse that file instead of downloading the audio a second time.
+        val reusable = dao.getCompletedForTrack(track.id)
+            .firstOrNull { it.id != taskId && locationExists(it.filePath) }
+        if (reusable != null) {
+            val now = System.currentTimeMillis()
+            dao.upsert(
+                DownloadTaskEntity(
+                    id = taskId,
+                    trackJson = json.encodeToString(Track.serializer(), track),
+                    title = track.title,
+                    artist = track.artistLine,
+                    providerId = source.providerId,
+                    providerTrackId = source.providerTrackId,
+                    status = DownloadStatus.COMPLETED.name,
+                    bytesDownloaded = reusable.bytesDownloaded,
+                    totalBytes = reusable.totalBytes,
+                    filePath = reusable.filePath,
+                    error = null,
+                    retryCount = 0,
+                    createdAt = now,
+                    updatedAt = now,
+                    trackId = track.id,
+                    qualityKbps = quality,
+                    downloadLyrics = lyrics,
+                    downloadArtwork = artwork,
+                ),
+            )
+            return@runCatching
+        }
+
         val now = System.currentTimeMillis()
         dao.upsert(
             DownloadTaskEntity(

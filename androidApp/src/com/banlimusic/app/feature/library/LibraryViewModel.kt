@@ -1,5 +1,6 @@
 package com.banlimusic.app.feature.library
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.banlimusic.app.core.datastore.SettingsRepository
@@ -41,8 +42,25 @@ class LibraryViewModel(
     val categories: StateFlow<List<String>> = library.observeFavoriteCategories()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val favoriteIds: StateFlow<Set<String>> = library.observeFavoriteIds()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** trackId -> favourite folder, so lists can show where a track lives. */
+    val favoriteFolders: StateFlow<Map<String, String>> = library.observeFavoriteFolders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     val history: StateFlow<List<Track>> = library.observeHistory(100)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Application track ids that already have a completed download on disk. */
+    val downloadedIds: StateFlow<Set<String>> = downloads.observeTasks()
+        .map { tasks ->
+            tasks
+                .filter { it.status == DownloadStatus.COMPLETED && !it.filePath.isNullOrBlank() }
+                .map { it.track.id }
+                .toSet()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     val localTracks: StateFlow<List<Track>> = combine(
         localMusic.observeTracks(),
@@ -52,16 +70,17 @@ class LibraryViewModel(
             .filter { it.status == DownloadStatus.COMPLETED && !it.filePath.isNullOrBlank() }
             .map { task ->
                 val uri = task.filePath.orEmpty()
+                // Keep the original provider sources so artwork and lyrics can still
+                // be resolved on demand even when the sidecar files were not saved.
+                val localSource = TrackSource(
+                    providerId = "download",
+                    providerTrackId = uri,
+                    availableActions = setOf(TrackAction.STREAM),
+                    localUri = uri,
+                    durationMs = task.track.durationMs,
+                )
                 task.track.copy(
-                    sources = listOf(
-                        TrackSource(
-                            providerId = "download",
-                            providerTrackId = uri,
-                            availableActions = setOf(TrackAction.STREAM),
-                            localUri = uri,
-                            durationMs = task.track.durationMs,
-                        ),
-                    ),
+                    sources = listOf(localSource) + task.track.sources.filter { it.localUri == null },
                 )
             }
         (imported + downloaded).distinctBy { track ->
@@ -101,6 +120,65 @@ class LibraryViewModel(
             } else {
                 "没有发现新的本地音乐"
             }
+        }
+    }
+
+    fun importLocalFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val count = runCatching { localMusic.importFromUris(uris) }
+                .getOrDefault(0)
+            _message.value = if (count > 0) {
+                "已导入 $count 首本地音乐"
+            } else {
+                "所选文件中没有可导入的歌曲（过短或格式不支持）"
+            }
+        }
+    }
+
+    fun importLocalFolder(treeUri: Uri) {
+        viewModelScope.launch {
+            val count = runCatching { localMusic.importFromTree(treeUri) }
+                .getOrDefault(0)
+            _message.value = if (count > 0) {
+                "已从文件夹导入 $count 首歌曲"
+            } else {
+                "该文件夹中没有可导入的歌曲"
+            }
+        }
+    }
+
+    fun deleteLocalTracks(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            localMusic.delete(ids)
+            _message.value = "已移除 ${ids.size} 首本地记录（不会删除原始文件）"
+        }
+    }
+
+    /**
+     * Removes the selected imported records. Downloaded tracks are not touched:
+     * their files belong to the download page, so the user is told where to go.
+     */
+    fun deleteLocalSelection(tracks: List<Track>) {
+        val selected = tracks.filter { it.id in _selectedIds.value }
+        if (selected.isEmpty()) return
+        val imported = selected.filter { track ->
+            track.sources.any { it.providerId == "local" }
+        }
+        val downloadedCount = selected.size - imported.size
+        viewModelScope.launch {
+            if (imported.isNotEmpty()) localMusic.delete(imported.map { it.id })
+            _message.value = buildString {
+                if (imported.isNotEmpty()) {
+                    append("已移除 ${imported.size} 首导入记录（未删除原始文件）")
+                }
+                if (downloadedCount > 0) {
+                    if (isNotEmpty()) append("；")
+                    append("$downloadedCount 首为已下载歌曲，如需删除请到 下载-已下载 中删除源文件")
+                }
+            }
+            clearSelection()
         }
     }
 

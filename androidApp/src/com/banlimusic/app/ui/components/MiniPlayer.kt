@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -33,6 +36,9 @@ fun MiniPlayer(
     onClick: () -> Unit,
     onTogglePlayPause: () -> Unit,
     onNext: () -> Unit,
+    onPrevious: () -> Unit = {},
+    isFavorite: Boolean = false,
+    onToggleFavorite: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val track = state.currentTrack ?: return
@@ -80,6 +86,36 @@ fun MiniPlayer(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                IconButton(
+                    onClick = onToggleFavorite,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) {
+                            Icons.Rounded.Favorite
+                        } else {
+                            Icons.Rounded.FavoriteBorder
+                        },
+                        contentDescription = if (isFavorite) "取消收藏" else "收藏",
+                        tint = if (isFavorite) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                IconButton(
+                    onClick = onPrevious,
+                    enabled = state.hasPrevious,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.SkipPrevious,
+                        contentDescription = "上一首",
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
                 IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(42.dp)) {
                     Icon(
                         imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -89,9 +125,13 @@ fun MiniPlayer(
                 IconButton(
                     onClick = onNext,
                     enabled = state.hasNext,
-                    modifier = Modifier.size(42.dp),
+                    modifier = Modifier.size(38.dp),
                 ) {
-                    Icon(Icons.Rounded.SkipNext, contentDescription = "下一首")
+                    Icon(
+                        Icons.Rounded.SkipNext,
+                        contentDescription = "下一首",
+                        modifier = Modifier.size(22.dp),
+                    )
                 }
             }
             LinearProgressIndicator(

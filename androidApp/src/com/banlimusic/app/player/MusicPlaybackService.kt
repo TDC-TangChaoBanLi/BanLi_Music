@@ -12,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
@@ -71,7 +72,14 @@ class MusicPlaybackService : MediaSessionService() {
         }
 
         val exoPlayer = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(resolvingFactory))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(
+                    CacheDataSource.Factory()
+                        .setCache(container.playbackCache.cache)
+                        .setUpstreamDataSourceFactory(resolvingFactory)
+                        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR),
+                ),
+            )
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -125,6 +133,37 @@ class MusicPlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_TOGGLE_PLAY -> {
+                val current = player ?: return super.onStartCommand(intent, flags, startId)
+                when {
+                    current.playbackState == Player.STATE_IDLE && current.mediaItemCount > 0 -> {
+                        current.prepare()
+                        current.play()
+                    }
+                    current.isPlaying -> current.pause()
+                    else -> current.play()
+                }
+            }
+
+            ACTION_NEXT -> {
+                player?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() }
+            }
+
+            ACTION_PREVIOUS -> {
+                player?.let {
+                    if (it.currentPosition > 3_000L) {
+                        it.seekTo(0L)
+                    } else if (it.hasPreviousMediaItem()) {
+                        it.seekToPreviousMediaItem()
+                    }
+                }
+            }
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Keep playing when the task is swiped away, but don't leave an idle service.
@@ -204,5 +243,11 @@ class MusicPlaybackService : MediaSessionService() {
                 durationMs = duration,
             )
         }
+    }
+
+    companion object {
+        const val ACTION_TOGGLE_PLAY = "com.banlimusic.app.action.TOGGLE_PLAY"
+        const val ACTION_NEXT = "com.banlimusic.app.action.NEXT"
+        const val ACTION_PREVIOUS = "com.banlimusic.app.action.PREVIOUS"
     }
 }

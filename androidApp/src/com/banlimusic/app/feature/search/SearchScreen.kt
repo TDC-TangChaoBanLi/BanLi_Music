@@ -1,6 +1,7 @@
 package com.banlimusic.app.feature.search
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,13 +67,16 @@ import com.banlimusic.app.ui.components.qualityShortLabel
 @Composable
 fun SearchScreen(
     onPlayQueue: (List<Track>, Int) -> Unit,
+    onExitApp: () -> Unit = {},
     viewModel: SearchViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
+    BackHandler { onExitApp() }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.history.collectAsStateWithLifecycle()
     val enabledSources by viewModel.enabledSources.collectAsStateWithLifecycle()
     val favoriteCategories by viewModel.favoriteCategories.collectAsStateWithLifecycle()
     val defaultCategory by viewModel.defaultFavoriteCategory.collectAsStateWithLifecycle()
+    val downloadedIds by viewModel.downloadedIds.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
@@ -163,7 +167,7 @@ fun SearchScreen(
             )
         }
 
-        Box(modifier = Modifier.weight(1f)) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when {
                 state.isSearching && state.results.isEmpty() -> {
                     CircularProgressIndicator(
@@ -193,6 +197,15 @@ fun SearchScreen(
                 else -> {
                     LazyColumn(
                         state = listState,
+                        modifier = Modifier.dragSelect(
+                            enabled = true,
+                            listState = listState,
+                            validKeys = validIds,
+                            onSelect = { id ->
+                                if (!state.selectionMode) viewModel.setSelectionMode(true)
+                                viewModel.toggleSelection(id)
+                            },
+                        ),
                         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
@@ -242,6 +255,8 @@ fun SearchScreen(
                                     }
                                 },
                                 isFavorite = track.id in state.favoriteIds,
+                                downloaded = track.id in downloadedIds,
+                                categoryLabel = state.favoriteFolders[track.id],
                                 onToggleFavorite = if (state.selectionMode) {
                                     null
                                 } else {
@@ -251,24 +266,6 @@ fun SearchScreen(
                                     track.id in state.selectedIds
                                 } else {
                                     null
-                                },
-                                onLongClick = if (state.selectionMode) {
-                                    null
-                                } else {
-                                    {
-                                        viewModel.setSelectionMode(true)
-                                        viewModel.toggleSelection(track.id)
-                                    }
-                                },
-                                selectionDragModifier = if (state.selectionMode) {
-                                    Modifier.dragSelect(
-                                        enabled = true,
-                                        listState = listState,
-                                        validKeys = validIds,
-                                        onSelect = viewModel::toggleSelection,
-                                    )
-                                } else {
-                                    Modifier
                                 },
                             )
                         }

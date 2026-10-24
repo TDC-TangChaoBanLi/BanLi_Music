@@ -12,6 +12,12 @@ data class FavoriteTrackEntity(
     val category: String = "默认收藏",
 )
 
+/** Projection used to show which folder a favourite belongs to. */
+data class FavoriteFolderRow(
+    val trackId: String,
+    val category: String,
+)
+
 @Entity(tableName = "favorite_categories")
 data class FavoriteCategoryEntity(
     @PrimaryKey val name: String,
