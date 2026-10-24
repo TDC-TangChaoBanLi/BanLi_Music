@@ -2,6 +2,7 @@ package com.banlimusic.app
 
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
@@ -188,6 +189,7 @@ fun AppRoot(
                             playQueue = ::playQueue,
                             navigateTopLevel = ::navigateTo,
                             onExitApp = onExitApp,
+                            navOrder = destinations.map { it.route },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
@@ -246,6 +248,7 @@ fun AppRoot(
                     playQueue = ::playQueue,
                     navigateTopLevel = ::navigateTo,
                     onExitApp = onExitApp,
+                    navOrder = destinations.map { it.route },
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -259,23 +262,52 @@ private fun AppNavHost(
     playQueue: (List<Track>, Int) -> Unit,
     navigateTopLevel: (String) -> Unit,
     onExitApp: () -> Unit,
+    navOrder: List<String>,
     modifier: Modifier = Modifier,
 ) {
+    fun indexOf(route: String?): Int = navOrder.indexOf(route).takeIf { it >= 0 } ?: 0
+
     NavHost(
         navController = navController,
         startDestination = Routes.HOME,
         modifier = modifier,
         enterTransition = {
-            slideInHorizontally(animationSpec = tween(220)) { it } 
+            val forward = indexOf(targetState.destination.route) >=
+                indexOf(initialState.destination.route)
+            slideInHorizontally(
+                animationSpec = tween(260, easing = FastOutSlowInEasing),
+            ) { width -> if (forward) width else -width }
         },
         exitTransition = {
-            ExitTransition.None
+            if (targetState.destination.route == Routes.PLAYER) {
+                // The player slides up over the current page.
+                ExitTransition.None
+            } else {
+                val forward = indexOf(targetState.destination.route) >=
+                    indexOf(initialState.destination.route)
+                slideOutHorizontally(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                ) { width -> if (forward) -width else width }
+            }
         },
         popEnterTransition = {
-            EnterTransition.None
+            if (initialState.destination.route == Routes.PLAYER) {
+                // Returning from the player: only the player animates (slides down).
+                EnterTransition.None
+            } else {
+                val forward = indexOf(targetState.destination.route) >=
+                    indexOf(initialState.destination.route)
+                slideInHorizontally(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                ) { width -> if (forward) width else -width }
+            }
         },
         popExitTransition = {
-            slideOutHorizontally(animationSpec = tween(220)) { it }
+            val forward = indexOf(targetState.destination.route) >=
+                indexOf(initialState.destination.route)
+            slideOutHorizontally(
+                animationSpec = tween(260, easing = FastOutSlowInEasing),
+            ) { width -> if (forward) -width else width }
         },
     ) {
         composable(Routes.HOME) {
