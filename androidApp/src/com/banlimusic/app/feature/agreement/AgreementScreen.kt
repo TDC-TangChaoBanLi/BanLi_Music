@@ -1,3 +1,6 @@
+/**
+ * 文件作用：首次启动时的用户协议与 GD 音乐台声明界面。
+ */
 package com.banlimusic.app.feature.agreement
 
 import android.app.Activity

@@ -2,6 +2,7 @@ package com.banlimusic.desktop.data
 
 import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.common.TtlCache
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.StreamInfo
 import com.banlimusic.app.data.source.MusicProvider
 import com.banlimusic.app.domain.playback.StreamCandidate
@@ -20,7 +21,7 @@ class DesktopStreamResolver(
     ): StreamInfo {
         if (candidates.isEmpty()) throw MusicException.NoPlayableSource()
         val effective = candidates.take(1)
-        val quality = qualityKbps ?: settings.current().qualityKbps
+        val quality = QualityTiers.normalize(qualityKbps ?: settings.current().qualityKbps)
         val cacheKey = effective.joinToString(";") {
             "${it.providerId}:${it.providerTrackId}"
         } + ":$quality"
@@ -29,8 +30,12 @@ class DesktopStreamResolver(
         var lastError: Throwable? = null
         for (candidate in effective) {
             val provider = providers[candidate.providerId] ?: continue
+            val providerQuality = QualityTiers.mapToProvider(
+                requestedKbps = quality,
+                providerQualities = provider.capabilities.downloadQualities,
+            )
             try {
-                val info = provider.resolveStream(candidate.providerTrackId, quality)
+                val info = provider.resolveStream(candidate.providerTrackId, providerQuality)
                 cache.put(cacheKey, info)
                 return info
             } catch (cancelled: CancellationException) {

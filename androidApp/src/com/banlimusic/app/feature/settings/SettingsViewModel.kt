@@ -1,3 +1,6 @@
+/**
+ * 文件作用：写入设置项，并维护限流状态、缓存统计与缓存清理操作。
+ */
 package com.banlimusic.app.feature.settings
 
 import androidx.lifecycle.ViewModel
@@ -77,6 +80,9 @@ class SettingsViewModel(
 
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { settings.setDynamicColor(enabled) }
 
+    fun setCustomThemeColor(color: Int?) =
+        viewModelScope.launch { settings.setCustomThemeColor(color) }
+
     fun setQuality(qualityKbps: Int) = viewModelScope.launch { settings.setQuality(qualityKbps) }
 
     fun setSourceEnabled(source: String, enabled: Boolean) =
@@ -114,6 +120,9 @@ class SettingsViewModel(
 
     fun setRequestListArtwork(enabled: Boolean) =
         viewModelScope.launch { settings.setRequestListArtwork(enabled) }
+
+    fun setAutoLoadArtwork(enabled: Boolean) =
+        viewModelScope.launch { settings.setAutoLoadArtwork(enabled) }
 
     fun setCacheMaxBytes(bytes: Long) {
         viewModelScope.launch {

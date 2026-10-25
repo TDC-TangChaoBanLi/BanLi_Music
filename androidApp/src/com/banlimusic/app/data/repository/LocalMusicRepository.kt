@@ -1,3 +1,6 @@
+/**
+ * 文件作用：通过 MediaStore 与文件 URI 导入本地音乐并维护索引。
+ */
 package com.banlimusic.app.data.repository
 
 import android.content.ContentUris

@@ -1,3 +1,6 @@
+/**
+ * 文件作用：封装 Media3 SimpleCache，提供播放缓存读取、删除与下载复用。
+ */
 package com.banlimusic.app.core.cache
 
 import android.content.Context

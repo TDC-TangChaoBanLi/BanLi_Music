@@ -1,3 +1,6 @@
+/**
+ * 文件作用：首页界面，展示快捷入口与最近播放内容。
+ */
 package com.banlimusic.app.feature.home
 
 import androidx.compose.foundation.layout.Arrangement

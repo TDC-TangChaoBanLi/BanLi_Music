@@ -1,3 +1,6 @@
+/**
+ * 文件作用：本地音乐索引表的数据库访问。
+ */
 package com.banlimusic.app.core.database.dao
 
 import androidx.room.Dao

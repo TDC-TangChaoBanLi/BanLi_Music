@@ -1,3 +1,6 @@
+/**
+ * 文件作用：定义收藏、历史、下载、本地音乐与缓存等 Room 实体。
+ */
 package com.banlimusic.app.core.database.entity
 
 import androidx.room.Entity

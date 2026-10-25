@@ -1,3 +1,6 @@
+/**
+ * 文件作用：3×1 桌面音乐小组件的 AppWidgetProvider。
+ */
 package com.banlimusic.app.widget
 
 import android.appwidget.AppWidgetManager

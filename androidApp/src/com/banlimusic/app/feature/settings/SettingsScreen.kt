@@ -1,10 +1,19 @@
+/**
+ * 文件作用：设置页界面，组织外观、播放、播放源、缓存与关于等模块。
+ */
 package com.banlimusic.app.feature.settings
 
+import android.graphics.Color as AndroidColor
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -89,13 +98,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.banlimusic.app.R
 import com.banlimusic.app.core.cache.CachedTrack
 import com.banlimusic.app.core.datastore.AppSettings
 import com.banlimusic.app.core.datastore.BOTTOM_NAV_OPTIONS
@@ -107,6 +125,7 @@ import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.core.datastore.sanitizeNavItems
 import com.banlimusic.app.core.limiter.RateLimitStatus
 import com.banlimusic.app.core.model.ProviderInfo
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.feature.common.AppViewModelProvider
 import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackArtwork
@@ -117,6 +136,29 @@ import com.banlimusic.app.widget.PlayerWidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private enum class CacheClearTarget(val title: String, val message: String) {
+    AUDIO(
+        "清理歌曲缓存",
+        "将删除已缓存的播放音频，已下载文件不受影响。",
+    ),
+    ARTWORK(
+        "清理海报缓存",
+        "将删除列表、系统媒体控件和桌面小组件使用的缓存海报。",
+    ),
+    LYRICS(
+        "清理歌词缓存",
+        "将删除已缓存的歌词文件。",
+    ),
+    OTHER(
+        "清理其他缓存",
+        "将删除 HTTP 请求、图片等临时缓存。",
+    ),
+    ALL(
+        "清理全部缓存",
+        "将删除歌曲、海报、歌词和其他缓存；不会删除已下载文件，正在下载的临时文件会保留。",
+    ),
+}
 
 private enum class SettingsPage(
     val title: String,
@@ -133,8 +175,18 @@ private enum class SettingsPage(
 }
 
 private val HOME_PAGES = SettingsPage.entries.filter { it != SettingsPage.CACHED_TRACKS }
-private val QUALITY_OPTIONS = listOf(128, 192, 320, 740, 999)
+private val QUALITY_OPTIONS = QualityTiers.PRESET_KBPS
 private const val MIB = 1024L * 1024L
+
+private val CUSTOM_THEME_SWATCHES = listOf(
+    0xFF0F766E.toInt(),
+    0xFF2563EB.toInt(),
+    0xFF7C3AED.toInt(),
+    0xFFDB2777.toInt(),
+    0xFFDC2626.toInt(),
+    0xFFEA580C.toInt(),
+    0xFFCA8A04.toInt(),
+)
 
 private fun navLabel(id: String): String =
     BOTTOM_NAV_OPTIONS.firstOrNull { it.id == id }?.label ?: id
@@ -376,7 +428,7 @@ private fun AppearanceSettings(settings: AppSettings, viewModel: SettingsViewMod
             SettingsSwitchRow(
                 icon = Icons.Rounded.ColorLens,
                 title = "动态取色",
-                description = "Android 12+ 使用系统壁纸颜色生成主题",
+                description = "Android 12+ 使用系统壁纸颜色；关闭后可自定义主题色",
                 checked = settings.dynamicColor,
                 onCheckedChange = viewModel::setDynamicColor,
             )
@@ -387,6 +439,17 @@ private fun AppearanceSettings(settings: AppSettings, viewModel: SettingsViewMod
                 checked = settings.highRefreshRateLists,
                 onCheckedChange = viewModel::setHighRefreshRateLists,
             )
+            HorizontalDivider()
+            if (settings.dynamicColor) {
+                SettingsSectionLabel(Icons.Rounded.ColorLens, "自定义主题颜色")
+                Text(
+                    text = "关闭“动态取色”后才能自定义主题颜色。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                CustomThemeColorSection(settings = settings, viewModel = viewModel)
+            }
         }
 
         SettingsCard(title = "底部导航栏", icon = Icons.Rounded.ViewList) {
@@ -482,6 +545,133 @@ private fun AppearanceSettings(settings: AppSettings, viewModel: SettingsViewMod
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CustomThemeColorSection(
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+) {
+    val current = settings.customThemeColor
+    val fallback = MaterialTheme.colorScheme.primary.toArgb()
+    val hsv = remember(current, fallback) {
+        FloatArray(3).also { AndroidColor.colorToHSV(current ?: fallback, it) }
+    }
+    var hue by remember(current, fallback) { mutableFloatStateOf(hsv[0]) }
+    var saturation by remember(current, fallback) { mutableFloatStateOf(hsv[1]) }
+    val preview = Color(
+        AndroidColor.HSVToColor(
+            floatArrayOf(hue, saturation.coerceIn(0.15f, 1f), 0.78f),
+        ),
+    )
+    val customSelected = current != null && current !in CUSTOM_THEME_SWATCHES
+
+    SettingsSectionLabel(Icons.Rounded.ColorLens, "自定义主题颜色")
+    Text(
+        text = "从 7 个预设颜色或一个自定义颜色中选择主题色。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        CUSTOM_THEME_SWATCHES.forEach { argb ->
+            val selected = current == argb
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(Color(argb))
+                    .border(
+                        width = if (selected) 3.dp else 1.dp,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
+                        },
+                        shape = CircleShape,
+                    )
+                    .clickable { viewModel.setCustomThemeColor(argb) }
+                    .semantics {
+                        contentDescription = String.format(
+                            java.util.Locale.ROOT,
+                            "主题颜色 #%06X",
+                            argb and 0xFFFFFF,
+                        )
+                    },
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.sweepGradient(
+                        listOf(
+                            Color(0xFFE53935),
+                            Color(0xFFFDD835),
+                            Color(0xFF43A047),
+                            Color(0xFF00ACC1),
+                            Color(0xFF1E88E5),
+                            Color(0xFF8E24AA),
+                            Color(0xFFE53935),
+                        ),
+                    ),
+                )
+                .border(
+                    width = if (customSelected) 3.dp else 1.dp,
+                    color = if (customSelected) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
+                    shape = CircleShape,
+                )
+                .clickable { viewModel.setCustomThemeColor(preview.toArgb()) }
+                .semantics { contentDescription = "自定义主题颜色" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.ColorLens,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(15.dp),
+            )
+        }
+    }
+    if (customSelected) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(preview),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "自定义颜色",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text("色相", style = MaterialTheme.typography.labelMedium)
+        Slider(
+            value = hue,
+            onValueChange = { hue = it },
+            valueRange = 0f..360f,
+            onValueChangeFinished = { viewModel.setCustomThemeColor(preview.toArgb()) },
+        )
+        Text("饱和度", style = MaterialTheme.typography.labelMedium)
+        Slider(
+            value = saturation,
+            onValueChange = { saturation = it },
+            valueRange = 0.15f..1f,
+            onValueChangeFinished = { viewModel.setCustomThemeColor(preview.toArgb()) },
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PlaybackSettings(settings: AppSettings, viewModel: SettingsViewModel) {
     SettingsCard(title = "播放行为", icon = Icons.Rounded.PlayCircle) {
@@ -534,6 +724,22 @@ private fun PlaybackSettings(settings: AppSettings, viewModel: SettingsViewModel
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        HorizontalDivider()
+        SettingsSectionLabel(Icons.Rounded.HighQuality, "播放音质")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            QUALITY_OPTIONS.forEach { quality ->
+                FilterChip(
+                    selected = settings.qualityKbps == quality,
+                    onClick = { viewModel.setQuality(quality) },
+                    label = { Text(qualityShortLabel(quality)) },
+                )
+            }
+        }
+        Text(
+            "所有音乐源统一使用标准、较高、高品、无损四档；来源支持的档位不足时映射到最接近的音质，多于四档时舍弃多余档位。",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -573,16 +779,6 @@ private fun SourceSettings(
                 )
             }
             HorizontalDivider()
-            SettingsSectionLabel(Icons.Rounded.HighQuality, "播放音质")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                QUALITY_OPTIONS.forEach { quality ->
-                    FilterChip(
-                        selected = settings.qualityKbps == quality,
-                        onClick = { viewModel.setQuality(quality) },
-                        label = { Text(qualityShortLabel(quality)) },
-                    )
-                }
-            }
             SettingsSlider(
                 icon = Icons.Rounded.Speed,
                 title = "5 分钟请求上限",
@@ -672,6 +868,7 @@ private fun DownloadCacheSettings(
     var cacheMbValue by remember(settings.cacheMaxBytes) {
         mutableFloatStateOf(settings.cacheMaxBytes.toFloat() / MIB)
     }
+    var pendingClear by remember { mutableStateOf<CacheClearTarget?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SettingsCard(title = "下载", icon = Icons.Rounded.Download) {
@@ -719,6 +916,13 @@ private fun DownloadCacheSettings(
                 description = "关闭时列表只读取已缓存海报；播放页始终加载",
                 checked = settings.requestListArtwork,
                 onCheckedChange = viewModel::setRequestListArtwork,
+            )
+            SettingsSwitchRow(
+                icon = Icons.Rounded.Image,
+                title = "播放时自动加载海报",
+                description = "当前歌曲没有海报缓存时自动请求，供系统媒体控件和桌面小组件显示",
+                checked = settings.autoLoadArtwork,
+                onCheckedChange = viewModel::setAutoLoadArtwork,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -769,25 +973,25 @@ private fun DownloadCacheSettings(
                 icon = Icons.Rounded.MusicNote,
                 title = "歌曲缓存",
                 value = formatBytes(cacheUsage.audioBytes),
-                onClear = viewModel::clearAudioCache,
+                onClear = { pendingClear = CacheClearTarget.AUDIO },
             )
             SettingsValueRow(
                 icon = Icons.Rounded.Image,
                 title = "海报缓存",
                 value = formatBytes(cacheUsage.artworkBytes),
-                onClear = viewModel::clearArtworkCache,
+                onClear = { pendingClear = CacheClearTarget.ARTWORK },
             )
             SettingsValueRow(
                 icon = Icons.Rounded.Lyrics,
                 title = "歌词缓存",
                 value = formatBytes(cacheUsage.lyricsBytes),
-                onClear = viewModel::clearLyricsCache,
+                onClear = { pendingClear = CacheClearTarget.LYRICS },
             )
             SettingsValueRow(
                 icon = Icons.Rounded.PieChart,
                 title = "其他缓存",
                 value = formatBytes(cacheUsage.otherBytes),
-                onClear = viewModel::clearOtherCache,
+                onClear = { pendingClear = CacheClearTarget.OTHER },
             )
             SettingsActionRow(
                 icon = Icons.Rounded.QueueMusic,
@@ -801,10 +1005,7 @@ private fun DownloadCacheSettings(
                 title = "清理全部缓存",
                 description = "不会删除已下载文件；正在下载的临时文件会保留",
                 actionText = "清理",
-                onClick = {
-                    viewModel.clearCaches()
-                    Toast.makeText(context, "已清理缓存", Toast.LENGTH_SHORT).show()
-                },
+                onClick = { pendingClear = CacheClearTarget.ALL },
             )
             TextButton(onClick = viewModel::refreshCacheUsage) {
                 Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -812,6 +1013,34 @@ private fun DownloadCacheSettings(
                 Text("刷新缓存大小")
             }
         }
+    }
+
+    pendingClear?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingClear = null },
+            title = { Text(target.title) },
+            text = { Text(target.message) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        when (target) {
+                            CacheClearTarget.AUDIO -> viewModel.clearAudioCache()
+                            CacheClearTarget.ARTWORK -> viewModel.clearArtworkCache()
+                            CacheClearTarget.LYRICS -> viewModel.clearLyricsCache()
+                            CacheClearTarget.OTHER -> viewModel.clearOtherCache()
+                            CacheClearTarget.ALL -> {
+                                viewModel.clearCaches()
+                                Toast.makeText(context, "已清理缓存", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        pendingClear = null
+                    },
+                ) { Text("确认清理") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingClear = null }) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -822,6 +1051,7 @@ private fun CachedTracksPage(
     modifier: Modifier = Modifier,
 ) {
     var selected by remember { mutableStateOf(emptySet<String>()) }
+    var pendingDeleteKeys by remember { mutableStateOf<Set<String>?>(null) }
     val totalBytes = cachedTracks.sumOf { it.cachedBytes }
 
     Column(modifier = modifier) {
@@ -868,10 +1098,7 @@ private fun CachedTracksPage(
             TextButton(
                 enabled = selected.isNotEmpty(),
                 onClick = {
-                    cachedTracks.filter { it.cacheKey in selected }.forEach {
-                        viewModel.removeCachedTrack(it.cacheKey)
-                    }
-                    selected = emptySet()
+                    if (selected.isNotEmpty()) pendingDeleteKeys = selected
                 },
             ) { Text("删除缓存") }
             Spacer(Modifier.weight(1f))
@@ -902,11 +1129,35 @@ private fun CachedTracksPage(
                                 selected + entry.cacheKey
                             }
                         },
-                        onDelete = { viewModel.removeCachedTrack(entry.cacheKey) },
+                        onDelete = { pendingDeleteKeys = setOf(entry.cacheKey) },
                     )
                 }
             }
         }
+    }
+
+    pendingDeleteKeys?.let { keys ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteKeys = null },
+            title = { Text("删除缓存歌曲") },
+            text = {
+                Text("将删除选中的 ${keys.size} 首缓存音频，已下载文件不受影响。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        cachedTracks.filter { it.cacheKey in keys }.forEach {
+                            viewModel.removeCachedTrack(it.cacheKey)
+                        }
+                        selected = selected - keys
+                        pendingDeleteKeys = null
+                    },
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteKeys = null }) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -1097,11 +1348,29 @@ private fun LibrarySettings(settings: AppSettings, viewModel: SettingsViewModel)
 @Composable
 private fun AboutSettings(versionName: String) {
     SettingsCard(title = "关于 BanLiMusic", icon = Icons.Rounded.Info) {
-        Text(
-            text = "BanLiMusic $versionName",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Image(
+                painter = painterResource(R.drawable.banli_logo),
+                contentDescription = "BanLiMusic 标志",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(16.dp)),
+            )
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text(
+                    text = "BanLiMusic $versionName",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "板栗音乐",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Text(
             text = "音乐数据来自 GD 音乐台（music.gdstudio.xyz）。该来源仅用于学习参考，不得用于商业用途。",
             style = MaterialTheme.typography.bodySmall,

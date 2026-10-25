@@ -1,5 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M62,30v39.5A11,9 0 1,1 55,60.6V30h22v10z" />
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <!-- Keep the logo inside the adaptive-icon safe zone. -->
+    <group
+        android:pivotX="256"
+        android:pivotY="275"
+        android:scaleX="0.68"
+        android:scaleY="0.68"
+        android:translateY="-13">
+        <!-- Chestnut body -->
+        <path
+            android:pathData="M 256 75 C 315 160 445 250 445 345 C 445 435 360 475 256 475 C 152 475 67 435 67 345 C 67 250 197 160 256 75 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="102"
+                    android:startY="26"
+                    android:endX="410"
+                    android:endY="500">
+                    <item android:offset="0" android:color="#FFFFF0D4" />
+                    <item android:offset="0.3" android:color="#FFFAD28B" />
+                    <item android:offset="0.7" android:color="#FFDF9C4B" />
+                    <item android:offset="1" android:color="#FFB36224" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- Soft highlight -->
+        <path
+            android:pathData="M 256 75 C 315 160 445 250 445 345 C 445 435 360 475 256 475 C 152 475 67 435 67 345 C 67 250 197 160 256 75 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="163"
+                    android:centerY="138"
+                    android:gradientRadius="320">
+                    <item android:offset="0" android:color="#66FFFFFF" />
+                    <item android:offset="0.5" android:color="#14FFFFFF" />
+                    <item android:offset="1" android:color="#00FFFFFF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <!-- Music note silhouette (reads as the cut-out from the source logo) -->
+        <group
+            android:pivotX="200"
+            android:pivotY="380"
+            android:rotation="-15">
+            <path
+                android:pathData="M132,380 a68,50 0 1,0 136,0 a68,50 0 1,0 -136,0 Z"
+                android:fillColor="#FF351508" />
+        </group>
+        <path
+            android:pathData="M242,155 L272,155 L272,382 L242,382 Z"
+            android:fillColor="#FF351508" />
+        <path
+            android:pathData="M252,155 C300,165 335,215 325,275 C310,230 285,200 262,190 Z"
+            android:fillColor="#FF351508" />
+    </group>
 </vector>

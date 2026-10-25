@@ -1,3 +1,6 @@
+/**
+ * 文件作用：组织应用根导航、底部或侧边导航栏以及小播放器。
+ */
 package com.banlimusic.app
 
 import androidx.compose.animation.EnterTransition

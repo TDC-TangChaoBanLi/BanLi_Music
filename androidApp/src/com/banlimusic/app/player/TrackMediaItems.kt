@@ -1,3 +1,6 @@
+/**
+ * 文件作用：在应用曲目模型与 Media3 MediaItem 之间转换并附加来源信息。
+ */
 package com.banlimusic.app.player
 
 import android.net.Uri

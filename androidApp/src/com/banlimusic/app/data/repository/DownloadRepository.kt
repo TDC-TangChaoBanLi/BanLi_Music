@@ -1,3 +1,6 @@
+/**
+ * 文件作用：持久化下载任务并调度 WorkManager，管理暂停、恢复与文件落盘。
+ */
 package com.banlimusic.app.data.repository
 
 import android.content.Context

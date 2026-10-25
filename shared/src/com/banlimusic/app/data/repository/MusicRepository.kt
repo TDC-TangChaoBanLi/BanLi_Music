@@ -19,7 +19,10 @@ interface MusicRepository {
 
     suspend fun downloadInfo(track: Track, qualityKbps: Int? = null): DownloadInfo
 
-    /** Common quality choices supported by every selected track's provider. */
+    /**
+     * App-level quality tiers available for the given tracks. Implementations
+     * normalize provider choices to the shared four-tier presets.
+     */
     suspend fun downloadQualities(tracks: Collection<Track>): List<Int>
 
     suspend fun providers(): List<ProviderInfo>

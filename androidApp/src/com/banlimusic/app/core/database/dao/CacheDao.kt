@@ -1,3 +1,6 @@
+/**
+ * 文件作用：缓存歌曲索引表的查询与增删改。
+ */
 package com.banlimusic.app.core.database.dao
 
 import androidx.room.Dao
@@ -20,6 +23,9 @@ interface CacheDao {
             "AND qualityKbps = :qualityKbps LIMIT 1",
     )
     suspend fun getForTrackAndQuality(trackId: String, qualityKbps: Int): CachedTrackEntity?
+
+    @Query("SELECT * FROM cached_tracks WHERE cacheKey = :cacheKey")
+    suspend fun getByKey(cacheKey: String): CachedTrackEntity?
 
     @Upsert
     suspend fun upsert(entity: CachedTrackEntity)

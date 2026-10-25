@@ -1,3 +1,6 @@
+/**
+ * 文件作用：管理非音频缓存目录，统计各类缓存大小并执行清理。
+ */
 package com.banlimusic.app.core.cache
 
 import android.content.Context

@@ -1,3 +1,6 @@
+/**
+ * 文件作用：音乐库界面，包含收藏、最近播放、本地音乐与库内搜索。
+ */
 package com.banlimusic.app.feature.library
 
 import android.Manifest
@@ -421,6 +424,7 @@ fun LibraryScreen(
                     },
                     downloadQualities = viewModel::downloadQualities,
                     onPlayQueue = onPlayQueue,
+                    onToggleFavorite = viewModel::toggleFavorite,
                     onClearHistory = viewModel::clearHistory,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -1101,6 +1105,7 @@ private fun HistoryTabContent(
     onDownloadSelected: (List<Track>, Int?) -> Unit,
     downloadQualities: suspend (List<Track>) -> List<Int>,
     onPlayQueue: (List<Track>, Int) -> Unit,
+    onToggleFavorite: (Track) -> Unit,
     onClearHistory: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1205,7 +1210,11 @@ private fun HistoryTabContent(
                             },
                             isFavorite = track.id in favoriteFolders,
                             showFavoriteState = false,
-                            onToggleFavorite = null,
+                            onToggleFavorite = if (selectionMode) {
+                                null
+                            } else {
+                                { onToggleFavorite(track) }
+                            },
                             downloaded = track.id in downloadedIds,
                             categoryLabel = favoriteFolders[track.id],
                             selected = if (selectionMode) track.id in selectedIds else null,

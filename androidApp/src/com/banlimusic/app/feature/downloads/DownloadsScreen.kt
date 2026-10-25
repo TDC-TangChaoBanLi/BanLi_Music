@@ -1,3 +1,6 @@
+/**
+ * 文件作用：下载页界面，展示已下载歌曲列表与下载队列。
+ */
 package com.banlimusic.app.feature.downloads
 
 import androidx.compose.foundation.layout.Arrangement
@@ -68,7 +71,7 @@ import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackArtwork
 import com.banlimusic.app.ui.components.TrackRow
 import com.banlimusic.app.ui.components.formatBytes
-import com.banlimusic.app.ui.components.qualityLabel
+import com.banlimusic.app.ui.components.qualityTierLabel
 import kotlinx.coroutines.launch
 
 private enum class DownloadSort(val label: String) {
@@ -298,7 +301,7 @@ private fun DownloadedList(
                     trailing = {
                         if (task.qualityKbps > 0) {
                             Text(
-                                text = qualityLabel(task.qualityKbps),
+                                text = qualityTierLabel(task.qualityKbps),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -512,7 +515,7 @@ private fun DownloadCard(
                 if (task.qualityKbps > 0) {
                     Spacer(Modifier.size(8.dp))
                     Text(
-                        text = qualityLabel(task.qualityKbps),
+                        text = qualityTierLabel(task.qualityKbps),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

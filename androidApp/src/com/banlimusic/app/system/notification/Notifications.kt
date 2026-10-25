@@ -1,3 +1,6 @@
+/**
+ * 文件作用：创建通知渠道，并构建播放停止与下载进度通知。
+ */
 package com.banlimusic.app.system.notification
 
 import android.app.Notification

@@ -1,3 +1,6 @@
+/**
+ * 文件作用：持久化播放队列、当前索引与进度，供播放服务恢复。
+ */
 package com.banlimusic.app.player
 
 import android.content.Context

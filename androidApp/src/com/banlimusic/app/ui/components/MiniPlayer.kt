@@ -1,3 +1,6 @@
+/**
+ * 文件作用：底部导航栏上方的小型播放控制条。
+ */
 package com.banlimusic.app.ui.components
 
 import androidx.compose.foundation.clickable

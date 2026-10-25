@@ -1,3 +1,6 @@
+/**
+ * 文件作用：处理搜索请求、分页、选择状态与批量收藏下载。
+ */
 package com.banlimusic.app.feature.search
 
 import androidx.lifecycle.ViewModel

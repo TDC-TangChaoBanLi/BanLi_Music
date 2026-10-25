@@ -37,7 +37,11 @@ data class ProviderCapabilities(
     val streaming: Boolean = true,
     val lyrics: Boolean = false,
     val download: Boolean = false,
-    /** Empty means the provider does not expose quality choices. */
+    /**
+     * Provider-specific quality options, used for stream resolution and
+     * downloads. The app requests one of its four presets and maps it to the
+     * closest value here. Empty means quality requests pass through unchanged.
+     */
     val downloadQualities: List<Int> = emptyList(),
     val artwork: Boolean = false,
     val playlists: Boolean = false,

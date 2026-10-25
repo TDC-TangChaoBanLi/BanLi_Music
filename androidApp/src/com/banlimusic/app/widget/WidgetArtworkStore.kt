@@ -1,3 +1,6 @@
+/**
+ * 文件作用：下载、缓存并解码桌面小组件使用的海报位图。
+ */
 package com.banlimusic.app.widget
 
 import android.content.Context

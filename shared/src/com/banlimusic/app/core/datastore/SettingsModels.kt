@@ -70,6 +70,8 @@ data class ProviderSettings(
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
+    /** Custom ARGB seed for the theme; null keeps dynamic/system colors. */
+    val customThemeColor: Int? = null,
     val providers: ProviderSettings = ProviderSettings(),
     val allowMobileNetwork: Boolean = true,
     val playbackRetryCount: Int = 3,
@@ -87,6 +89,12 @@ data class AppSettings(
      * player page always resolves artwork normally.
      */
     val requestListArtwork: Boolean = false,
+    /**
+     * Resolves artwork for the current track while it plays so the system media
+     * controls and the desktop widget can show the poster even when the player
+     * screen has never been opened. Cached artwork is always used.
+     */
+    val autoLoadArtwork: Boolean = true,
     val cacheMaxBytes: Long = DEFAULT_CACHE_MAX_BYTES,
     val bottomNavItems: List<String> = DEFAULT_BOTTOM_NAV_ITEMS,
     val agreementAccepted: Boolean = false,

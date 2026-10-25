@@ -1,3 +1,6 @@
+/**
+ * 文件作用：定义下载任务、下载状态与目标位置等领域模型。
+ */
 package com.banlimusic.app.domain.download
 
 import com.banlimusic.app.core.model.Track

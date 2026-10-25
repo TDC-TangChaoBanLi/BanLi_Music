@@ -1,3 +1,6 @@
+/**
+ * 文件作用：应用进程入口，持有全局依赖容器并初始化通知等基础设施。
+ */
 package com.banlimusic.app
 
 import android.app.Application

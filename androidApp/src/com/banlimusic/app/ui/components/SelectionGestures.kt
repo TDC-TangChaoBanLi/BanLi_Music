@@ -1,3 +1,6 @@
+/**
+ * 文件作用：实现列表长按拖拽多选的手势支持。
+ */
 package com.banlimusic.app.ui.components
 
 import androidx.compose.foundation.MutatePriority

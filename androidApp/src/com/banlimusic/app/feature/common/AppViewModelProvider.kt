@@ -1,3 +1,6 @@
+/**
+ * 文件作用：为各页面创建依赖齐全的 ViewModel 工厂。
+ */
 package com.banlimusic.app.feature.common
 
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY

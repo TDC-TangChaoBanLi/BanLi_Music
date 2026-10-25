@@ -1,3 +1,6 @@
+/**
+ * 文件作用：接收小组件按钮点击并通过 MediaController 执行播放操作。
+ */
 package com.banlimusic.app.widget
 
 import android.app.Activity

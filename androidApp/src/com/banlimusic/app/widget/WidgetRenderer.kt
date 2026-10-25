@@ -1,3 +1,6 @@
+/**
+ * 文件作用：使用 RemoteViews 渲染大小两种桌面小组件。
+ */
 package com.banlimusic.app.widget
 
 import android.app.PendingIntent

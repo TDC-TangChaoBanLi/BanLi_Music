@@ -1,3 +1,6 @@
+/**
+ * 文件作用：收藏、收藏夹、播放历史与搜索历史的数据库访问。
+ */
 package com.banlimusic.app.core.database.dao
 
 import androidx.room.Dao

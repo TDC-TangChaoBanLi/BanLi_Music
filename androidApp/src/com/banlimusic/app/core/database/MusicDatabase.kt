@@ -1,3 +1,6 @@
+/**
+ * 文件作用：定义 Room 数据库、版本号与升级迁移。
+ */
 package com.banlimusic.app.core.database
 
 import android.content.Context

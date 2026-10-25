@@ -1,3 +1,6 @@
+/**
+ * 文件作用：聚合音乐源，负责搜索合并、歌词与海报解析以及下载音质能力。
+ */
 package com.banlimusic.app.data.repository
 
 import com.banlimusic.app.core.common.MusicException
@@ -8,6 +11,7 @@ import com.banlimusic.app.core.limiter.RateLimitStatus
 import com.banlimusic.app.core.model.DownloadInfo
 import com.banlimusic.app.core.model.Lyrics
 import com.banlimusic.app.core.model.ProviderInfo
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.SearchPage
 import com.banlimusic.app.core.model.StreamInfo
 import com.banlimusic.app.core.model.Track
@@ -172,13 +176,10 @@ class DefaultMusicRepository(
                 ?: track.sources.firstOrNull { TrackAction.STREAM in it.availableActions }
                     ?.let { providersById[it.providerId] }
         }
-        if (providersForTracks.any { it == null }) return emptyList()
-        val qualities = providersForTracks.filterNotNull().map { it.capabilities.downloadQualities }
-        if (qualities.any { it.isEmpty() }) return emptyList()
-        return qualities
-            .map { it.toSet() }
-            .reduce { common, next -> common.intersect(next) }
-            .sorted()
+        if (providersForTracks.any { it == null || !it.capabilities.download }) return emptyList()
+        // The app always exposes five tiers. Each provider maps a tier to its
+        // closest actual quality when the stream/download request is made.
+        return QualityTiers.PRESET_KBPS
     }
 
     override suspend fun providers(): List<ProviderInfo> {

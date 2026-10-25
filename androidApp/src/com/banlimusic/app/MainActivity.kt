@@ -1,3 +1,6 @@
+/**
+ * 文件作用：应用主 Activity，负责窗口配置、权限请求、协议入口与 Compose 根内容。
+ */
 package com.banlimusic.app
 
 import android.Manifest
@@ -67,6 +70,7 @@ class MainActivity : ComponentActivity() {
             BanLiMusicTheme(
                 themeMode = settings?.themeMode ?: ThemeMode.SYSTEM,
                 dynamicColor = settings?.dynamicColor ?: true,
+                customThemeColor = settings?.customThemeColor,
             ) {
                 val scope = rememberCoroutineScope()
                 when {

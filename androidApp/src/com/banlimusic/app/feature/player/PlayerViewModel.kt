@@ -1,3 +1,6 @@
+/**
+ * 文件作用：管理播放页状态、歌词加载、收藏与下载音质选择。
+ */
 package com.banlimusic.app.feature.player
 
 import androidx.lifecycle.ViewModel

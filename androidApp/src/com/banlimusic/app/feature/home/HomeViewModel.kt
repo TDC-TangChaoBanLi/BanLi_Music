@@ -1,3 +1,6 @@
+/**
+ * 文件作用：加载首页所需的数据并维护页面状态。
+ */
 package com.banlimusic.app.feature.home
 
 import androidx.lifecycle.ViewModel

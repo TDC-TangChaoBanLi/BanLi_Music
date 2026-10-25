@@ -1,3 +1,6 @@
+/**
+ * 文件作用：定义系统媒体控件使用的收藏自定义 SessionCommand。
+ */
 package com.banlimusic.app.player
 
 import android.os.Bundle

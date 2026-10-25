@@ -1,3 +1,6 @@
+/**
+ * 文件作用：维护应用级 MediaController 连接、播放状态与失败重试策略。
+ */
 package com.banlimusic.app.player
 
 import android.content.ComponentName

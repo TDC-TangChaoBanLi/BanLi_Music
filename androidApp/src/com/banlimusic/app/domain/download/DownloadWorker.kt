@@ -1,3 +1,6 @@
+/**
+ * 文件作用：执行单首歌曲下载，处理缓存复用、断点续传与文件发布。
+ */
 package com.banlimusic.app.domain.download
 
 import android.content.ContentValues
@@ -16,6 +19,7 @@ import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.common.TextNormalizer
 import com.banlimusic.app.core.common.userMessage
 import com.banlimusic.app.core.database.entity.DownloadTaskEntity
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.network.JsonHttpClient
 import com.banlimusic.app.data.repository.DownloadRepository
@@ -52,7 +56,9 @@ class DownloadWorker(
 
         return try {
             val settings = container.settingsRepository.current()
-            val quality = entity.qualityKbps.takeIf { it > 0 } ?: settings.qualityKbps
+            val quality = QualityTiers.normalize(
+                entity.qualityKbps.takeIf { it > 0 } ?: settings.qualityKbps,
+            )
             val cached = container.cacheRepository.findForTrack(track.id, quality)
             val fullyCached = cached != null &&
                 container.playbackCache.isComplete(cached.cacheKey, cached.totalBytes)

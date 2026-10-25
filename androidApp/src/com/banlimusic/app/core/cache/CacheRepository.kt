@@ -1,3 +1,6 @@
+/**
+ * 文件作用：维护 Media3 播放缓存索引，提供缓存歌曲查询、删除与转下载。
+ */
 package com.banlimusic.app.core.cache
 
 import com.banlimusic.app.core.database.dao.CacheDao
@@ -62,15 +65,22 @@ class CacheRepository(
         sourceUrl: String?,
     ) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
+        val existing = dao.getByKey(cacheKey)
         dao.upsert(
             CachedTrackEntity(
                 cacheKey = cacheKey,
                 trackId = track.id,
                 trackJson = json.encodeToString(Track.serializer(), track),
                 qualityKbps = qualityKbps,
-                totalBytes = totalBytes.coerceAtLeast(0L),
-                fileExtension = extensionFor(sourceUrl),
-                createdAt = now,
+                // A pre-created index entry has no size yet; never overwrite a
+                // size learned from an earlier resolved stream.
+                totalBytes = maxOf(totalBytes, existing?.totalBytes ?: 0L),
+                fileExtension = if (sourceUrl != null) {
+                    extensionFor(sourceUrl)
+                } else {
+                    existing?.fileExtension ?: "mp3"
+                },
+                createdAt = existing?.createdAt ?: now,
                 lastAccessAt = now,
             ),
         )

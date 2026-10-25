@@ -1,3 +1,6 @@
+/**
+ * 文件作用：管理下载页状态以及播放、暂停、恢复和删除操作。
+ */
 package com.banlimusic.app.feature.downloads
 
 import androidx.lifecycle.ViewModel

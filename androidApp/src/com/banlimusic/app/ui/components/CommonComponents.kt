@@ -1,3 +1,6 @@
+/**
+ * 文件作用：提供封面、曲目行、来源徽标和音质文案等通用 Compose 组件。
+ */
 package com.banlimusic.app.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -28,13 +31,16 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
 import com.banlimusic.app.MusicApplication
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 
 fun providerLabel(providerId: String): String = when (providerId) {
@@ -69,23 +76,24 @@ fun providerLabel(providerId: String): String = when (providerId) {
     else -> providerId.substringAfterLast('-')
 }
 
-fun qualityLabel(kbps: Int): String = when (kbps) {
+fun qualityLabel(kbps: Int): String = when (QualityTiers.normalize(kbps)) {
     128 -> "标准 128K"
     192 -> "较高 192K"
     320 -> "高品 320K"
     740 -> "无损 740K"
-    999 -> "超无损 999K"
     else -> "${kbps}K"
 }
 
-fun qualityShortLabel(kbps: Int): String = when (kbps) {
+fun qualityShortLabel(kbps: Int): String = when (QualityTiers.normalize(kbps)) {
     128 -> "标准"
     192 -> "较高"
     320 -> "高品"
     740 -> "无损"
-    999 -> "超无损"
     else -> "${kbps}K"
 }
+
+/** Display-only tier label: never exposes technical bitrates such as 128K. */
+fun qualityTierLabel(kbps: Int): String = qualityShortLabel(kbps)
 
 fun formatBytes(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
@@ -270,7 +278,7 @@ fun TrackSourceBadges(track: Track, downloaded: Boolean = false) {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun TrackRow(
     track: Track,
@@ -303,7 +311,7 @@ fun TrackRow(
             .clip(RoundedCornerShape(14.dp))
             .then(selectionDragModifier)
             .then(clickModifier)
-            .padding(horizontal = 8.dp, vertical = 7.dp),
+            .padding(start = 8.dp, top = 7.dp, end = 2.dp, bottom = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (selected != null) {
@@ -322,7 +330,7 @@ fun TrackRow(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 12.dp),
+                .padding(start = 12.dp, end = 4.dp),
         ) {
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                 val titleMaxWidth = maxWidth * 0.66f
@@ -383,35 +391,44 @@ fun TrackRow(
                 }
             }
         }
-        if (infoAction != null) {
-            IconButton(onClick = infoAction, modifier = Modifier.size(34.dp)) {
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+            if (infoAction != null) {
+                IconButton(onClick = infoAction, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        imageVector = Icons.Rounded.Info,
+                        contentDescription = "查看信息",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            if (onToggleFavorite != null) {
+                IconButton(onClick = onToggleFavorite, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        imageVector = if (isFavorite) {
+                            Icons.Rounded.Favorite
+                        } else {
+                            Icons.Rounded.FavoriteBorder
+                        },
+                        contentDescription = if (isFavorite) "取消收藏" else "收藏",
+                        tint = if (isFavorite) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            } else if (showFavoriteState && isFavorite) {
                 Icon(
-                    imageVector = Icons.Rounded.Info,
-                    contentDescription = "查看信息",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
+                    imageVector = Icons.Rounded.Favorite,
+                    contentDescription = "已收藏",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp)
+                        .size(16.dp),
                 )
             }
-        }
-        if (onToggleFavorite != null) {
-            IconButton(onClick = onToggleFavorite, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    contentDescription = if (isFavorite) "取消收藏" else "收藏",
-                    tint = if (isFavorite) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-        } else if (showFavoriteState && isFavorite) {
-            Icon(
-                imageVector = Icons.Rounded.Favorite,
-                contentDescription = "已收藏",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(horizontal = 8.dp)
-                    .size(16.dp),
-            )
         }
         trailing?.invoke()
     }

@@ -1,3 +1,6 @@
+/**
+ * 文件作用：全屏播放器界面，包含海报、歌词、收藏与下载操作。
+ */
 package com.banlimusic.app.feature.player
 
 import androidx.activity.compose.BackHandler

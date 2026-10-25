@@ -1,3 +1,6 @@
+/**
+ * 文件作用：提供列表 A-Z 索引与拖动字母气泡组件。
+ */
 package com.banlimusic.app.ui.components
 
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress

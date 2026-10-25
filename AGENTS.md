@@ -119,7 +119,7 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
 - 新增功能或较大范围重构：`0.3.1` → `0.4.0`（MINOR）。
 - 第一位版本号变化必须先获得用户明确指令，不得自动修改。
 
-当前版本为 `0.5.0`，`versionCode` 为 7。
+当前版本为 `0.5.2`，`versionCode` 为 9。
 
 ## 不要提交的文件
 
@@ -136,3 +136,18 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
 - 协程使用结构化并发；不要在主线程执行阻塞 IO。
 - 捕获异常时区分 `CancellationException`，不要吞掉取消。
 - 对用户可见错误使用 `MusicException.userMessage()`。
+
+## 源码文件头注释
+
+- Android APK 主源码（`androidApp/src/**/*.kt`）的每个 Kotlin 文件必须在 `package` 声明之前包含统一格式的中文文件头注释：
+
+  ```kotlin
+  /**
+   * 文件作用：一句话说明该文件在应用中的职责。
+   */
+  ```
+
+- 注释只说明“该文件负责什么”，不要重复类名或堆砌实现细节；新增文件必须同时添加，移动或重命名文件后要检查注释是否仍然准确。
+- 直接参与 APK 的清单文件（如 `androidApp/src/AndroidManifest.xml`）也应在 XML 声明后使用中文注释说明作用。
+- 桌面端源码（`desktopApp/src/**/*.kt`）将来也必须遵守同样的文件头注释规则；本轮只要求 Android APK 源码，桌面端暂不批量补注释。
+- `androidApp/res/README.md` 必须说明资源子目录和主要资源文件的用途；新增、删除或重命名资源时必须同步更新该文件。

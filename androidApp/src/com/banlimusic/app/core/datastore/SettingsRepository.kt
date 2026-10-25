@@ -1,3 +1,6 @@
+/**
+ * 文件作用：通过 DataStore 读写应用设置，并处理校验与旧键兼容。
+ */
 package com.banlimusic.app.core.datastore
 
 import android.content.Context
@@ -9,6 +12,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.banlimusic.app.core.model.QualityTiers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
@@ -30,6 +34,7 @@ class SettingsRepository(private val context: Context) {
     private object Keys {
         val themeMode = stringPreferencesKey("theme_mode")
         val dynamicColor = booleanPreferencesKey("dynamic_color")
+        val customThemeColor = longPreferencesKey("custom_theme_color")
         val quality = intPreferencesKey("quality_kbps")
         val sources = stringSetPreferencesKey("enabled_sources")
         val allowMobileNetwork = booleanPreferencesKey("allow_mobile_network")
@@ -43,6 +48,7 @@ class SettingsRepository(private val context: Context) {
         val downloadLyrics = booleanPreferencesKey("download_lyrics")
         val downloadArtwork = booleanPreferencesKey("download_artwork")
         val requestListArtwork = booleanPreferencesKey("request_list_artwork")
+        val autoLoadArtwork = booleanPreferencesKey("auto_load_artwork")
         val cacheMaxBytes = longPreferencesKey("cache_max_bytes")
         val bottomNavItems = stringPreferencesKey("bottom_nav_items")
         val agreementAccepted = booleanPreferencesKey("agreement_accepted")
@@ -74,9 +80,11 @@ class SettingsRepository(private val context: Context) {
                 .toSet()
             val gd = GdProviderSettings(
                 enabledSourceKeys = sources,
-                playbackQualityKbps = (preferences[Keys.gdPlaybackQuality]
-                    ?: preferences[Keys.quality]
-                    ?: 128).takeIf { it > 0 } ?: 128,
+                playbackQualityKbps = QualityTiers.normalize(
+                    (preferences[Keys.gdPlaybackQuality]
+                        ?: preferences[Keys.quality]
+                        ?: 128).takeIf { it > 0 } ?: 128,
+                ),
                 apiLimitPerWindow = (preferences[Keys.gdApiLimit]
                     ?: preferences[Keys.apiLimitPerWindow]
                     ?: 45).coerceIn(1, MAX_API_LIMIT_PER_WINDOW),
@@ -90,6 +98,9 @@ class SettingsRepository(private val context: Context) {
                     ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
                     ?: ThemeMode.SYSTEM,
                 dynamicColor = preferences[Keys.dynamicColor] ?: true,
+                customThemeColor = preferences[Keys.customThemeColor]
+                    ?.takeIf { it != 0L }
+                    ?.toInt(),
                 providers = ProviderSettings(
                     gd = gd,
                     customSources = parseCustomSources(preferences[Keys.customSources]),
@@ -100,11 +111,13 @@ class SettingsRepository(private val context: Context) {
                     .coerceIn(1, 10),
                 defaultShowLyrics = preferences[Keys.defaultShowLyrics] ?: false,
                 downloadDirectory = preferences[Keys.downloadDirectory].orEmpty(),
-                downloadQualityKbps = (preferences[Keys.downloadQuality] ?: 128)
-                    .takeIf { it > 0 } ?: 128,
+                downloadQualityKbps = QualityTiers.normalize(
+                    (preferences[Keys.downloadQuality] ?: 128).takeIf { it > 0 } ?: 128,
+                ),
                 downloadLyrics = preferences[Keys.downloadLyrics] ?: false,
                 downloadArtwork = preferences[Keys.downloadArtwork] ?: false,
                 requestListArtwork = preferences[Keys.requestListArtwork] ?: false,
+                autoLoadArtwork = preferences[Keys.autoLoadArtwork] ?: true,
                 cacheMaxBytes = (preferences[Keys.cacheMaxBytes] ?: DEFAULT_CACHE_MAX_BYTES)
                     .coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES),
                 bottomNavItems = navItems,
@@ -132,8 +145,18 @@ class SettingsRepository(private val context: Context) {
         it[Keys.dynamicColor] = enabled
     }
 
+    suspend fun setCustomThemeColor(color: Int?) = context.settingsDataStore.edit { preferences ->
+        if (color == null) {
+            preferences.remove(Keys.customThemeColor)
+        } else {
+            preferences[Keys.customThemeColor] = color.toLong() and 0xFFFFFFFFL
+        }
+    }
+
     suspend fun setQuality(qualityKbps: Int) = context.settingsDataStore.edit {
-        it[Keys.gdPlaybackQuality] = if (qualityKbps > 0) qualityKbps else 128
+        it[Keys.gdPlaybackQuality] = QualityTiers.normalize(
+            if (qualityKbps > 0) qualityKbps else 128,
+        )
     }
 
     suspend fun setSourceEnabled(source: String, enabled: Boolean) =
@@ -177,7 +200,11 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setDownloadQuality(qualityKbps: Int) = context.settingsDataStore.edit {
-        it[Keys.downloadQuality] = if (qualityKbps > 0) qualityKbps else 0
+        it[Keys.downloadQuality] = if (qualityKbps > 0) {
+            QualityTiers.normalize(qualityKbps)
+        } else {
+            0
+        }
     }
 
     suspend fun setDownloadLyrics(enabled: Boolean) = context.settingsDataStore.edit {
@@ -190,6 +217,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setRequestListArtwork(enabled: Boolean) = context.settingsDataStore.edit {
         it[Keys.requestListArtwork] = enabled
+    }
+
+    suspend fun setAutoLoadArtwork(enabled: Boolean) = context.settingsDataStore.edit {
+        it[Keys.autoLoadArtwork] = enabled
     }
 
     suspend fun setCacheMaxBytes(bytes: Long) = context.settingsDataStore.edit {

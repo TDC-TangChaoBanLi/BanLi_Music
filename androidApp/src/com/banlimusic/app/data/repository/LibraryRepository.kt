@@ -1,3 +1,6 @@
+/**
+ * 文件作用：提供收藏、播放历史、搜索历史以及收藏导入导出能力。
+ */
 package com.banlimusic.app.data.repository
 
 import com.banlimusic.app.core.database.dao.LibraryDao

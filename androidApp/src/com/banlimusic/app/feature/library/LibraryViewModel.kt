@@ -1,3 +1,6 @@
+/**
+ * 文件作用：管理音乐库数据、收藏、批量操作与本地音乐扫描状态。
+ */
 package com.banlimusic.app.feature.library
 
 import android.net.Uri

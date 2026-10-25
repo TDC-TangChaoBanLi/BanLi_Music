@@ -1,3 +1,6 @@
+/**
+ * 文件作用：下载任务表的查询、状态与进度更新。
+ */
 package com.banlimusic.app.core.database.dao
 
 import androidx.room.Dao

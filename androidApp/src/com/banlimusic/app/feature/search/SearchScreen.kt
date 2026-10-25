@@ -1,3 +1,6 @@
+/**
+ * 文件作用：搜索页界面，支持分页、多选、收藏与批量下载。
+ */
 package com.banlimusic.app.feature.search
 
 import android.widget.Toast

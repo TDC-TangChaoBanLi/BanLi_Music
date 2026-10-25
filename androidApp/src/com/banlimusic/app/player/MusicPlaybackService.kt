@@ -1,3 +1,6 @@
+/**
+ * 文件作用：Media3 媒体会话服务，管理播放器、缓存键、媒体控件与小组件回调。
+ */
 package com.banlimusic.app.player
 
 import android.app.PendingIntent
@@ -8,10 +11,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.Player
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheKeyFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
@@ -21,8 +26,10 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionCommands
 import androidx.media3.session.SessionResult
 import androidx.core.net.toUri
+import com.banlimusic.app.AppContainer
 import com.banlimusic.app.MainActivity
 import com.banlimusic.app.MusicApplication
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.network.JsonHttpClient
 import com.banlimusic.app.domain.playback.StreamUriCodec
@@ -37,6 +44,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
@@ -48,6 +56,7 @@ class MusicPlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lastRecordedMediaId: String? = null
     private var widgetTicker: Job? = null
+    private var artworkJob: Job? = null
     @Volatile
     private var favoriteIds: Set<String> = emptySet()
     @Volatile
@@ -61,6 +70,7 @@ class MusicPlaybackService : MediaSessionService() {
         ): MediaSession.ConnectionResult {
             val sessionCommands = SessionCommands.Builder()
                 .add(FavoriteCommand.sessionCommand)
+                .add(PlayOrderCommand.sessionCommand)
                 .build()
             val playerCommands = if (controller.isTrusted) {
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
@@ -81,6 +91,10 @@ class MusicPlaybackService : MediaSessionService() {
         ): ListenableFuture<SessionResult> {
             if (customCommand.customAction == FavoriteCommand.ACTION) {
                 toggleFavorite()
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            if (customCommand.customAction == PlayOrderCommand.ACTION) {
+                cyclePlayOrder()
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
             return Futures.immediateFuture(
@@ -108,9 +122,8 @@ class MusicPlaybackService : MediaSessionService() {
                 val candidates = StreamUriCodec.decode(encoded)
                 val resolved = container.streamResolver.resolveBlockingInfo(candidates)
                 val mediaId = StreamUriCodec.mediaIdOf(uriText)
-                val cacheKey = mediaId?.let {
-                    StreamUriCodec.cacheKey(it, resolved.qualityKbps)
-                }
+                val quality = playbackQuality(container)
+                val cacheKey = mediaId?.let { StreamUriCodec.cacheKey(it, quality) }
                 if (mediaId != null && cacheKey != null) {
                     trackById[mediaId]?.let { track ->
                         scope.launch(Dispatchers.IO) {
@@ -118,7 +131,7 @@ class MusicPlaybackService : MediaSessionService() {
                                 container.cacheRepository.record(
                                     track = track,
                                     cacheKey = cacheKey,
-                                    qualityKbps = resolved.qualityKbps,
+                                    qualityKbps = quality,
                                     totalBytes = resolved.info.sizeBytes ?: 0L,
                                     sourceUrl = resolved.info.url,
                                 )
@@ -142,6 +155,11 @@ class MusicPlaybackService : MediaSessionService() {
                     CacheDataSource.Factory()
                         .setCache(container.playbackCache.cache)
                         .setUpstreamDataSourceFactory(resolvingFactory)
+                        // Stable keys make cached audio discoverable in the cache
+                        // settings list and keep different qualities separate.
+                        .setCacheKeyFactory(CacheKeyFactory { dataSpec ->
+                            cacheKeyFor(dataSpec, container)
+                        })
                         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR),
                 ),
             )
@@ -171,10 +189,14 @@ class MusicPlaybackService : MediaSessionService() {
             .build()
 
         restoreQueue(container)
+        currentTrack(exoPlayer).let { track ->
+            scheduleArtwork(exoPlayer, track)
+            ensureCacheIndex(track)
+        }
         scope.launch {
             container.libraryRepository.observeFavoriteIds().collect { ids ->
                 favoriteIds = ids
-                refreshFavoriteUI()
+                refreshMediaButtons()
                 player?.let(::updateWidget)
             }
         }
@@ -189,7 +211,10 @@ class MusicPlaybackService : MediaSessionService() {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 rememberTrack(mediaItem)
                 maybeRecordPlayback(exoPlayer)
-                refreshFavoriteUI()
+                refreshMediaButtons()
+                val track = TrackMediaItems.trackOf(mediaItem, container.json)
+                scheduleArtwork(exoPlayer, track)
+                ensureCacheIndex(track)
                 persistQueue(container)
                 updateWidgetWithRetry(exoPlayer)
             }
@@ -207,6 +232,14 @@ class MusicPlaybackService : MediaSessionService() {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 persistQueue(container)
                 updateWidgetWithRetry(exoPlayer)
+            }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                refreshMediaButtons()
+            }
+
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                refreshMediaButtons()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -277,6 +310,7 @@ class MusicPlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         widgetTicker?.cancel()
+        artworkJob?.cancel()
         (application as? MusicApplication)?.let { persistQueue(it.container) }
         player?.let { current ->
             val item = current.currentMediaItem
@@ -319,6 +353,13 @@ class MusicPlaybackService : MediaSessionService() {
         val items = restored.tracks.map { TrackMediaItems.create(it, container.json) }
         if (items.isEmpty()) return
         current.setMediaItems(items, restored.index, restored.positionMs)
+        // The app defaults to list repeat; keep the notification button in sync
+        // with the state a normal in-app playback would use.
+        if (!current.shuffleModeEnabled && current.repeatMode == Player.REPEAT_MODE_OFF) {
+            current.repeatMode = Player.REPEAT_MODE_ALL
+        }
+        rememberTracks(current)
+        refreshMediaButtons()
         updateWidget(current)
     }
 
@@ -415,26 +456,151 @@ class MusicPlaybackService : MediaSessionService() {
             val category = container.settingsRepository.current().defaultFavoriteCategory
             runCatching { container.libraryRepository.toggleFavorite(track, category) }
             withContext(Dispatchers.Main.immediate) {
-                refreshFavoriteUI()
+                refreshMediaButtons()
                 player?.let(::updateWidget)
             }
         }
     }
 
-    private fun refreshFavoriteUI() {
-        val favorite = player?.currentMediaItem?.mediaId?.let { it in favoriteIds } ?: false
-        if (favorite == currentFavorite) return
-        currentFavorite = favorite
-        mediaSession?.setMediaButtonPreferences(mediaButtons(favorite))
+    /** Shuffle → list repeat → single repeat, matching the in-app play button. */
+    private fun cyclePlayOrder() {
+        val current = player ?: return
+        when {
+            current.shuffleModeEnabled -> {
+                current.shuffleModeEnabled = false
+                current.repeatMode = Player.REPEAT_MODE_ALL
+            }
+
+            current.repeatMode == Player.REPEAT_MODE_ONE -> {
+                current.repeatMode = Player.REPEAT_MODE_OFF
+                current.shuffleModeEnabled = true
+            }
+
+            else -> current.repeatMode = Player.REPEAT_MODE_ONE
+        }
+        refreshMediaButtons()
+        updateWidget(current)
     }
 
-    private fun mediaButtons(isFavorite: Boolean): List<CommandButton> {
+    private fun currentTrack(player: Player): Track? {
+        val container = (application as MusicApplication).container
+        return TrackMediaItems.trackOf(player.currentMediaItem, container.json)
+    }
+
+    /**
+     * Resolves artwork for the playing track so the notification and widget do
+     * not keep showing the previous poster. Cached artwork is always applied;
+     * provider requests only happen when the setting is enabled.
+     */
+    private fun scheduleArtwork(player: Player, track: Track?) {
+        artworkJob?.cancel()
+        track ?: return
+        val container = (application as MusicApplication).container
+        artworkJob = scope.launch {
+            val metadataArtwork = player.currentMediaItem
+                ?.takeIf { it.mediaId == track.id }
+                ?.mediaMetadata?.artworkUri?.toString()
+            val cached = runCatching { container.mediaMetadataCache.artwork(track.id) }
+                .getOrNull()
+            val artwork = when {
+                !cached.isNullOrBlank() -> cached
+                !metadataArtwork.isNullOrBlank() -> metadataArtwork
+                !container.settingsRepository.current().autoLoadArtwork -> return@launch
+                else -> runCatching { container.musicRepository.artwork(track) }.getOrNull()
+            } ?: return@launch
+            withContext(Dispatchers.Main.immediate) {
+                val current = player.currentMediaItem ?: return@withContext
+                if (current.mediaId != track.id) return@withContext
+                if (current.mediaMetadata.artworkUri?.toString() == artwork) return@withContext
+                val index = player.currentMediaItemIndex
+                if (index != C.INDEX_UNSET) {
+                    runCatching {
+                        player.replaceMediaItem(index, TrackMediaItems.withArtwork(current, artwork))
+                    }
+                }
+                updateWidget(player)
+            }
+        }
+    }
+
+    /**
+     * Creates the cache index entry as soon as a track becomes current. The
+     * data source may run before ExoPlayer delivers its timeline callbacks, so
+     * relying on the resolver alone would leave the cached-song list empty.
+     */
+    private fun ensureCacheIndex(track: Track?) {
+        track ?: return
+        val container = (application as MusicApplication).container
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val quality = QualityTiers.normalize(
+                    container.settingsRepository.current().qualityKbps,
+                )
+                container.cacheRepository.record(
+                    track = track,
+                    cacheKey = StreamUriCodec.cacheKey(track.id, quality),
+                    qualityKbps = quality,
+                    totalBytes = 0L,
+                    sourceUrl = null,
+                )
+            }
+        }
+    }
+
+    /** Stable cache key shared by the cache data source and the cache index. */
+    private fun cacheKeyFor(dataSpec: DataSpec, container: AppContainer): String {
+        val uri = dataSpec.uri
+        if (uri.scheme != StreamUriCodec.SCHEME) return uri.toString()
+        val mediaId = StreamUriCodec.mediaIdOf(uri.toString()) ?: return uri.toString()
+        return StreamUriCodec.cacheKey(mediaId, playbackQuality(container))
+    }
+
+    /** App-level tier used for cache keys and the cache index. */
+    private fun playbackQuality(container: AppContainer): Int = QualityTiers.normalize(
+        runBlocking { container.settingsRepository.current().qualityKbps },
+    )
+
+    private fun refreshMediaButtons() {
+        val current = player ?: return
+        val favorite = current.currentMediaItem?.mediaId?.let { it in favoriteIds } ?: false
+        currentFavorite = favorite
+        mediaSession?.setMediaButtonPreferences(
+            mediaButtons(
+                isFavorite = favorite,
+                shuffleEnabled = current.shuffleModeEnabled,
+                repeatMode = current.repeatMode,
+            ),
+        )
+    }
+
+    private fun mediaButtons(
+        isFavorite: Boolean,
+        shuffleEnabled: Boolean = false,
+        repeatMode: Int = Player.REPEAT_MODE_OFF,
+    ): List<CommandButton> {
         val favorite = CommandButton.Builder(
             if (isFavorite) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED,
         )
             .setSessionCommand(FavoriteCommand.sessionCommand)
             .setDisplayName(if (isFavorite) "取消收藏" else "收藏")
             .setSlots(CommandButton.SLOT_BACK_SECONDARY, CommandButton.SLOT_OVERFLOW)
+            .build()
+        val playOrder = CommandButton.Builder(
+            when {
+                shuffleEnabled -> CommandButton.ICON_SHUFFLE_ON
+                repeatMode == Player.REPEAT_MODE_ONE -> CommandButton.ICON_REPEAT_ONE
+                else -> CommandButton.ICON_REPEAT_ALL
+            },
+        )
+            .setSessionCommand(PlayOrderCommand.sessionCommand)
+            .setDisplayName(
+                when {
+                    shuffleEnabled -> "随机播放"
+                    repeatMode == Player.REPEAT_MODE_ONE -> "单曲循环"
+                    else -> "列表循环"
+                },
+            )
+            .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
             .build()
         val previous = CommandButton.Builder(CommandButton.ICON_PREVIOUS)
             .setPlayerCommand(Player.COMMAND_SEEK_TO_PREVIOUS)
@@ -446,7 +612,7 @@ class MusicPlaybackService : MediaSessionService() {
             .setDisplayName("下一首")
             .setSlots(CommandButton.SLOT_FORWARD)
             .build()
-        return listOf(previous, favorite, next)
+        return listOf(previous, favorite, playOrder, next)
     }
 
     companion object {

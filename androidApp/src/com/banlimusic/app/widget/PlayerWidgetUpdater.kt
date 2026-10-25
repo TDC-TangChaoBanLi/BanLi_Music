@@ -1,3 +1,6 @@
+/**
+ * 文件作用：维护桌面小组件状态快照、持久化与刷新调度。
+ */
 package com.banlimusic.app.widget
 
 import android.content.Context

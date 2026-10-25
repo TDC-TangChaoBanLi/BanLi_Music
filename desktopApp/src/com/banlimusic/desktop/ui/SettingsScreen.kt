@@ -134,7 +134,7 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "桌面播放器当前使用 JLayer 解码 MP3，因此暂不提供 740/999 无损音质。",
+                text = "桌面播放器当前使用 JLayer 解码 MP3，因此暂不提供 740 无损音质。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

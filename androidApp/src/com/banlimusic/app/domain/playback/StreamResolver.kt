@@ -1,9 +1,13 @@
+/**
+ * 文件作用：播放时懒解析临时流地址，并套用四档音质映射与限流。
+ */
 package com.banlimusic.app.domain.playback
 
 import androidx.core.net.toUri
 import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.common.TtlCache
 import com.banlimusic.app.core.datastore.SettingsRepository
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.network.NetworkMonitor
 import com.banlimusic.app.core.model.StreamInfo
 import com.banlimusic.app.data.source.MusicProvider
@@ -27,15 +31,19 @@ class StreamResolver(
         }
         // Playback retry handles failures; do not silently switch to another source.
         val effective = candidates.take(1)
-        val quality = qualityKbps ?: current.qualityKbps
+        val quality = QualityTiers.normalize(qualityKbps ?: current.qualityKbps)
         val cacheKey = effective.joinToString(";") { "${it.providerId}:${it.providerTrackId}" } + ":$quality"
         cache.get(cacheKey)?.let { return it }
 
         var lastError: Throwable? = null
         for (candidate in effective) {
             val provider = providers[candidate.providerId] ?: continue
+            val providerQuality = QualityTiers.mapToProvider(
+                requestedKbps = quality,
+                providerQualities = provider.capabilities.downloadQualities,
+            )
             try {
-                val info = provider.resolveStream(candidate.providerTrackId, quality)
+                val info = provider.resolveStream(candidate.providerTrackId, providerQuality)
                 cache.put(cacheKey, info)
                 return info
             } catch (cancelled: CancellationException) {
@@ -67,7 +75,7 @@ class StreamResolver(
         candidates: List<StreamCandidate>,
         qualityKbps: Int? = null,
     ): ResolvedStream = runBlocking {
-        val quality = qualityKbps ?: settings.current().qualityKbps
+        val quality = QualityTiers.normalize(qualityKbps ?: settings.current().qualityKbps)
         val info = withTimeout(30_000L) { resolve(candidates, quality) }
         ResolvedStream(info = info, qualityKbps = info.bitrateKbps ?: quality)
     }

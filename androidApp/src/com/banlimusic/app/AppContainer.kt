@@ -1,3 +1,6 @@
+/**
+ * 文件作用：手动依赖容器，集中创建数据库、设置、音乐源、缓存、下载与播放控制器。
+ */
 package com.banlimusic.app
 
 import android.content.Context

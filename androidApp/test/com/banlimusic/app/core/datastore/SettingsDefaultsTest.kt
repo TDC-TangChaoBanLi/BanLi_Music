@@ -2,6 +2,7 @@ package com.banlimusic.app.core.datastore
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,5 +33,7 @@ class SettingsDefaultsTest {
         assertEquals(20, settings.searchPageSize)
         assertTrue(settings.providers.customSources.isEmpty())
         assertFalse(settings.requestListArtwork)
+        assertTrue(settings.autoLoadArtwork)
+        assertNull(settings.customThemeColor)
     }
 }

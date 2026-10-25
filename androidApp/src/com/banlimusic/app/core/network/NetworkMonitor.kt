@@ -1,3 +1,6 @@
+/**
+ * 文件作用：检测当前网络是否为计费网络，用于移动网络播放限制。
+ */
 package com.banlimusic.app.core.network
 
 import android.content.Context
