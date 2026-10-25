@@ -345,6 +345,16 @@ androidApp/
 ./kotlin run -m desktopApp
 ```
 
+Windows x64 便携版产物为 `dist/BanLiMusic-<version>-windows-x64.zip`，包含：
+
+- `BanLiMusic.exe`：Launch4j 生成的 Windows 启动器（未签名）
+- `app/`：应用 classpath 与依赖，包含 Windows Skiko 原生库
+- `runtime/`：BellSoft Liberica JRE 21（Windows x64）
+- `BanLiMusic.bat` / `BanLiMusic-console.bat`：启动器被安全软件拦截时的备用入口
+- `README.txt`、`THIRD_PARTY_NOTICES.txt` 和 `.zip.sha256`
+
+该包可以在 Linux/WSL 内交叉生成，不依赖 Windows 主机或 Wine；`desktopApp/module.yaml` 同时保留 Linux 与 Windows 的 Compose Desktop 原生运行时。由于 Amper 的 executable jar 会对不同 group 下同名的 `runtime-desktop` 做文件名去重，Windows 包使用普通 classpath 启动器，而不是 Spring Boot 可执行 jar。
+
 关键原则：
 
 1. UI 只依赖 `MusicRepository`，不直接访问 GD API。

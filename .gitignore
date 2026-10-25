@@ -6,6 +6,8 @@
 local.properties
 .tooling/
 build/
+build-win/
+build-pkg-probe/
 **/build/
 dist/
 captures/

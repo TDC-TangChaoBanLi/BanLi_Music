@@ -9,6 +9,9 @@ repositories:
 dependencies:
   - //shared
   - $compose.desktop.currentOs
+  # Kept alongside currentOs so the executable jar also carries Windows Skiko
+  # natives and can be packaged from Linux/WSL without a Windows host.
+  - org.jetbrains.compose.desktop:desktop-jvm-windows-x64:1.12.1
   - $compose.material3
   - $libs.compose.material.icons.core
   - $libs.kotlinx.coroutines.core
