@@ -49,6 +49,16 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
    - 序列化的 `Track` / `TrackSource` 新增字段必须提供默认值，保证旧下载记录和收藏记录可反序列化。
    - DataStore 新增键必须提供默认值，并处理旧版本缺失键的情况。
 
+8. **云同步（Android）**
+   - 与平台无关的同步文档、合并算法与 Graph 客户端放 `shared/`；令牌存储、OAuth 回调、Worker 与设置 UI 留在 `androidApp/`。
+   - 同步请求必须使用独立 OkHttp 与独立 `RequestScheduler`，不得占用 GD 的 5 分钟请求额度。
+   - 只允许访问 Graph `special/approot` 下的 `library.json`；权限使用 `Files.ReadWrite.AppFolder`（仅个人 Microsoft 账号），不得申请整个 OneDrive 的读写权限。
+   - `OneDriveConfig.CLIENT_ID` 是公开的应用标识符，允许提交到仓库；它不是密钥，禁止添加 client secret，也不得把令牌写入仓库。
+   - refresh token 必须使用 Android Keystore 加密并存入 `noBackupFilesDir`，不得写入 DataStore、普通文件或日志。
+   - 收藏/收藏夹删除必须写墓碑（`deletedAt`）并参与双向合并；禁止整库覆盖式同步。
+   - 同步文档与同步相关实体新增字段必须提供默认值；`ProviderCapabilities` 不用于表达云同步能力。
+   - OAuth 回调仅监听 `msauth://com.banlimusic.app`，且必须校验 `state` 与 PKCE verifier。
+
 ## 包体积与依赖
 
 - **尽量不引入大的外部包**。优先使用 AndroidX、平台 API、现有依赖。
@@ -119,7 +129,7 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
 - 新增功能或较大范围重构：`0.3.1` → `0.4.0`（MINOR）。
 - 第一位版本号变化必须先获得用户明确指令，不得自动修改。
 
-当前版本为 `0.5.2`，`versionCode` 为 9。
+当前版本为 `0.6.0`，`versionCode` 为 10。
 
 ## 不要提交的文件
 

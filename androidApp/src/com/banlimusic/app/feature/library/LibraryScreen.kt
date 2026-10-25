@@ -51,6 +51,7 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -78,6 +79,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -199,7 +201,8 @@ fun LibraryScreen(
             val filtered = when (searchFilter) {
                 LibrarySearchFilter.ALL -> allFavorites + history + localTracks
                 LibrarySearchFilter.FAVORITES -> allFavorites.filter { track ->
-                    searchCategory == null || favoriteFolders[track.id] == searchCategory
+                    searchCategory == null ||
+                        favoriteFolders[track.id]?.contains(searchCategory) == true
                 }
                 LibrarySearchFilter.HISTORY -> history
                 LibrarySearchFilter.LOCAL -> localTracks
@@ -382,10 +385,15 @@ fun LibraryScreen(
                         selectionMode = false
                         viewModel.clearSelection()
                     },
-                    onAddFavorites = { tracks, category ->
-                        viewModel.addFavorites(tracks, category)
+                    onAddFavorites = { tracks, folders ->
+                        viewModel.addFavorites(tracks, folders)
                         selectionMode = false
                     },
+                    onRemoveFromSelection = { tracks, folder ->
+                        viewModel.removeFavorites(tracks, folder)
+                        selectionMode = false
+                    },
+                    onDeleteCategory = viewModel::deleteCategory,
                     onDownloadSelected = { tracks, quality ->
                         viewModel.downloadSelected(tracks, quality)
                         selectionMode = false
@@ -414,8 +422,8 @@ fun LibraryScreen(
                         selectionMode = false
                         viewModel.clearSelection()
                     },
-                    onAddFavorites = { tracks, category ->
-                        viewModel.addFavorites(tracks, category)
+                    onAddFavorites = { tracks, folders ->
+                        viewModel.addFavorites(tracks, folders)
                         selectionMode = false
                     },
                     onDownloadSelected = { tracks, quality ->
@@ -449,8 +457,8 @@ fun LibraryScreen(
                         selectionMode = false
                         viewModel.clearSelection()
                     },
-                    onAddFavorites = { tracks, category ->
-                        viewModel.addFavorites(tracks, category)
+                    onAddFavorites = { tracks, folders ->
+                        viewModel.addFavorites(tracks, folders)
                         selectionMode = false
                     },
                     onDownloadSelected = { tracks, quality ->
@@ -573,7 +581,7 @@ private fun LibrarySearchContent(
     onSort: (TrackSort) -> Unit,
     onToggleOrder: () -> Unit,
     favoriteIds: Set<String>,
-    favoriteFolders: Map<String, String>,
+    favoriteFolders: Map<String, Set<String>>,
     downloadedIds: Set<String>,
     onPlayQueue: (List<Track>, Int) -> Unit,
     onToggleFavorite: (Track) -> Unit,
@@ -685,7 +693,7 @@ private fun LibrarySearchContent(
                             isFavorite = track.id in favoriteIds,
                             onToggleFavorite = { onToggleFavorite(track) },
                             downloaded = track.id in downloadedIds,
-                            categoryLabel = favoriteFolders[track.id],
+                            categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
                         )
                     }
                 }
@@ -765,7 +773,7 @@ private fun FavoritesTabContent(
     categories: List<String>,
     selectedCategory: String?,
     defaultCategory: String,
-    favoriteFolders: Map<String, String>,
+    favoriteFolders: Map<String, Set<String>>,
     downloadedIds: Set<String>,
     selectionMode: Boolean,
     selectedIds: Set<String>,
@@ -777,7 +785,9 @@ private fun FavoritesTabContent(
     onToggleSelection: (String) -> Unit,
     onSelectAll: () -> Unit,
     onClearSelection: () -> Unit,
-    onAddFavorites: (List<Track>, String) -> Unit,
+    onAddFavorites: (List<Track>, Set<String>) -> Unit,
+    onRemoveFromSelection: (List<Track>, String?) -> Unit,
+    onDeleteCategory: (String) -> Unit,
     onDownloadSelected: (List<Track>, Int?) -> Unit,
     downloadQualities: suspend (List<Track>) -> List<Int>,
     onHeaderVisibilityChange: (Boolean) -> Unit,
@@ -792,10 +802,12 @@ private fun FavoritesTabContent(
         }
     }
     val validIds = remember(favorites) { favorites.map { it.id }.toSet() }
-    var chosenCategory by remember(defaultCategory) { mutableStateOf(defaultCategory) }
+    var chosenCategories by remember(defaultCategory) { mutableStateOf(setOf(defaultCategory)) }
     var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
     var chosenQuality by remember { mutableStateOf<Int?>(null) }
     var headerVisible by remember { mutableStateOf(true) }
+    var manageCategories by remember { mutableStateOf(false) }
+    var pendingDeleteCategory by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(listState) {
         var previousIndex = 0
@@ -860,6 +872,16 @@ private fun FavoritesTabContent(
                                     onClick = onCreateCategory,
                                     label = {
                                         Text("+ 新建", style = MaterialTheme.typography.labelSmall)
+                                    },
+                                    modifier = Modifier.height(28.dp),
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = false,
+                                    onClick = { manageCategories = true },
+                                    label = {
+                                        Text("管理", style = MaterialTheme.typography.labelSmall)
                                     },
                                     modifier = Modifier.height(28.dp),
                                 )
@@ -944,7 +966,7 @@ private fun FavoritesTabContent(
                             showFavoriteState = false,
                             onToggleFavorite = null,
                             downloaded = track.id in downloadedIds,
-                            categoryLabel = favoriteFolders[track.id],
+                            categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
                             selected = if (selectionMode) track.id in selectedIds else null,
                         )
                     }
@@ -971,18 +993,84 @@ private fun FavoritesTabContent(
             TrackSelectionBar(
                 count = selectedIds.size,
                 categories = (categories + defaultCategory).distinct(),
-                chosenCategory = chosenCategory,
-                onCategoryChange = { chosenCategory = it },
+                chosenCategories = chosenCategories,
+                onCategoriesChange = { chosenCategories = it },
                 qualities = qualities,
                 chosenQuality = chosenQuality,
                 onQualityChange = { chosenQuality = it },
-                onFavorite = { onAddFavorites(favorites, chosenCategory) },
+                onFavorite = { onAddFavorites(favorites, chosenCategories) },
                 onDownload = { onDownloadSelected(favorites, chosenQuality) },
                 onSelectAll = onSelectAll,
                 onCancel = onClearSelection,
+                onDelete = {
+                    onRemoveFromSelection(
+                        favorites.filter { it.id in selectedIds },
+                        selectedCategory,
+                    )
+                },
+                deleteLabel = if (selectedCategory == null) "取消收藏" else "移出本夹",
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
+    }
+
+    if (manageCategories) {
+        AlertDialog(
+            onDismissRequest = { manageCategories = false },
+            title = { Text("管理收藏夹") },
+            text = {
+                if (categories.isEmpty()) {
+                    Text("还没有收藏夹")
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                        items(categories) { category ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = category,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                TextButton(onClick = { pendingDeleteCategory = category }) {
+                                    Text("删除")
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { manageCategories = false }) { Text("关闭") }
+            },
+        )
+    }
+
+    pendingDeleteCategory?.let { category ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteCategory = null },
+            title = { Text("删除收藏夹“$category”") },
+            text = {
+                Text(
+                    "只会移除这个收藏夹和其中的归属关系，歌曲仍保留在其他收藏夹中。" +
+                        "删除会在下次同步时同步到其他设备。",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteCategory(category)
+                        pendingDeleteCategory = null
+                        if (selectedCategory == category) onSelectCategory(null)
+                    },
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteCategory = null }) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -990,8 +1078,8 @@ private fun FavoritesTabContent(
 private fun TrackSelectionBar(
     count: Int,
     categories: List<String>,
-    chosenCategory: String,
-    onCategoryChange: (String) -> Unit,
+    chosenCategories: Set<String>,
+    onCategoriesChange: (Set<String>) -> Unit,
     qualities: List<Int>,
     chosenQuality: Int?,
     onQualityChange: (Int) -> Unit,
@@ -1001,9 +1089,11 @@ private fun TrackSelectionBar(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     onDelete: (() -> Unit)? = null,
+    deleteLabel: String = "删除",
 ) {
-    var categoryMenu by remember { mutableStateOf(false) }
+    var categoryDialog by remember { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
+    var draftCategories by remember(chosenCategories) { mutableStateOf(chosenCategories) }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -1019,25 +1109,61 @@ private fun TrackSelectionBar(
         ) {
             Box {
                 CompactTextButton(
-                    text = "$chosenCategory ▾",
-                    onClick = { categoryMenu = true },
+                    text = when {
+                        chosenCategories.isEmpty() -> "选择收藏夹 ▾"
+                        chosenCategories.size == 1 -> "${chosenCategories.first()} ▾"
+                        else -> "${chosenCategories.size} 个收藏夹 ▾"
+                    },
+                    onClick = {
+                        draftCategories = chosenCategories
+                        categoryDialog = true
+                    },
                 )
-                DropdownMenu(
-                    expanded = categoryMenu,
-                    onDismissRequest = { categoryMenu = false },
-                ) {
-                    categories.forEach { category ->
-                        DropdownMenuItem(
-                            text = { Text(category) },
-                            onClick = {
-                                categoryMenu = false
-                                onCategoryChange(category)
-                            },
-                        )
-                    }
+                if (categoryDialog) {
+                    AlertDialog(
+                        onDismissRequest = { categoryDialog = false },
+                        title = { Text("收藏到") },
+                        text = {
+                            LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                                items(categories) { category ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Checkbox(
+                                            checked = category in draftCategories,
+                                            onCheckedChange = { checked ->
+                                                draftCategories = if (checked) {
+                                                    draftCategories + category
+                                                } else {
+                                                    draftCategories - category
+                                                }
+                                            },
+                                        )
+                                        Text(category)
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    categoryDialog = false
+                                    onCategoriesChange(draftCategories)
+                                },
+                            ) { Text("确定") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { categoryDialog = false }) { Text("取消") }
+                        },
+                    )
                 }
             }
-            CompactTextButton(text = "收藏", onClick = onFavorite, enabled = count > 0)
+            CompactTextButton(
+                text = "收藏",
+                onClick = onFavorite,
+                enabled = count > 0 && chosenCategories.isNotEmpty(),
+            )
             Spacer(Modifier.weight(1f))
             if (qualities.isNotEmpty()) {
                 Box {
@@ -1064,7 +1190,7 @@ private fun TrackSelectionBar(
             CompactTextButton(text = "下载", onClick = onDownload, enabled = count > 0)
             CompactTextButton(text = "全选", onClick = onSelectAll, enabled = count > 0)
             if (onDelete != null) {
-                CompactTextButton(text = "删除", onClick = onDelete, enabled = count > 0)
+                CompactTextButton(text = deleteLabel, onClick = onDelete, enabled = count > 0)
             }
             CompactTextButton(text = "取消", onClick = onCancel)
         }
@@ -1093,7 +1219,7 @@ private fun HistoryTabContent(
     sections: List<AlphabetSection>,
     categories: List<String>,
     defaultCategory: String,
-    favoriteFolders: Map<String, String>,
+    favoriteFolders: Map<String, Set<String>>,
     downloadedIds: Set<String>,
     selectionMode: Boolean,
     selectedIds: Set<String>,
@@ -1101,7 +1227,7 @@ private fun HistoryTabContent(
     onToggleSelection: (String) -> Unit,
     onSelectAll: () -> Unit,
     onClearSelection: () -> Unit,
-    onAddFavorites: (List<Track>, String) -> Unit,
+    onAddFavorites: (List<Track>, Set<String>) -> Unit,
     onDownloadSelected: (List<Track>, Int?) -> Unit,
     downloadQualities: suspend (List<Track>) -> List<Int>,
     onPlayQueue: (List<Track>, Int) -> Unit,
@@ -1121,7 +1247,7 @@ private fun HistoryTabContent(
     val selectedTracks = remember(history, selectedIds) {
         history.filter { it.id in selectedIds }
     }
-    var chosenCategory by remember(defaultCategory) { mutableStateOf(defaultCategory) }
+    var chosenCategories by remember(defaultCategory) { mutableStateOf(setOf(defaultCategory)) }
     var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
     var chosenQuality by remember { mutableStateOf<Int?>(null) }
 
@@ -1216,7 +1342,7 @@ private fun HistoryTabContent(
                                 { onToggleFavorite(track) }
                             },
                             downloaded = track.id in downloadedIds,
-                            categoryLabel = favoriteFolders[track.id],
+                            categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
                             selected = if (selectionMode) track.id in selectedIds else null,
                         )
                     }
@@ -1243,12 +1369,12 @@ private fun HistoryTabContent(
             TrackSelectionBar(
                 count = selectedIds.size,
                 categories = (categories + defaultCategory).distinct(),
-                chosenCategory = chosenCategory,
-                onCategoryChange = { chosenCategory = it },
+                chosenCategories = chosenCategories,
+                onCategoriesChange = { chosenCategories = it },
                 qualities = qualities,
                 chosenQuality = chosenQuality,
                 onQualityChange = { chosenQuality = it },
-                onFavorite = { onAddFavorites(history, chosenCategory) },
+                onFavorite = { onAddFavorites(history, chosenCategories) },
                 onDownload = { onDownloadSelected(history, chosenQuality) },
                 onSelectAll = onSelectAll,
                 onCancel = onClearSelection,
@@ -1264,7 +1390,7 @@ private fun LocalTabContent(
     tracks: List<Track>,
     sections: List<AlphabetSection>,
     favoriteIds: Set<String>,
-    favoriteFolders: Map<String, String>,
+    favoriteFolders: Map<String, Set<String>>,
     downloadedIds: Set<String>,
     categories: List<String>,
     defaultCategory: String,
@@ -1274,7 +1400,7 @@ private fun LocalTabContent(
     onToggleSelection: (String) -> Unit,
     onSelectAll: () -> Unit,
     onClearSelection: () -> Unit,
-    onAddFavorites: (List<Track>, String) -> Unit,
+    onAddFavorites: (List<Track>, Set<String>) -> Unit,
     onDownloadSelected: (List<Track>, Int?) -> Unit,
     onDeleteSelected: () -> Unit,
     downloadQualities: suspend (List<Track>) -> List<Int>,
@@ -1296,7 +1422,7 @@ private fun LocalTabContent(
     val selectedTracks = remember(tracks, selectedIds) {
         tracks.filter { it.id in selectedIds }
     }
-    var chosenCategory by remember(defaultCategory) { mutableStateOf(defaultCategory) }
+    var chosenCategories by remember(defaultCategory) { mutableStateOf(setOf(defaultCategory)) }
     var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
     var chosenQuality by remember { mutableStateOf<Int?>(null) }
 
@@ -1389,7 +1515,7 @@ private fun LocalTabContent(
                         showFavoriteState = false,
                         onToggleFavorite = null,
                         downloaded = track.id in downloadedIds,
-                        categoryLabel = favoriteFolders[track.id],
+                        categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
                         infoAction = if (selectionMode) null else ({ onShowLocation(track) }),
                         selected = if (selectionMode) track.id in selectedIds else null,
                     )
@@ -1415,12 +1541,12 @@ private fun LocalTabContent(
             TrackSelectionBar(
                 count = selectedIds.size,
                 categories = (categories + defaultCategory).distinct(),
-                chosenCategory = chosenCategory,
-                onCategoryChange = { chosenCategory = it },
+                chosenCategories = chosenCategories,
+                onCategoriesChange = { chosenCategories = it },
                 qualities = qualities,
                 chosenQuality = chosenQuality,
                 onQualityChange = { chosenQuality = it },
-                onFavorite = { onAddFavorites(tracks, chosenCategory) },
+                onFavorite = { onAddFavorites(tracks, chosenCategories) },
                 onDownload = { onDownloadSelected(tracks, chosenQuality) },
                 onSelectAll = onSelectAll,
                 onCancel = onClearSelection,

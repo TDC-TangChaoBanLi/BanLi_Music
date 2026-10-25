@@ -259,7 +259,7 @@ fun SearchScreen(
                                 },
                                 isFavorite = track.id in state.favoriteIds,
                                 downloaded = track.id in downloadedIds,
-                                categoryLabel = state.favoriteFolders[track.id],
+                                categoryLabel = state.favoriteFolders[track.id]?.joinToString(" · "),
                                 onToggleFavorite = if (state.selectionMode) {
                                     null
                                 } else {

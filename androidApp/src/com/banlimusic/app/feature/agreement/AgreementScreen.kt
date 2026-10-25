@@ -108,6 +108,18 @@ fun AgreementScreen(onAccept: () -> Unit) {
                             "不会移动或修改原始文件。",
                     )
                     Spacer(Modifier.height(14.dp))
+                    AgreementTitle("OneDrive 云同步（可选）")
+                    AgreementText(
+                        "你可以选择使用自己的 Microsoft 账号登录，把收藏夹和收藏歌曲同步到自己的 " +
+                            "OneDrive 应用专属目录（应用 / BanLiMusic / library.json）。" +
+                            "登录令牌仅保存在本机的 Android Keystore 加密存储中，应用不会读取该目录之外的 " +
+                            "OneDrive 文件，也不会把同步数据发送到开发者服务器。",
+                    )
+                    AgreementText(
+                        "你可以随时在设置中断开 OneDrive，并选择是否删除云端同步文件。" +
+                            "同步文件只包含收藏夹名称、曲目标识与曲目元数据，不包含音频文件、播放历史或登录令牌。",
+                    )
+                    Spacer(Modifier.height(14.dp))
                     AgreementTitle("第三方服务")
                     AgreementText(
                         "搜索、歌词、封面和播放地址由第三方音乐服务提供。应用无法保证这些服务的可用性、" +

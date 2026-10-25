@@ -3,6 +3,9 @@
  */
 package com.banlimusic.app.feature.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -72,9 +75,11 @@ import androidx.compose.material.icons.rounded.ViewList
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -110,6 +115,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -126,6 +132,8 @@ import com.banlimusic.app.core.datastore.sanitizeNavItems
 import com.banlimusic.app.core.limiter.RateLimitStatus
 import com.banlimusic.app.core.model.ProviderInfo
 import com.banlimusic.app.core.model.QualityTiers
+import com.banlimusic.app.data.sync.AuthState
+import com.banlimusic.app.data.sync.SyncStatus
 import com.banlimusic.app.feature.common.AppViewModelProvider
 import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackArtwork
@@ -136,6 +144,9 @@ import com.banlimusic.app.widget.PlayerWidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private enum class CacheClearTarget(val title: String, val message: String) {
     AUDIO(
@@ -170,6 +181,7 @@ private enum class SettingsPage(
     SOURCE("播放源", "GD 音乐台与预留的自定义 API 来源", Icons.Rounded.CloudQueue),
     DOWNLOAD_CACHE("下载与缓存", "下载目录、缓存上限与缓存歌曲", Icons.Rounded.Download),
     LIBRARY("音乐库与收藏", "默认收藏夹与本地音乐", Icons.Rounded.LibraryMusic),
+    SYNC("云同步", "使用自己的 OneDrive 同步收藏夹", Icons.Rounded.CloudQueue),
     ABOUT("关于", "版本与来源声明", Icons.Rounded.Info),
     CACHED_TRACKS("缓存歌曲", "查看缓存歌曲并转换为下载", Icons.Rounded.QueueMusic),
 }
@@ -377,6 +389,10 @@ private fun SettingsDetail(
 
                     SettingsPage.LIBRARY -> item {
                         LibrarySettings(settings, viewModel)
+                    }
+
+                    SettingsPage.SYNC -> item {
+                        SyncSettingsPage()
                     }
 
                     SettingsPage.ABOUT -> item {
@@ -1296,7 +1312,7 @@ private fun LibrarySettings(settings: AppSettings, viewModel: SettingsViewModel)
                 ) { Text("导入收藏") }
             }
             Text(
-                "导出文件包含收藏夹、添加时间与曲目元数据。",
+                "导出文件包含收藏夹、每首歌所属的多个收藏夹、添加时间与曲目元数据。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1320,7 +1336,10 @@ private fun LibrarySettings(settings: AppSettings, viewModel: SettingsViewModel)
             title = { Text("导入收藏") },
             text = {
                 Column {
-                    Text("选择“覆盖导入”会清空当前收藏；选择“仅追加”会保留现有收藏。")
+                    Text(
+                        "选择“覆盖导入”会移除当前收藏（并在下次同步时同步到云端）；" +
+                            "选择“仅追加”会保留现有收藏。",
+                    )
                     Spacer(Modifier.height(8.dp))
                     TextButton(
                         onClick = {
@@ -1344,6 +1363,234 @@ private fun LibrarySettings(settings: AppSettings, viewModel: SettingsViewModel)
         )
     }
 }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SyncSettingsPage(
+    syncViewModel: SyncViewModel = viewModel(factory = AppViewModelProvider.Factory),
+) {
+    val state by syncViewModel.state.collectAsStateWithLifecycle()
+    val message by syncViewModel.message.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var showSignOut by remember { mutableStateOf(false) }
+
+    LaunchedEffect(message) {
+        message?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            syncViewModel.consumeMessage()
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SettingsCard(title = "OneDrive 云同步", icon = Icons.Rounded.CloudQueue) {
+            Text(
+                text = "收藏夹与收藏歌曲会保存到你自己 OneDrive 的应用专属目录：" +
+                    "“应用 / BanLiMusic / library.json”。应用不会读取该目录之外的任何文件，" +
+                    "数据也不会经过开发者服务器。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (!state.configured) {
+                HorizontalDivider()
+                Text(
+                    text = "尚未配置 OneDrive 应用 ID",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Text(
+                    text = "请先在 Microsoft Entra 注册应用，然后把 Application (client) ID 填入 " +
+                        "OneDriveConfig.CLIENT_ID。注册时选择“个人 Microsoft 账号”，" +
+                        "添加 Android 平台并填写下面的包名和签名，再授予 " +
+                        "Files.ReadWrite.AppFolder、User.Read、offline_access 权限。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                CopyRow(label = "包名", value = context.packageName)
+                CopyRow(label = "SHA-1 指纹（十六进制）", value = state.signatureSha1)
+                CopyRow(label = "签名哈希（SHA-1 Base64）", value = state.signatureHash)
+                CopyRow(label = "回调 URI", value = state.redirectUri)
+            } else {
+                HorizontalDivider()
+                when (state.auth) {
+                    AuthState.NOT_CONFIGURED -> Unit
+                    AuthState.SIGNED_OUT -> {
+                        Text(
+                            text = "登录后可在这台设备与其他 Android 设备之间双向同步收藏夹。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Button(onClick = syncViewModel::signIn) {
+                            Icon(
+                                Icons.Rounded.CloudQueue,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("登录 Microsoft 账号")
+                        }
+                    }
+
+                    AuthState.SIGNED_IN -> {
+                        Text(
+                            text = "已连接：${state.accountName ?: "Microsoft 账号"}",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            text = "上次同步：${formatSyncTime(state.lastSyncAt)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        val syncing = state.status == SyncStatus.Syncing
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Button(onClick = syncViewModel::syncNow, enabled = !syncing) {
+                                if (syncing) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Rounded.Refresh,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (syncing) "同步中…" else "立即同步")
+                            }
+                            TextButton(onClick = { showSignOut = true }) { Text("断开连接") }
+                        }
+                        val failure = state.status as? SyncStatus.Error
+                        val errorText = failure?.message ?: state.lastError
+                        if (!errorText.isNullOrBlank()) {
+                            Text(
+                                text = errorText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        val success = state.status as? SyncStatus.Success
+                        if (success != null) {
+                            Text(
+                                text = buildString {
+                                    append("同步完成")
+                                    if (success.addedMemberships > 0) {
+                                        append("，新增 ${success.addedMemberships} 项")
+                                    }
+                                    if (success.removedMemberships > 0) {
+                                        append("，移除 ${success.removedMemberships} 项")
+                                    }
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        HorizontalDivider()
+                        SettingsSwitchRow(
+                            icon = Icons.Rounded.Refresh,
+                            title = "自动同步",
+                            description = "启动应用时检查一次，并在后台定期同步",
+                            checked = state.autoSync,
+                            onCheckedChange = syncViewModel::setAutoSync,
+                        )
+                        if (state.autoSync) {
+                            Text(text = "同步间隔", style = MaterialTheme.typography.titleSmall)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(1, 3, 6, 12, 24).forEach { hours ->
+                                    FilterChip(
+                                        selected = state.intervalHours == hours,
+                                        onClick = { syncViewModel.setIntervalHours(hours) },
+                                        label = { Text("${hours} 小时") },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider()
+            Text(
+                text = "建议在 Wi-Fi 下同步。云端文件只包含收藏夹名称、曲目 ID 与曲目元数据；" +
+                    "不包含音频文件、播放历史或登录令牌。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    if (showSignOut) {
+        AlertDialog(
+            onDismissRequest = { showSignOut = false },
+            title = { Text("断开 OneDrive") },
+            text = {
+                Text(
+                    "断开后本机收藏仍会保留。选择“断开并删除云端文件”会删除 OneDrive 中的应用同步文件，" +
+                        "其他设备上的本地数据不会被修改。",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        syncViewModel.signOut(deleteCloudFile = true)
+                        showSignOut = false
+                    },
+                ) { Text("断开并删除云端文件") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            syncViewModel.signOut(deleteCloudFile = false)
+                            showSignOut = false
+                        },
+                    ) { Text("仅断开") }
+                    TextButton(onClick = { showSignOut = false }) { Text("取消") }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun CopyRow(label: String, value: String) {
+    if (value.isBlank()) return
+    val context = LocalContext.current
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        TextButton(
+            onClick = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText(label, value))
+                Toast.makeText(context, "已复制$label", Toast.LENGTH_SHORT).show()
+            },
+        ) { Text("复制") }
+    }
+}
+
+private fun formatSyncTime(value: Long): String =
+    if (value <= 0L) {
+        "尚未同步"
+    } else {
+        SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(value))
+    }
 
 @Composable
 private fun AboutSettings(versionName: String) {

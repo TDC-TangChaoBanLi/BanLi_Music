@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -25,9 +26,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import com.banlimusic.app.core.datastore.ThemeMode
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.banlimusic.app.core.datastore.AppSettings
+import com.banlimusic.app.core.sync.OneDriveConfig
+import com.banlimusic.app.data.sync.syncUserMessage
 import com.banlimusic.app.feature.agreement.AgreementScreen
 import com.banlimusic.app.ui.theme.BanLiMusicTheme
 import kotlinx.coroutines.launch
@@ -46,6 +50,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleWidgetIntent(intent)
+        handleOAuthIntent(intent)
         requestNotificationPermissionIfNeeded()
         val container = (application as MusicApplication).container
 
@@ -189,6 +194,23 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleWidgetIntent(intent)
+        handleOAuthIntent(intent)
+    }
+
+    private fun handleOAuthIntent(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != OneDriveConfig.REDIRECT_SCHEME || data.host != OneDriveConfig.REDIRECT_HOST) {
+            return
+        }
+        // Consume the URI so activity recreation does not replay the code exchange.
+        intent.data = null
+        lifecycleScope.launch {
+            val result = (application as MusicApplication).container
+                .oneDriveSyncRepository
+                .completeSignIn(data)
+            val message = result.exceptionOrNull()?.syncUserMessage() ?: "OneDrive 已连接"
+            Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun handleWidgetIntent(intent: Intent?) {

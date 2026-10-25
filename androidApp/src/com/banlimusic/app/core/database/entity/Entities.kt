@@ -7,24 +7,45 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "favorites")
+@Entity(tableName = "favorite_tracks")
 data class FavoriteTrackEntity(
     @PrimaryKey val trackId: String,
     val trackJson: String,
     val addedAt: Long,
-    val category: String = "默认收藏",
+    val updatedAt: Long = addedAt,
+)
+
+/**
+ * Many-to-many membership between a favourite track and a folder. `deletedAt`
+ * is a tombstone so a removal can be synced to other devices without being
+ * resurrected by the next pull.
+ */
+@Entity(
+    tableName = "favorite_memberships",
+    primaryKeys = ["trackId", "folder"],
+    indices = [Index("folder")],
+)
+data class FavoriteMembershipEntity(
+    val trackId: String,
+    val folder: String,
+    val addedAt: Long,
+    val updatedAt: Long = addedAt,
+    val deletedAt: Long? = null,
 )
 
 /** Projection used to show which folder a favourite belongs to. */
-data class FavoriteFolderRow(
+data class FavoriteMembershipRow(
     val trackId: String,
-    val category: String,
+    val folder: String,
+    val addedAt: Long,
 )
 
 @Entity(tableName = "favorite_categories")
 data class FavoriteCategoryEntity(
     @PrimaryKey val name: String,
     val createdAt: Long,
+    val updatedAt: Long = createdAt,
+    val deletedAt: Long? = null,
 )
 
 @Entity(tableName = "play_history")

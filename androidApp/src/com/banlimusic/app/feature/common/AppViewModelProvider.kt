@@ -8,12 +8,14 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.banlimusic.app.MusicApplication
+import com.banlimusic.app.core.sync.OneDriveSignature
 import com.banlimusic.app.feature.downloads.DownloadsViewModel
 import com.banlimusic.app.feature.home.HomeViewModel
 import com.banlimusic.app.feature.library.LibraryViewModel
 import com.banlimusic.app.feature.player.PlayerViewModel
 import com.banlimusic.app.feature.search.SearchViewModel
 import com.banlimusic.app.feature.settings.SettingsViewModel
+import com.banlimusic.app.feature.settings.SyncViewModel
 
 object AppViewModelProvider {
     val Factory = viewModelFactory {
@@ -52,6 +54,15 @@ object AppViewModelProvider {
                 music = app().container.musicRepository,
                 library = app().container.libraryRepository,
                 cacheRepository = app().container.cacheRepository,
+            )
+        }
+        initializer {
+            SyncViewModel(
+                sync = app().container.oneDriveSyncRepository,
+                settings = app().container.settingsRepository,
+                scheduler = app().container.syncScheduler,
+                signatureHash = OneDriveSignature.sha1Base64(app()),
+                signatureSha1 = OneDriveSignature.sha1Hex(app()),
             )
         }
         initializer {

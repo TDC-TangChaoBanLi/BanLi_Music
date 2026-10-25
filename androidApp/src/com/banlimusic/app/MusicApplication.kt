@@ -27,7 +27,9 @@ class MusicApplication : Application() {
                 val settings = container.settingsRepository.current()
                 container.cacheRepository.trimTo(settings.cacheMaxBytes)
                 PlayerWidgetUpdater.setTheme(this@MusicApplication, settings.widgetTheme)
+                container.syncScheduler.apply(settings.sync)
             }
+            runCatching { container.oneDriveSyncRepository.maybeSyncOnStart() }
         }
     }
 }

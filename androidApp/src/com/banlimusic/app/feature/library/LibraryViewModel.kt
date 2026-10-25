@@ -52,8 +52,8 @@ class LibraryViewModel(
     val favoriteIds: StateFlow<Set<String>> = library.observeFavoriteIds()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    /** trackId -> favourite folder, so lists can show where a track lives. */
-    val favoriteFolders: StateFlow<Map<String, String>> = library.observeFavoriteFolders()
+    /** trackId -> every favourite folder, so lists can show where a track lives. */
+    val favoriteFolders: StateFlow<Map<String, Set<String>>> = library.observeFavoriteFolders()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     val history: StateFlow<List<Track>> = library.observeHistory(100)
@@ -222,12 +222,50 @@ class LibraryViewModel(
         runCatching { music.downloadQualities(tracks) }.getOrDefault(emptyList())
 
     fun addFavorites(tracks: List<Track>, category: String) {
+        addFavorites(tracks, setOf(category))
+    }
+
+    fun addFavorites(tracks: List<Track>, folders: Set<String>) {
+        val selected = tracks.filter { it.id in _selectedIds.value }
+        if (selected.isEmpty() || folders.isEmpty()) return
+        viewModelScope.launch {
+            library.addFavorites(selected, folders)
+            _message.value = "已收藏 ${selected.size} 首到“${folders.joinToString("、")}”"
+            clearSelection()
+        }
+    }
+
+    fun removeFavoriteFromFolder(tracks: List<Track>, folder: String) {
         val selected = tracks.filter { it.id in _selectedIds.value }
         if (selected.isEmpty()) return
         viewModelScope.launch {
-            library.addFavorites(selected, category)
-            _message.value = "已收藏 ${selected.size} 首到“$category”"
+            selected.forEach { library.removeFavoriteFromFolder(it.id, folder) }
+            _message.value = "已从“$folder”移除 ${selected.size} 首"
             clearSelection()
+        }
+    }
+
+    /** Removes every membership when [folder] is null, otherwise only that folder. */
+    fun removeFavorites(tracks: List<Track>, folder: String?) {
+        val selected = tracks.filter { it.id in _selectedIds.value }
+        if (selected.isEmpty()) return
+        viewModelScope.launch {
+            if (folder == null) {
+                selected.forEach { library.removeFavorite(it.id) }
+                _message.value = "已取消收藏 ${selected.size} 首"
+            } else {
+                selected.forEach { library.removeFavoriteFromFolder(it.id, folder) }
+                _message.value = "已从“$folder”移除 ${selected.size} 首"
+            }
+            clearSelection()
+        }
+    }
+
+    fun deleteCategory(name: String) {
+        viewModelScope.launch {
+            library.deleteCategory(name)
+            if (_selectedCategory.value == name) _selectedCategory.value = null
+            _message.value = "已删除收藏夹“$name”"
         }
     }
 

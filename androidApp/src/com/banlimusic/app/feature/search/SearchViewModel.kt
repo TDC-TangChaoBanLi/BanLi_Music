@@ -33,7 +33,7 @@ data class SearchUiState(
     val hasMore: Boolean = false,
     val error: String? = null,
     val favoriteIds: Set<String> = emptySet(),
-    val favoriteFolders: Map<String, String> = emptyMap(),
+    val favoriteFolders: Map<String, Set<String>> = emptyMap(),
     val selectionMode: Boolean = false,
     val selectedIds: Set<String> = emptySet(),
 )

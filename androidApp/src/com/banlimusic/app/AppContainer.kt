@@ -17,6 +17,10 @@ import com.banlimusic.app.core.datastore.MAX_API_LIMIT_PER_WINDOW
 import com.banlimusic.app.core.datastore.MAX_CACHE_MAX_BYTES
 import com.banlimusic.app.core.datastore.MIN_GD_REQUEST_INTERVAL_MS
 import com.banlimusic.app.core.datastore.SettingsRepository
+import com.banlimusic.app.core.datastore.SyncStateStore
+import com.banlimusic.app.core.security.AndroidTokenStore
+import com.banlimusic.app.core.sync.OneDriveConfig
+import com.banlimusic.app.core.sync.OneDriveSignature
 import com.banlimusic.app.core.limiter.RequestScheduler
 import com.banlimusic.app.core.limiter.SlidingWindowRateLimiter
 import com.banlimusic.app.core.network.JsonHttpClient
@@ -29,8 +33,12 @@ import com.banlimusic.app.data.repository.MusicRepository
 import com.banlimusic.app.data.source.MusicProvider
 import com.banlimusic.app.data.source.gd.GdApiClient
 import com.banlimusic.app.data.source.gd.GdMusicProvider
+import com.banlimusic.app.data.sync.OneDriveAuthManager
+import com.banlimusic.app.data.sync.OneDriveClient
+import com.banlimusic.app.data.sync.OneDriveSyncRepository
 import com.banlimusic.app.domain.playback.StreamResolver
 import com.banlimusic.app.domain.search.TrackMerger
+import com.banlimusic.app.domain.sync.SyncScheduler
 import com.banlimusic.app.player.PlaybackController
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -114,7 +122,7 @@ class AppContainer(private val context: Context) {
     }
 
     val libraryRepository: LibraryRepository by lazy {
-        LibraryRepository(database.libraryDao(), json)
+        LibraryRepository(database, database.libraryDao(), json)
     }
 
     val localMusicRepository: LocalMusicRepository by lazy {
@@ -159,4 +167,62 @@ class AppContainer(private val context: Context) {
     val playbackController: PlaybackController by lazy {
         PlaybackController(context, json, settingsRepository, downloadRepository)
     }
+
+    // --- OneDrive sync -----------------------------------------------------
+    // A dedicated OkHttp client and scheduler keep Graph traffic completely
+    // separate from the GD Music request budget.
+
+    val syncStateStore: SyncStateStore by lazy { SyncStateStore(context) }
+
+    private val oneDriveHttpClient: okhttp3.OkHttpClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
+
+    val oneDriveAuthManager: OneDriveAuthManager by lazy {
+        OneDriveAuthManager(
+            context = context.applicationContext,
+            json = json,
+            httpClient = oneDriveHttpClient,
+            tokenStore = AndroidTokenStore(context, json),
+            config = OneDriveConfig.authConfig(OneDriveSignature.sha1Base64(context)),
+        )
+    }
+
+    private val oneDriveRequestScheduler: RequestScheduler by lazy {
+        RequestScheduler(
+            maxConcurrent = 2,
+            limiter = SlidingWindowRateLimiter(
+                limit = 120,
+                windowMs = 60_000L,
+                maxWaitMs = 10_000L,
+            ),
+        )
+    }
+
+    val oneDriveClient: OneDriveClient by lazy {
+        OneDriveClient(
+            client = oneDriveHttpClient,
+            json = json,
+            tokenProvider = oneDriveAuthManager,
+            scheduler = oneDriveRequestScheduler,
+        )
+    }
+
+    val oneDriveSyncRepository: OneDriveSyncRepository by lazy {
+        OneDriveSyncRepository(
+            library = libraryRepository,
+            client = oneDriveClient,
+            auth = oneDriveAuthManager,
+            stateStore = syncStateStore,
+            settings = settingsRepository,
+        )
+    }
+
+    val syncScheduler: SyncScheduler by lazy { SyncScheduler(context.applicationContext) }
 }

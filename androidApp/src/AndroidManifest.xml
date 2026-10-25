@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 文件作用：声明 Android 应用的权限、入口组件、媒体播放服务与桌面小组件。 -->
+<!-- 文件作用：声明 Android 应用的权限、入口组件、OneDrive 登录回调、媒体播放服务与桌面小组件。 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
@@ -37,6 +37,15 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- OneDrive OAuth callback. The path is the signing hash; Entra validates it. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:host="com.banlimusic.app"
+                    android:scheme="msauth" />
             </intent-filter>
         </activity>
 

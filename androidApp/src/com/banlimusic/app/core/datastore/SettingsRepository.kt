@@ -65,6 +65,10 @@ class SettingsRepository(private val context: Context) {
         val gdSearchPageSize = intPreferencesKey("provider_gd_search_page_size")
         val customSources = stringPreferencesKey("provider_custom_sources_json")
         val defaultNavItem = stringPreferencesKey("default_nav_item")
+
+        // Cloud sync preferences; transient sync state lives in SyncStateStore.
+        val syncAuto = booleanPreferencesKey("sync_auto_enabled")
+        val syncIntervalHours = intPreferencesKey("sync_interval_hours")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data
@@ -104,6 +108,11 @@ class SettingsRepository(private val context: Context) {
                 providers = ProviderSettings(
                     gd = gd,
                     customSources = parseCustomSources(preferences[Keys.customSources]),
+                ),
+                sync = SyncSettings(
+                    autoSync = preferences[Keys.syncAuto] ?: false,
+                    intervalHours = (preferences[Keys.syncIntervalHours] ?: 6)
+                        .coerceIn(MIN_SYNC_INTERVAL_HOURS, MAX_SYNC_INTERVAL_HOURS),
                 ),
                 allowMobileNetwork = preferences[Keys.allowMobileNetwork] ?: true,
                 playbackRetryCount = (preferences[Keys.playbackRetryCount] ?: 3).coerceIn(0, 10),
@@ -242,6 +251,14 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDefaultFavoriteCategory(category: String) = context.settingsDataStore.edit {
         it[Keys.defaultFavoriteCategory] = category.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY }
+    }
+
+    suspend fun setSyncAutoSync(enabled: Boolean) = context.settingsDataStore.edit {
+        it[Keys.syncAuto] = enabled
+    }
+
+    suspend fun setSyncIntervalHours(hours: Int) = context.settingsDataStore.edit {
+        it[Keys.syncIntervalHours] = hours.coerceIn(MIN_SYNC_INTERVAL_HOURS, MAX_SYNC_INTERVAL_HOURS)
     }
 
     suspend fun setAutoImportLocalMusic(enabled: Boolean) = context.settingsDataStore.edit {

@@ -16,6 +16,7 @@ import com.banlimusic.app.core.database.dao.LocalMusicDao
 import com.banlimusic.app.core.database.entity.CachedTrackEntity
 import com.banlimusic.app.core.database.entity.DownloadTaskEntity
 import com.banlimusic.app.core.database.entity.FavoriteCategoryEntity
+import com.banlimusic.app.core.database.entity.FavoriteMembershipEntity
 import com.banlimusic.app.core.database.entity.FavoriteTrackEntity
 import com.banlimusic.app.core.database.entity.LocalTrackEntity
 import com.banlimusic.app.core.database.entity.PlayHistoryEntity
@@ -24,6 +25,7 @@ import com.banlimusic.app.core.database.entity.SearchHistoryEntity
 @Database(
     entities = [
         FavoriteTrackEntity::class,
+        FavoriteMembershipEntity::class,
         PlayHistoryEntity::class,
         SearchHistoryEntity::class,
         DownloadTaskEntity::class,
@@ -31,7 +33,7 @@ import com.banlimusic.app.core.database.entity.SearchHistoryEntity
         FavoriteCategoryEntity::class,
         CachedTrackEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class MusicDatabase : RoomDatabase() {
@@ -111,13 +113,19 @@ abstract class MusicDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                MusicMigrations.v4To5.forEach(db::execSQL)
+            }
+        }
+
         fun get(context: Context): MusicDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 MusicDatabase::class.java,
                 "banli_music.db",
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { instance = it }
         }

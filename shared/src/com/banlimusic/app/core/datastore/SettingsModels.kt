@@ -12,6 +12,14 @@ const val MAX_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L
 const val DEFAULT_FAVORITE_CATEGORY = "默认收藏"
 const val MAX_API_LIMIT_PER_WINDOW = 50
 const val MIN_GD_REQUEST_INTERVAL_MS = 1_000L
+const val MIN_SYNC_INTERVAL_HOURS = 1
+const val MAX_SYNC_INTERVAL_HOURS = 168
+
+/** User-facing cloud sync preferences; transient state lives in SyncStateStore. */
+data class SyncSettings(
+    val autoSync: Boolean = false,
+    val intervalHours: Int = 6,
+)
 
 /** Defaults for a single GD source backend. */
 @Serializable
@@ -73,6 +81,7 @@ data class AppSettings(
     /** Custom ARGB seed for the theme; null keeps dynamic/system colors. */
     val customThemeColor: Int? = null,
     val providers: ProviderSettings = ProviderSettings(),
+    val sync: SyncSettings = SyncSettings(),
     val allowMobileNetwork: Boolean = true,
     val playbackRetryCount: Int = 3,
     val consecutiveFailureLimit: Int = 3,
