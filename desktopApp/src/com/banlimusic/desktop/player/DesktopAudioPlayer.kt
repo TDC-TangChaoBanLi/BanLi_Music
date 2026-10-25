@@ -74,8 +74,10 @@ class DesktopAudioPlayer(
     @Volatile private var playMode = DesktopPlayMode.SEQUENTIAL
     @Volatile private var input: InputStream? = null
     @Volatile private var line: SourceDataLine? = null
+    @Volatile private var localFiles: Map<String, File> = emptyMap()
 
     fun play(track: Track, queue: List<Track> = listOf(track)) {
+        localFiles = emptyMap()
         val effectiveQueue = queue.ifEmpty { listOf(track) }
         val index = effectiveQueue.indexOfFirst { it.id == track.id }
             .takeIf { it >= 0 }
@@ -85,7 +87,15 @@ class DesktopAudioPlayer(
 
     fun playLocal(track: Track, file: File) {
         if (!file.isFile) return
+        localFiles = mapOf(track.id to file)
         start(queue = listOf(track), index = 0, localFile = file)
+    }
+
+    fun playLocalQueue(track: Track, queue: List<Track>, files: Map<String, File>) {
+        if (queue.isEmpty()) return
+        localFiles = files
+        val index = queue.indexOfFirst { it.id == track.id }.takeIf { it >= 0 } ?: 0
+        start(queue = queue, index = index, localFile = files[track.id])
     }
 
     fun togglePause() {
@@ -207,6 +217,7 @@ class DesktopAudioPlayer(
         localFile: File? = null,
     ) {
         val track = queue.getOrNull(index) ?: return
+        val effectiveLocalFile = localFile ?: localFiles[track.id]
         stopCurrent()
         val currentGeneration = ++generation
         stopped = false
@@ -221,7 +232,7 @@ class DesktopAudioPlayer(
             playMode = playMode,
         )
         job = scope.launch {
-            runPlayback(currentGeneration, track, startPositionMs, localFile)
+            runPlayback(currentGeneration, track, startPositionMs, effectiveLocalFile)
         }
     }
 

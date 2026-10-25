@@ -46,6 +46,7 @@ import java.io.File
 @Composable
 fun DesktopDownloadsScreen(state: DesktopAppState) {
     val tasks by state.downloads.collectAsState()
+    val folders by state.favoriteFolders.collectAsState()
     val completed = tasks.filter { it.status == DesktopDownloadStatus.COMPLETED }
     val pending = tasks.filter { it.status != DesktopDownloadStatus.COMPLETED }
     var tab by remember { mutableIntStateOf(0) }
@@ -107,6 +108,7 @@ fun DesktopDownloadsScreen(state: DesktopAppState) {
                     DownloadCard(
                         task = task,
                         state = state,
+                        categoryLabel = folders[task.track.id],
                     )
                 }
             }
@@ -134,7 +136,11 @@ fun DesktopDownloadsScreen(state: DesktopAppState) {
 }
 
 @Composable
-private fun DownloadCard(task: DesktopDownloadTask, state: DesktopAppState) {
+private fun DownloadCard(
+    task: DesktopDownloadTask,
+    state: DesktopAppState,
+    categoryLabel: String?,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -177,10 +183,25 @@ private fun DownloadCard(task: DesktopDownloadTask, state: DesktopAppState) {
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
+                            text = task.track.sources.firstOrNull()?.providerId
+                                ?.let(::desktopProviderLabel) ?: "未知来源",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
                             text = "${task.qualityKbps}K",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        categoryLabel?.takeIf { it.isNotBlank() }?.let { folder ->
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = folder,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
                         if (task.bytesDownloaded > 0L) {
                             Spacer(Modifier.width(8.dp))
                             Text(

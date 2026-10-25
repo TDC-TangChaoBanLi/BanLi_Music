@@ -20,7 +20,7 @@
 - **系统媒体控制**：Media3 通知/任务栏播放控件通过自定义 SessionCommand 提供收藏按钮，图标随当前歌曲收藏状态切换。
 - **界面**：Jetpack Compose + Material 3，首页、搜索、音乐库、下载、设置、全屏播放器、歌词页；手机使用底部导航，平板使用 NavigationRail，播放器在平板上使用双栏布局。
 - **设置**：二级菜单分类为外观、播放、播放源、下载与缓存、音乐库与收藏、关于；桌面小组件并入外观；底部导航 5 个栏目全部保留、仅可排序，并可设置默认栏目；GD 音乐台作为播放源模块，预留自定义 API 来源设置（名称/代码、曲目 ID、音质、搜索/取流/歌词/海报参数映射，暂不发起请求）；每个设置项均有图标。
-- **跨平台与桌面端**：`shared/`（Kotlin Multiplatform：Android + JVM）承载模型、Provider、GD 客户端、限流、解析、排序等核心；`desktopApp/`（Compose Desktop）已实现首页、手动搜索、收藏与最近播放、下载、MP3 播放、歌词/队列、缓存、主题和来源设置。桌面端当前使用 JLayer 解码 MP3，暂不提供无损音质；本地音乐扫描和自动更新留待下一阶段。
+- **跨平台与桌面端**：`shared/`（Kotlin Multiplatform：Android + JVM）承载模型、Provider、GD 客户端、限流、解析、排序等核心；`desktopApp/`（Compose Desktop）已实现首页、手动搜索与搜索历史、收藏夹分类、最近播放、本地音乐扫描、多选批量收藏/下载、下载管理、MP3 播放、歌词/播放队列、缓存、主题和来源设置。桌面端当前使用 JLayer 解码 MP3，暂不提供无损音质；自动更新仍留待后续。
 - **测试**：去重算法、限流器、LRC 解析、来源 URI 编解码、收藏 JSON 序列化、GD 响应解析与 MockWebServer 集成测试，共 49 个 JVM 单元测试。
 - **开发约束**：`AGENTS.md` 记录多来源扩展、包体积控制、限流、数据库迁移和 UI 约定。
 
@@ -310,7 +310,7 @@ desktopApp/                   Compose Desktop 桌面端
   module.yaml
   src/main.kt                 窗口与 NavigationRail
   src/com/banlimusic/desktop/
-    data/                     设置、收藏/历史、下载、元数据缓存、仓库
+    data/                     设置、收藏夹/历史/本地音乐、下载、缓存、仓库
     player/                   JLayer MP3 播放引擎
     ui/                       首页、搜索、音乐库、下载、设置、播放页
 androidApp/

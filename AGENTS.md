@@ -11,7 +11,7 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
 0. **共享核心与桌面端边界**
    - 与平台无关的模型、Provider 接口、GD 客户端、限流、解析、去重、排序放在 `shared/`（KMP，platforms `android` + `jvm`）。
    - `shared/` 当前允许使用 `java.*` API，但不得引入 Android SDK、Media3、Room Android、WorkManager、Glance、RemoteViews；这些实现留在 `androidApp/`。
-   - `desktopApp/` 只通过 `//shared` 复用核心；桌面端已接入搜索、收藏/历史、下载、MP3 播放、歌词和设置。桌面端播放使用 JLayer（仅 MP3），不要把它下沉到 `shared/`。本地音乐扫描和自动更新尚未接入。
+   - `desktopApp/` 只通过 `//shared` 复用核心；桌面端已接入首页、搜索、收藏夹/历史、本地音乐扫描、多选批量操作、下载、MP3 播放、歌词和设置。桌面端播放使用 JLayer（仅 MP3），不要把它下沉到 `shared/`。自动更新尚未接入。
 
 1. **UI 不直接访问具体音乐 API**
    - Compose 页面和 ViewModel 只依赖 `MusicRepository`、`LibraryRepository`、`DownloadRepository` 等领域接口。

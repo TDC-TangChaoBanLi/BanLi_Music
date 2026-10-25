@@ -24,8 +24,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -35,14 +39,28 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.banlimusic.desktop.data.DesktopDownloadStatus
 
 @Composable
 fun DesktopSearchScreen(state: DesktopAppState) {
     val settings by state.settings.collectAsState()
     val playback by state.playback.collectAsState()
     val favoriteIds = state.favorites.collectAsState().value.mapTo(mutableSetOf()) { it.id }
+    val favoriteFolders by state.favoriteFolders.collectAsState()
+    val categories by state.favoriteCategories.collectAsState()
+    val downloads by state.downloads.collectAsState()
     val searchHistory by state.searchHistory.collectAsState()
+    val downloadedIds = downloads
+        .filter { it.status == DesktopDownloadStatus.COMPLETED }
+        .mapTo(mutableSetOf()) { it.track.id }
+    val selection = rememberTrackSelectionState()
+    var showNewCategory by remember { mutableStateOf(false) }
     val search = state.search
+    val selectedTracks = search.results.filter { it.id in selection.selectedIds }
+
+    LaunchedEffect(search.results) {
+        selection.retain(search.results.mapTo(mutableSetOf()) { it.id })
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 26.dp, vertical = 20.dp)) {
         Text(
@@ -131,10 +149,34 @@ fun DesktopSearchScreen(state: DesktopAppState) {
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                TextButton(
+                    onClick = {
+                        if (selection.mode) selection.exit() else selection.enter()
+                    },
+                ) {
+                    Text(if (selection.mode) "取消选择" else "选择")
+                }
                 Text(
                     text = "第 ${search.page} 页",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (selection.mode) {
+                TrackSelectionBar(
+                    selection = selection,
+                    selectableIds = search.results.map { it.id },
+                    categories = categories,
+                    onFavorite = { category ->
+                        state.addTracksToCategory(selectedTracks, category)
+                        selection.exit()
+                    },
+                    onCreateCategory = { showNewCategory = true },
+                    onDownload = { quality ->
+                        state.downloadTracks(selectedTracks, quality)
+                        selection.exit()
+                    },
+                    initialQuality = settings.downloadQualityKbps,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -172,9 +214,15 @@ fun DesktopSearchScreen(state: DesktopAppState) {
                         allowRemoteArtwork = settings.requestListArtwork,
                         favorite = track.id in favoriteIds,
                         current = playback.track?.id == track.id,
-                        onPlay = { state.play(track, search.results) },
+                        onPlay = {
+                            if (selection.mode) selection.toggle(track.id)
+                            else state.play(track, search.results)
+                        },
                         onToggleFavorite = { state.toggleFavorite(track) },
                         onDownload = { state.download(track) },
+                        downloaded = track.id in downloadedIds,
+                        categoryLabel = favoriteFolders[track.id],
+                        selected = if (selection.mode) track.id in selection.selectedIds else null,
                     )
                 }
                 item {
@@ -207,5 +255,18 @@ fun DesktopSearchScreen(state: DesktopAppState) {
                 }
             }
         }
+    }
+
+    if (showNewCategory) {
+        NewCategoryDialog(
+            onDismiss = { showNewCategory = false },
+            onCreate = { name ->
+                showNewCategory = false
+                state.createFavoriteCategory(name) { category ->
+                    state.addTracksToCategory(selectedTracks, category)
+                    selection.exit()
+                }
+            },
+        )
     }
 }

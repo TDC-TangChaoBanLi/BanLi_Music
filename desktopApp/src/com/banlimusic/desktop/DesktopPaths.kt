@@ -45,11 +45,12 @@ object DesktopPaths {
     }
 
     val downloadDir: Path = home.resolve("Music").resolve("BanLiMusic")
+    val localMusicDir: Path = home.resolve("Music")
 
     val libraryFile: Path get() = configDir.resolve("library.json")
 
     fun ensureDirectories() {
-        listOf(configDir, cacheDir, downloadDir).forEach { dir ->
+        listOf(configDir, cacheDir, downloadDir, localMusicDir).forEach { dir ->
             runCatching { Files.createDirectories(dir) }
         }
     }

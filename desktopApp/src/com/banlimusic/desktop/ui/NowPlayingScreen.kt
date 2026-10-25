@@ -22,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -63,6 +62,7 @@ import kotlinx.coroutines.CancellationException
 fun DesktopNowPlayingScreen(state: DesktopAppState) {
     val playback by state.playback.collectAsState()
     val favorites by state.favorites.collectAsState()
+    val folders by state.favoriteFolders.collectAsState()
     val settings by state.settings.collectAsState()
     val track = playback.track ?: return
     val isFavorite = favorites.any { it.id == track.id }
@@ -91,7 +91,7 @@ fun DesktopNowPlayingScreen(state: DesktopAppState) {
             }
             TextButton(onClick = { state.download(track) }) {
                 Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    imageVector = DesktopIcons.Download,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                 )
@@ -161,6 +161,19 @@ fun DesktopNowPlayingScreen(state: DesktopAppState) {
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
+                    }
+                    folders[track.id]?.let { folder ->
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Text(
+                                text = folder,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.weight(0.12f))

@@ -19,9 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +41,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +53,35 @@ import androidx.compose.ui.unit.sp
 import com.banlimusic.app.core.common.TextNormalizer
 import com.banlimusic.app.core.model.Track
 import java.util.Locale
+
+/** Icons missing from the small material-icons-core artifact. */
+object DesktopIcons {
+    val Download: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Download",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).apply {
+            path(fill = SolidColor(Color.Black)) {
+                moveTo(19f, 9f)
+                horizontalLineToRelative(-4f)
+                verticalLineTo(3f)
+                horizontalLineTo(9f)
+                verticalLineToRelative(6f)
+                horizontalLineTo(5f)
+                lineToRelative(7f, 7f)
+                close()
+                moveTo(5f, 18f)
+                verticalLineToRelative(2f)
+                horizontalLineToRelative(14f)
+                verticalLineToRelative(-2f)
+                close()
+            }
+        }.build()
+    }
+}
 
 fun formatPlaybackTime(millis: Long): String {
     val totalSeconds = (millis / 1000).coerceAtLeast(0)
@@ -75,6 +108,8 @@ fun desktopProviderLabel(providerId: String): String = when (providerId) {
     "gd-netease" -> "GD网易云"
     "gd-joox" -> "GD JOOX"
     "gd-bilibili" -> "GD B站"
+    "local" -> "本地"
+    "download" -> "已下载"
     else -> providerId
 }
 
@@ -133,6 +168,11 @@ fun DesktopTrackRow(
     onPlay: () -> Unit,
     onToggleFavorite: () -> Unit,
     onDownload: (() -> Unit)? = null,
+    showFavorite: Boolean = true,
+    downloaded: Boolean = false,
+    categoryLabel: String? = null,
+    selected: Boolean? = null,
+    onInfo: (() -> Unit)? = null,
 ) {
     val background = if (current) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
@@ -150,6 +190,14 @@ fun DesktopTrackRow(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (selected != null) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = null,
+                    modifier = Modifier.size(36.dp),
+                )
+                Spacer(Modifier.width(2.dp))
+            }
             DesktopTrackArtwork(
                 track = track,
                 loader = loader,
@@ -179,26 +227,27 @@ fun DesktopTrackRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (current) {
-                    Text(
-                        text = "正在播放",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            track.sources.firstOrNull()?.let { source ->
-                Surface(
-                    shape = RoundedCornerShape(5.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
+                Spacer(Modifier.height(3.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = desktopProviderLabel(source.providerId),
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    track.sources.firstOrNull()?.let { source ->
+                        RowBadge(desktopProviderLabel(source.providerId))
+                    }
+                    if (downloaded) {
+                        RowBadge("已下载", highlighted = true)
+                    }
+                    categoryLabel?.takeIf { it.isNotBlank() }?.let {
+                        RowBadge(it, highlighted = true)
+                    }
+                    if (current) {
+                        Text(
+                            text = "正在播放",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
             Spacer(Modifier.width(10.dp))
@@ -207,28 +256,59 @@ fun DesktopTrackRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (onInfo != null) {
+                IconButton(onClick = onInfo, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        imageVector = Icons.Rounded.Info,
+                        contentDescription = "查看文件信息",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
             if (onDownload != null) {
                 IconButton(onClick = onDownload) {
                     Icon(
-                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        imageVector = DesktopIcons.Download,
                         contentDescription = "下载",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            IconButton(onClick = onToggleFavorite) {
-                Icon(
-                    imageVector = if (favorite) Icons.Rounded.Favorite
-                    else Icons.Rounded.FavoriteBorder,
-                    contentDescription = if (favorite) "取消收藏" else "收藏",
-                    tint = if (favorite) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            if (showFavorite) {
+                IconButton(onClick = onToggleFavorite) {
+                    Icon(
+                        imageVector = if (favorite) Icons.Rounded.Favorite
+                        else Icons.Rounded.FavoriteBorder,
+                        contentDescription = if (favorite) "取消收藏" else "收藏",
+                        tint = if (favorite) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             TextButton(onClick = onPlay) {
                 Text("播放")
             }
         }
+    }
+}
+
+@Composable
+private fun RowBadge(text: String, highlighted: Boolean = false) {
+    Surface(
+        shape = RoundedCornerShape(5.dp),
+        color = if (highlighted) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (highlighted) MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

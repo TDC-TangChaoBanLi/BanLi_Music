@@ -3,7 +3,6 @@ package com.banlimusic.desktop.ui
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.getValue
@@ -17,12 +16,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.io.File
+import java.net.URI
 
 enum class DesktopTab(val label: String, val icon: ImageVector) {
     HOME("首页", Icons.Rounded.Home),
     SEARCH("搜索", Icons.Rounded.Search),
     LIBRARY("音乐库", Icons.AutoMirrored.Rounded.List),
-    DOWNLOADS("下载", Icons.Rounded.KeyboardArrowDown),
+    DOWNLOADS("下载", DesktopIcons.Download),
     SETTINGS("设置", Icons.Rounded.Settings),
 }
 
@@ -45,8 +46,16 @@ class DesktopAppState(
     val favorites = container.libraryRepository.favorites
     val history = container.libraryRepository.history
     val searchHistory = container.libraryRepository.searchHistory
+    val favoriteCategories = container.libraryRepository.favoriteCategories
+    val favoriteFolders = container.libraryRepository.favoriteFolders
+    val localTracks = container.libraryRepository.localTracks
     val downloads = container.downloads.tasks
     val playback = container.player.state
+
+    var localScanning by mutableStateOf(false)
+        private set
+    var localScanError by mutableStateOf<String?>(null)
+        private set
 
     var tab by mutableStateOf(DesktopTab.HOME)
     var showPlayer by mutableStateOf(false)
@@ -144,25 +153,90 @@ class DesktopAppState(
         }
     }
 
-    fun download(track: Track) {
-        container.downloads.download(track)
+    fun download(track: Track, qualityKbps: Int = settings.value.downloadQualityKbps) {
+        container.downloads.download(track, qualityKbps)
     }
 
-    fun playLocal(track: Track, file: java.io.File) {
-        container.player.playLocal(track, file)
+    fun downloadTracks(tracks: Collection<Track>, qualityKbps: Int) {
+        tracks.forEach { container.downloads.download(it, qualityKbps) }
+    }
+
+    fun addTracksToCategory(tracks: Collection<Track>, category: String) {
         scope.launch {
             try {
-                container.libraryRepository.recordPlay(track)
+                container.libraryRepository.addFavorites(tracks, category)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Throwable) {
-                // Playback should not fail because history persistence did.
+                // The list remains unchanged; the user can retry.
             }
         }
     }
 
+    fun createFavoriteCategory(name: String, onCreated: (String) -> Unit) {
+        scope.launch {
+            try {
+                onCreated(container.libraryRepository.createCategory(name))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Keep the dialog open so the user can retry.
+            }
+        }
+    }
+
+    fun scanLocalMusic(directory: String) {
+        if (localScanning) return
+        localScanning = true
+        localScanError = null
+        scope.launch {
+            try {
+                container.libraryRepository.scanLocal(directory)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                localScanError = error.userMessage()
+            } finally {
+                localScanning = false
+            }
+        }
+    }
+
+    fun clearLocalMusic() {
+        scope.launch {
+            try {
+                container.libraryRepository.clearLocal()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Nothing user-visible depends on this cleanup succeeding.
+            }
+        }
+    }
+
+    fun playLocal(track: Track, file: File) {
+        container.player.playLocal(track, file)
+        recordPlay(track)
+    }
+
     fun play(track: Track, queue: List<Track> = search.results) {
-        container.player.play(track, queue)
+        val localFiles = queue.mapNotNull { queued ->
+            localFileOf(queued)?.let { file -> queued.id to file }
+        }.toMap()
+        if (localFiles.containsKey(track.id)) {
+            container.player.playLocalQueue(track, queue, localFiles)
+        } else {
+            container.player.play(track, queue)
+        }
+        recordPlay(track)
+    }
+
+    private fun localFileOf(track: Track): File? = track.sources
+        .firstNotNullOfOrNull { source -> source.localUri }
+        ?.let { uri -> runCatching { File(URI(uri)) }.getOrNull() }
+        ?.takeIf { it.isFile }
+
+    private fun recordPlay(track: Track) {
         scope.launch {
             try {
                 container.libraryRepository.recordPlay(track)

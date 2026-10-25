@@ -51,6 +51,7 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
     val history by state.history.collectAsState()
     val searches by state.searchHistory.collectAsState()
     val downloads by state.downloads.collectAsState()
+    val localTracks by state.localTracks.collectAsState()
     val repository = state.container.settingsRepository
     val scope = rememberCoroutineScope()
     var cacheBytes by remember { mutableStateOf(0L) }
@@ -206,9 +207,10 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
                 TextButton(
                     onClick = {
                         chooseDirectory(
-                            settings.downloadDirectory.ifBlank {
+                            initial = settings.downloadDirectory.ifBlank {
                                 DesktopPaths.downloadDir.toString()
                             },
+                            title = "选择下载目录",
                         )?.let(repository::setDownloadDirectory)
                     },
                 ) { Text("选择目录") }
@@ -274,6 +276,62 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
             )
             Text(
                 text = "缓存：${DesktopPaths.cacheDir}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+
+        SettingsCard(title = "本地音乐", glyph = "♫") {
+            Text(
+                text = "目录：" + settings.localMusicDirectory.ifBlank {
+                    DesktopPaths.localMusicDir.toString()
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = {
+                        chooseDirectory(
+                            initial = settings.localMusicDirectory.ifBlank {
+                                DesktopPaths.localMusicDir.toString()
+                            },
+                            title = "选择本地音乐目录",
+                        )?.let { directory ->
+                            repository.setLocalMusicDirectory(directory)
+                            state.scanLocalMusic(directory)
+                        }
+                    },
+                ) { Text("选择目录并扫描") }
+                TextButton(
+                    onClick = {
+                        state.scanLocalMusic(
+                            settings.localMusicDirectory.ifBlank {
+                                DesktopPaths.localMusicDir.toString()
+                            },
+                        )
+                    },
+                    enabled = !state.localScanning,
+                ) { Text("重新扫描") }
+                TextButton(
+                    onClick = { state.clearLocalMusic() },
+                    enabled = localTracks.isNotEmpty(),
+                ) { Text("清空索引") }
+            }
+            if (state.localScanning) {
+                Text("正在扫描本地音乐…", style = MaterialTheme.typography.labelSmall)
+            }
+            state.localScanError?.let { error ->
+                Text(
+                    text = error,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Text(
+                text = "已索引 ${localTracks.size} 首。只记录文件路径，不复制或修改原文件。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -389,10 +447,10 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
     }
 }
 
-private fun chooseDirectory(initial: String): String? {
+private fun chooseDirectory(initial: String, title: String): String? {
     val chooser = JFileChooser().apply {
         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-        dialogTitle = "选择下载目录"
+        dialogTitle = title
         currentDirectory = File(initial).takeIf { it.isDirectory }
             ?: File(System.getProperty("user.home"))
     }

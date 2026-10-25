@@ -76,6 +76,8 @@ data class AppSettings(
     val consecutiveFailureLimit: Int = 3,
     val defaultShowLyrics: Boolean = false,
     val downloadDirectory: String = "",
+    /** Directory scanned for the desktop local-music library. */
+    val localMusicDirectory: String = "",
     val downloadQualityKbps: Int = 128,
     val downloadLyrics: Boolean = false,
     val downloadArtwork: Boolean = false,

@@ -70,6 +70,10 @@ class DesktopSettingsRepository {
         prefs.put(KEY_DOWNLOAD_DIR, path.trim())
     }
 
+    fun setLocalMusicDirectory(path: String) = update {
+        prefs.put(KEY_LOCAL_MUSIC_DIR, path.trim())
+    }
+
     fun setAgreementAccepted(accepted: Boolean) = update {
         prefs.putBoolean(KEY_AGREEMENT, accepted)
     }
@@ -106,6 +110,7 @@ class DesktopSettingsRepository {
                 .coerceToDesktopQuality(),
             downloadLyrics = prefs.getBoolean(KEY_DOWNLOAD_LYRICS, false),
             downloadArtwork = prefs.getBoolean(KEY_DOWNLOAD_ARTWORK, false),
+            localMusicDirectory = prefs.get(KEY_LOCAL_MUSIC_DIR, ""),
         )
     }
 
@@ -132,6 +137,7 @@ class DesktopSettingsRepository {
         private const val KEY_DOWNLOAD_QUALITY = "download_quality_kbps"
         private const val KEY_DOWNLOAD_LYRICS = "download_lyrics"
         private const val KEY_DOWNLOAD_ARTWORK = "download_artwork"
+        private const val KEY_LOCAL_MUSIC_DIR = "local_music_directory"
         private const val KEY_AGREEMENT = "agreement_accepted"
     }
 }

@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.banlimusic.app.core.datastore.SUPPORTED_SOURCES
 import com.banlimusic.app.core.model.Track
+import com.banlimusic.desktop.data.DesktopDownloadStatus
 import java.util.Calendar
 
 @Composable
@@ -43,7 +44,12 @@ fun DesktopHomeScreen(state: DesktopAppState) {
     val settings by state.settings.collectAsState()
     val favorites by state.favorites.collectAsState()
     val history by state.history.collectAsState()
+    val folders by state.favoriteFolders.collectAsState()
+    val downloads by state.downloads.collectAsState()
     val playback by state.playback.collectAsState()
+    val downloadedIds = downloads
+        .filter { it.status == DesktopDownloadStatus.COMPLETED }
+        .mapTo(mutableSetOf()) { it.track.id }
 
     val greeting = remember {
         when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
@@ -201,6 +207,9 @@ fun DesktopHomeScreen(state: DesktopAppState) {
                     onPlay = { state.play(track, favorites) },
                     onToggleFavorite = { state.toggleFavorite(track) },
                     onDownload = { state.download(track) },
+                    showFavorite = false,
+                    downloaded = track.id in downloadedIds,
+                    categoryLabel = folders[track.id],
                 )
             }
         }
