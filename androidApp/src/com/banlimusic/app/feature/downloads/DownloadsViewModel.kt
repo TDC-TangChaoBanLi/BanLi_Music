@@ -3,20 +3,29 @@
  */
 package com.banlimusic.app.feature.downloads
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.banlimusic.app.data.repository.DownloadManifestRepository
 import com.banlimusic.app.data.repository.DownloadRepository
+import com.banlimusic.app.data.repository.ManifestImportResult
 import com.banlimusic.app.domain.download.DownloadTask
 import com.banlimusic.app.player.PlaybackController
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class DownloadsViewModel(
     private val downloads: DownloadRepository,
     private val playback: PlaybackController,
+    private val manifest: DownloadManifestRepository,
 ) : ViewModel() {
+
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
 
     val tasks: StateFlow<List<DownloadTask>> = downloads.observeTasks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -37,6 +46,34 @@ class DownloadsViewModel(
 
     fun clearCompleted() = viewModelScope.launch {
         downloads.clearCompleted()
+    }
+
+    /** Imports `banli-downloads.json` chosen through SAF. */
+    fun importManifest(uri: Uri) = viewModelScope.launch {
+        val result = manifest.importManifest(uri)
+        _message.value = importMessage(result)
+    }
+
+    /** Retries the silent manifest sync for an app-readable download directory. */
+    fun refreshManifest() = viewModelScope.launch {
+        runCatching {
+            val count = manifest.syncFromTarget(downloads.downloadTarget())
+            if (count > 0) _message.value = "已识别 $count 首下载目录中的歌曲"
+        }
+    }
+
+    fun consumeMessage() {
+        _message.value = null
+    }
+
+    private fun importMessage(result: ManifestImportResult): String = when {
+        result.failed -> "无法读取该清单文件"
+        result.total == 0 -> "清单中没有歌曲"
+        result.imported == 0 && result.missing > 0 ->
+            "清单中的 ${result.missing} 首歌曲未在媒体库中找到"
+        result.missing > 0 ->
+            "已导入 ${result.imported} 首，${result.missing} 首未找到文件"
+        else -> "已导入 ${result.imported} 首歌曲"
     }
 
     fun play(tasks: List<DownloadTask>, index: Int) {

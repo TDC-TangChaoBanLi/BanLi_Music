@@ -3,8 +3,14 @@
  */
 package com.banlimusic.app.feature.downloads
 
-import androidx.compose.foundation.layout.Arrangement
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,46 +24,51 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowDownward
-import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Cancel
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.banlimusic.app.core.common.TextNormalizer
 import com.banlimusic.app.domain.download.DownloadStatus
 import com.banlimusic.app.domain.download.DownloadStatusLabels
 import com.banlimusic.app.domain.download.DownloadTask
@@ -65,26 +76,23 @@ import com.banlimusic.app.domain.sort.AlphabetSection
 import com.banlimusic.app.domain.sort.TrackSort
 import com.banlimusic.app.domain.sort.TrackSorter
 import com.banlimusic.app.feature.common.AppViewModelProvider
-import com.banlimusic.app.ui.components.AlphabetDragBubble
-import com.banlimusic.app.ui.components.AlphabetIndex
+import com.banlimusic.app.ui.components.CompactTextButton
 import com.banlimusic.app.ui.components.EmptyState
-import com.banlimusic.app.ui.components.TrackArtwork
+import com.banlimusic.app.ui.components.ListTabLabel
+import com.banlimusic.app.ui.components.TRACK_LIST_HEADER_ITEM_COUNT
+import com.banlimusic.app.ui.components.TrackListHeaderSpec
+import com.banlimusic.app.ui.components.TrackListPanel
 import com.banlimusic.app.ui.components.TrackRow
+import com.banlimusic.app.ui.components.TrackScreenHeader
 import com.banlimusic.app.ui.components.formatBytes
 import com.banlimusic.app.ui.components.qualityTierLabel
 import kotlinx.coroutines.launch
 
-private enum class DownloadSort(val label: String) {
-    TITLE("名称"),
-    ARTIST("歌手"),
-    CREATED("下载时间"),
-}
-
-private fun DownloadSort.toTrackSort(): TrackSort? = when (this) {
-    DownloadSort.TITLE -> TrackSort.TITLE
-    DownloadSort.ARTIST -> TrackSort.ARTIST
-    DownloadSort.CREATED -> null
-}
+private val DOWNLOAD_SORT_OPTIONS = listOf(
+    TrackSort.CREATED,
+    TrackSort.TITLE,
+    TrackSort.ARTIST,
+)
 
 @Composable
 fun DownloadsScreen(
@@ -92,61 +100,137 @@ fun DownloadsScreen(
     onExitApp: () -> Unit = {},
     viewModel: DownloadsViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
-    BackHandler { onExitApp() }
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    var sort by rememberSaveable { mutableStateOf(DownloadSort.TITLE) }
+    var sort by rememberSaveable { mutableStateOf(TrackSort.CREATED) }
     var ascending by rememberSaveable { mutableStateOf(true) }
+    var searchMode by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
 
     val completed = tasks.filter { it.status == DownloadStatus.COMPLETED }
     val active = tasks.filter { it.status != DownloadStatus.COMPLETED }
-    val completedBytes = completed.sumOf { it.totalBytes }
-    val sortedCompleted = remember(completed, sort, ascending) {
-        val trackSort = sort.toTrackSort()
-        if (trackSort == null) {
-            val ordered = completed.sortedBy { it.createdAt }
-            if (ascending) ordered else ordered.reversed()
+    val normalizedQuery = remember(searchQuery) { TextNormalizer.normalize(searchQuery) }
+    val visibleCompleted = remember(completed, normalizedQuery) {
+        if (normalizedQuery.isBlank()) {
+            completed
         } else {
-            val order = TrackSorter.sort(completed.map { it.track }, trackSort, ascending)
-                .map { it.id }
-                .withIndex()
-                .associate { it.value to it.index }
-            completed.sortedWith(
-                compareBy({ order[it.track.id] ?: Int.MAX_VALUE }, { it.createdAt }),
-            )
+            completed.filter { task ->
+                listOfNotNull(
+                    task.track.title,
+                    task.track.album?.title,
+                    task.track.artistLine,
+                ).any { TextNormalizer.normalize(it).contains(normalizedQuery) }
+            }
         }
     }
-    val completedSections = remember(sortedCompleted, sort) {
-        val trackSort = sort.toTrackSort() ?: return@remember emptyList()
-        TrackSorter.sections(sortedCompleted.map { it.track }, trackSort)
+    val visibleBytes = remember(visibleCompleted) { visibleCompleted.sumOf { it.totalBytes } }
+    val sortedCompleted = remember(visibleCompleted, sort, ascending) {
+        val order = TrackSorter.sort(visibleCompleted.map { it.track }, sort, ascending)
+            .map { it.id }
+            .withIndex()
+            .associate { it.value to it.index }
+        visibleCompleted.sortedWith(
+            compareBy({ order[it.track.id] ?: Int.MAX_VALUE }, { it.createdAt }),
+        )
+    }
+    val sections = remember(sortedCompleted, sort) {
+        TrackSorter.sections(sortedCompleted.map { it.track }, sort).map {
+            it.copy(itemIndex = it.itemIndex + TRACK_LIST_HEADER_ITEM_COUNT)
+        }
     }
 
-    LaunchedEffect(pagerState.currentPage) {
+    val manifestLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) viewModel.importManifest(uri)
+    }
+    val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_AUDIO
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            manifestLauncher.launch(arrayOf("application/json", "text/*"))
+        } else {
+            Toast.makeText(context, "需要媒体读取权限才能识别清单中的歌曲", Toast.LENGTH_SHORT).show()
+        }
+    }
+    fun requestManifestImport() {
+        val granted = ContextCompat.checkSelfPermission(context, audioPermission) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            manifestLauncher.launch(arrayOf("application/json", "text/*"))
+        } else {
+            permissionLauncher.launch(audioPermission)
+        }
+    }
+
+    fun exitSelection() {
         selectionMode = false
         selectedIds = emptySet()
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = "下载", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    text = "已下载 ${completed.size} 首 · ${formatBytes(completedBytes)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    BackHandler {
+        when {
+            selectionMode -> exitSelection()
+            searchMode -> {
+                searchMode = false
+                searchQuery = ""
+                keyboard?.hide()
             }
-            if (pagerState.currentPage == 0 && completed.isNotEmpty() && !selectionMode) {
-                TextButton(onClick = { selectionMode = true }) { Text("选择") }
+            else -> onExitApp()
+        }
+    }
+
+    LaunchedEffect(pagerState.currentPage) {
+        exitSelection()
+    }
+
+    LaunchedEffect(message) {
+        message?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.consumeMessage()
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        TrackScreenHeader(title = "下载") {
+            // Reserve the trailing slot on both tabs so the title and tab row
+            // never move when switching between 已下载 and 下载列表.
+            Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                if (pagerState.currentPage == 0) {
+                    IconButton(
+                        onClick = {
+                            if (searchMode) {
+                                searchMode = false
+                                searchQuery = ""
+                                keyboard?.hide()
+                                exitSelection()
+                            } else {
+                                searchMode = true
+                            }
+                        },
+                    ) {
+                        Icon(
+                            imageVector = if (searchMode) {
+                                Icons.Rounded.Close
+                            } else {
+                                Icons.Rounded.Search
+                            },
+                            contentDescription = if (searchMode) "关闭搜索" else "搜索已下载",
+                        )
+                    }
+                }
             }
         }
 
@@ -154,12 +238,12 @@ fun DownloadsScreen(
             Tab(
                 selected = pagerState.currentPage == 0,
                 onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
-                text = { Text("已下载") },
+                text = { ListTabLabel("已下载") },
             )
             Tab(
                 selected = pagerState.currentPage == 1,
                 onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
-                text = { Text("下载列表") },
+                text = { ListTabLabel("下载列表") },
             )
         }
 
@@ -168,45 +252,44 @@ fun DownloadsScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
+            userScrollEnabled = !selectionMode,
         ) { page ->
             if (page == 0) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    DownloadSortBar(
-                        sort = sort,
-                        ascending = ascending,
-                        onSort = { sort = it },
-                        onToggleOrder = { ascending = !ascending },
-                    )
-                    DownloadedList(
-                        tasks = sortedCompleted,
-                        sections = completedSections,
-                        selectionMode = selectionMode,
-                        selectedIds = selectedIds,
-                        onPlay = { index ->
-                            viewModel.play(sortedCompleted, index)
-                            onOpenPlayer()
-                        },
-                        onToggleSelection = { id ->
-                            selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
-                        },
-                        onEnterSelection = { id ->
-                            selectionMode = true
-                            selectedIds = selectedIds + id
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (selectionMode) {
-                        DeleteSelectionBar(
-                            count = selectedIds.size,
-                            onSelectAll = { selectedIds = sortedCompleted.map { it.id }.toSet() },
-                            onDelete = { if (selectedIds.isNotEmpty()) showDeleteConfirm = true },
-                            onCancel = {
-                                selectionMode = false
-                                selectedIds = emptySet()
-                            },
-                        )
-                    }
-                }
+                DownloadedPage(
+                    tasks = sortedCompleted,
+                    sections = sections,
+                    visibleBytes = visibleBytes,
+                    sort = sort,
+                    ascending = ascending,
+                    searchMode = searchMode,
+                    searchQuery = searchQuery,
+                    selectionMode = selectionMode,
+                    selectedIds = selectedIds,
+                    onQueryChange = { searchQuery = it },
+                    onSort = { sort = it },
+                    onToggleOrder = { ascending = !ascending },
+                    onPlay = { index ->
+                        viewModel.play(sortedCompleted, index)
+                        onOpenPlayer()
+                    },
+                    onToggleSelection = { id ->
+                        selectedIds = if (id in selectedIds) {
+                            selectedIds - id
+                        } else {
+                            selectedIds + id
+                        }
+                    },
+                    onSelectAll = { selectedIds = sortedCompleted.map { it.id }.toSet() },
+                    onStartSelection = { selectionMode = true },
+                    onEnterSelection = { id ->
+                        selectionMode = true
+                        selectedIds = selectedIds + id
+                    },
+                    onExitSelection = ::exitSelection,
+                    onImportManifest = ::requestManifestImport,
+                    onDelete = { if (selectedIds.isNotEmpty()) showDeleteConfirm = true },
+                    modifier = Modifier.fillMaxSize(),
+                )
             } else {
                 DownloadQueueList(
                     tasks = active,
@@ -245,156 +328,157 @@ fun DownloadsScreen(
 }
 
 @Composable
-private fun DownloadedList(
+private fun DownloadedPage(
     tasks: List<DownloadTask>,
     sections: List<AlphabetSection>,
+    visibleBytes: Long,
+    sort: TrackSort,
+    ascending: Boolean,
+    searchMode: Boolean,
+    searchQuery: String,
     selectionMode: Boolean,
     selectedIds: Set<String>,
+    onQueryChange: (String) -> Unit,
+    onSort: (TrackSort) -> Unit,
+    onToggleOrder: () -> Unit,
     onPlay: (Int) -> Unit,
     onToggleSelection: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onStartSelection: () -> Unit,
     onEnterSelection: (String) -> Unit,
+    onExitSelection: () -> Unit,
+    onImportManifest: () -> Unit,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (tasks.isEmpty()) {
-        Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            EmptyState(
-                title = "还没有已下载歌曲",
-                description = "在播放页或批量操作中选择下载，完成后会出现在这里。",
-                icon = Icons.Rounded.Download,
+    val listState = rememberLazyListState()
+
+    val spec = TrackListHeaderSpec(
+        countText = "已下载 ${tasks.size} 首 · ${formatBytes(visibleBytes)}",
+        selectionMode = selectionMode,
+        selectedCount = selectedIds.size,
+        sort = if (sort in DOWNLOAD_SORT_OPTIONS) sort else DOWNLOAD_SORT_OPTIONS.first(),
+        sortOptions = DOWNLOAD_SORT_OPTIONS,
+        ascending = ascending,
+        categories = null,
+    )
+    Column(modifier = modifier.fillMaxSize()) {
+        if (searchMode) {
+            val focusRequester = remember { FocusRequester() }
+            val keyboard = LocalSoftwareKeyboardController.current
+            LaunchedEffect(Unit) {
+                focusRequester.requestFocus()
+                withFrameNanos { }
+                keyboard?.show()
+            }
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onQueryChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .focusRequester(focusRequester),
+                placeholder = { Text("搜索已下载歌曲") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                singleLine = true,
             )
         }
-        return
-    }
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    var dragLetter by remember { mutableStateOf<String?>(null) }
-    val currentSection by remember(listState, sections) {
-        derivedStateOf {
-            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
-        }
-    }
-    Box(modifier = modifier.fillMaxWidth()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 12.dp,
-                end = 30.dp,
-                top = 6.dp,
-                bottom = 24.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
-                TrackRow(
-                    track = task.track,
-                    onClick = {
-                        if (selectionMode) onToggleSelection(task.id) else onPlay(index)
-                    },
-                    isFavorite = false,
-                    selected = if (selectionMode) task.id in selectedIds else null,
-                    onLongClick = if (selectionMode) {
-                        null
+        TrackListPanel(
+            items = tasks,
+            itemKey = { it.id },
+            validKey = { it.id },
+            spec = spec,
+            listState = listState,
+            sections = sections,
+            ascending = ascending,
+            selectionMode = selectionMode,
+            onStartSelection = onStartSelection,
+            onSelect = onToggleSelection,
+            onSelectAll = onSelectAll,
+            onCancelSelection = onExitSelection,
+            onSort = onSort,
+            onToggleOrder = onToggleOrder,
+            modifier = Modifier.weight(1f),
+            countActions = {
+                CompactTextButton(text = "导入清单", onClick = onImportManifest)
+                if (tasks.isNotEmpty()) {
+                    CompactTextButton(text = "选择", onClick = onStartSelection)
+                }
+            },
+            emptyContent = {
+                EmptyState(
+                    title = if (searchQuery.isBlank()) "还没有已下载歌曲" else "没有匹配的已下载歌曲",
+                    description = if (searchQuery.isBlank()) {
+                        "在播放页或批量操作中选择下载，完成后会出现在这里。"
                     } else {
-                        { onEnterSelection(task.id) }
+                        "换个关键词试试。"
                     },
-                    trailing = {
-                        if (task.qualityKbps > 0) {
-                            Text(
-                                text = qualityTierLabel(task.qualityKbps),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
+                    icon = Icons.Rounded.Download,
                 )
-            }
-            item {
+            },
+            footer = {
                 Text(
                     text = "下载目录可在设置中修改；Android 10+ 默认写入系统音乐目录，不可写时回退到应用外部音乐目录。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-            }
-        }
-        AlphabetIndex(
-            sections = sections,
-            currentSection = currentSection,
-            onSelect = { section -> scope.launch { listState.scrollToItem(section.itemIndex) } },
-            onDragLetter = { dragLetter = it },
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .padding(end = 2.dp),
-        )
-        AlphabetDragBubble(
-            letter = dragLetter,
-            modifier = Modifier.align(Alignment.Center),
-        )
-    }
-}
-
-@Composable
-private fun DownloadSortBar(
-    sort: DownloadSort,
-    ascending: Boolean,
-    onSort: (DownloadSort) -> Unit,
-    onToggleOrder: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            text = "排序",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        DownloadSort.entries.forEach { option ->
-            FilterChip(
-                selected = sort == option,
-                onClick = { onSort(option) },
-                label = { Text(option.label, style = MaterialTheme.typography.labelSmall) },
-                modifier = Modifier.height(28.dp),
+            },
+            selectionBar = {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth(),
+                    tonalElevation = 8.dp,
+                    shadowElevation = 8.dp,
+                ) {
+                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "删除所选歌曲及其文件",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            IconButton(
+                                onClick = onDelete,
+                                enabled = selectedIds.isNotEmpty(),
+                                modifier = Modifier.size(30.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Delete,
+                                    contentDescription = "删除",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+        ) { index, task ->
+            TrackRow(
+                track = task.track,
+                onClick = {
+                    if (selectionMode) onToggleSelection(task.id) else onPlay(index)
+                },
+                isFavorite = false,
+                selected = if (selectionMode) task.id in selectedIds else null,
+                onLongClick = if (selectionMode) null else ({ onEnterSelection(task.id) }),
+                trailing = {
+                    if (task.qualityKbps > 0) {
+                        Text(
+                            text = qualityTierLabel(task.qualityKbps),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
             )
-        }
-        Spacer(Modifier.weight(1f))
-        IconButton(onClick = onToggleOrder, modifier = Modifier.size(30.dp)) {
-            Icon(
-                imageVector = if (ascending) Icons.Rounded.ArrowUpward else Icons.Rounded.ArrowDownward,
-                contentDescription = if (ascending) "升序" else "降序",
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun DeleteSelectionBar(
-    count: Int,
-    onSelectAll: () -> Unit,
-    onDelete: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "已选 $count 首",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onSelectAll) { Text("全选") }
-            TextButton(onClick = onDelete, enabled = count > 0) { Text("删除") }
-            TextButton(onClick = onCancel) { Text("取消") }
         }
     }
 }
@@ -411,154 +495,71 @@ private fun DownloadQueueList(
     if (tasks.isEmpty()) {
         Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             EmptyState(
-                title = "下载列表为空",
-                description = "正在下载、等待中或失败的任务会显示在这里。",
+                title = "没有正在下载的歌曲",
+                description = "在播放页或歌曲列表中选择下载后，任务会显示在这里。",
                 icon = Icons.Rounded.Download,
             )
         }
         return
     }
     LazyColumn(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(tasks, key = { it.id }) { task ->
-            DownloadCard(
-                task = task,
-                onPause = { onPause(task.id) },
-                onResume = { onResume(task.id) },
-                onCancel = { onCancel(task.id) },
-                onDelete = { onDelete(task.id) },
-            )
-        }
-        item {
-            Text(
-                text = "批量下载会经过共享限流器，GD 音乐台请求间隔至少 1 秒。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun DownloadCard(
-    task: DownloadTask,
-    onPause: () -> Unit,
-    onResume: () -> Unit,
-    onCancel: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TrackArtwork(
-                    track = task.track,
-                    modifier = Modifier.size(50.dp),
-                    cornerRadius = 10.dp,
-                    artworkUrl = task.localArtwork?.toURI()?.toString()
-                        ?: task.track.artworkUrl,
-                )
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 12.dp),
-                ) {
-                    Text(
-                        text = task.track.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = task.track.artistLine,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
-                when {
-                    task.canPause -> IconButton(onClick = onPause) {
-                        Icon(Icons.Rounded.Pause, contentDescription = "暂停")
+            Card {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(task.track.title, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                task.track.artistLine,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (task.canPause) {
+                            IconButton(onClick = { onPause(task.id) }) {
+                                Icon(Icons.Rounded.Pause, contentDescription = "暂停")
+                            }
+                        }
+                        if (task.canResume) {
+                            IconButton(onClick = { onResume(task.id) }) {
+                                Icon(Icons.Rounded.Refresh, contentDescription = "重试")
+                            }
+                        }
+                        IconButton(onClick = { onCancel(task.id) }) {
+                            Icon(Icons.Rounded.Cancel, contentDescription = "取消")
+                        }
+                        IconButton(onClick = { onDelete(task.id) }) {
+                            Icon(Icons.Rounded.Delete, contentDescription = "删除任务")
+                        }
                     }
-
-                    task.canResume -> IconButton(onClick = onResume) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "继续下载")
-                    }
-
-                    else -> Unit
-                }
-                IconButton(onClick = if (task.isActive) onCancel else onDelete) {
-                    Icon(
-                        imageVector = if (task.isActive) Icons.Rounded.Cancel else Icons.Rounded.Delete,
-                        contentDescription = if (task.isActive) "取消" else "删除",
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { task.progress },
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = DownloadStatusLabels.label(task.status),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = when (task.status) {
-                        DownloadStatus.FAILED -> MaterialTheme.colorScheme.error
-                        DownloadStatus.COMPLETED -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-                if (task.qualityKbps > 0) {
-                    Spacer(Modifier.size(8.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        text = qualityTierLabel(task.qualityKbps),
+                        text = buildString {
+                            append(DownloadStatusLabels.label(task.status))
+                            if (task.totalBytes > 0) {
+                                append(" · ")
+                                append(formatBytes(task.bytesDownloaded))
+                                append(" / ")
+                                append(formatBytes(task.totalBytes))
+                            }
+                            task.error?.let {
+                                append(" · ")
+                                append(it)
+                            }
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Spacer(Modifier.weight(1f))
-                val sizeText = when {
-                    task.totalBytes > 0 ->
-                        "${formatBytes(task.bytesDownloaded)} / ${formatBytes(task.totalBytes)}"
-
-                    else -> formatBytes(task.bytesDownloaded)
-                }
-                Text(
-                    text = sizeText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-            if (task.totalBytes > 0L) {
-                LinearProgressIndicator(
-                    progress = { task.progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                )
-            } else {
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                )
-            }
-            if (!task.error.isNullOrBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = task.error.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
             }
         }
     }

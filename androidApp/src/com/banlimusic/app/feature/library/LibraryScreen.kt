@@ -14,11 +14,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,7 +23,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,23 +37,21 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowDownward
-import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.HeartBroken
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
@@ -67,37 +60,51 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.banlimusic.app.core.common.TextNormalizer
+import com.banlimusic.app.core.datastore.DEFAULT_FAVORITE_CATEGORY
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.domain.sort.AlphabetSection
 import com.banlimusic.app.domain.sort.TrackSort
 import com.banlimusic.app.domain.sort.TrackSorter
 import com.banlimusic.app.feature.common.AppViewModelProvider
-import com.banlimusic.app.ui.components.AlphabetDragBubble
-import com.banlimusic.app.ui.components.AlphabetIndex
+import com.banlimusic.app.feature.common.SourcePickerDialog
+import com.banlimusic.app.ui.components.AlphabetOverlay
+import com.banlimusic.app.ui.components.CompactTextButton
 import com.banlimusic.app.ui.components.EmptyState
+import com.banlimusic.app.ui.components.ListTabLabel
+import com.banlimusic.app.ui.components.SelectionExtraAction
+import com.banlimusic.app.ui.components.SortBar
+import com.banlimusic.app.ui.components.rememberSelectionActionsState
+import com.banlimusic.app.ui.components.TRACK_LIST_HEADER_ITEM_COUNT
+import com.banlimusic.app.ui.components.TrackListHeaderSpec
+import com.banlimusic.app.ui.components.TrackListPanel
 import com.banlimusic.app.ui.components.TrackRow
+import com.banlimusic.app.ui.components.TrackScreenHeader
+import com.banlimusic.app.ui.components.TrackSelectionActionBar
 import com.banlimusic.app.ui.components.dragSelect
-import com.banlimusic.app.ui.components.qualityLabel
-import com.banlimusic.app.ui.components.qualityShortLabel
+import com.banlimusic.app.ui.components.formatBytes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -116,11 +123,25 @@ private enum class LibrarySearchFilter(val label: String) {
     LOCAL("本地/下载"),
 }
 
+private enum class LocalFilter(val label: String) {
+    ALL("全部"),
+    IMPORTED("本地导入"),
+    DOWNLOADED("已下载"),
+}
+
+private val FAVORITE_SORT_OPTIONS = listOf(TrackSort.TITLE, TrackSort.ARTIST, TrackSort.ALBUM)
+private val HISTORY_SORT_OPTIONS = listOf(TrackSort.RECENT) + FAVORITE_SORT_OPTIONS
+private val IMPORTED_SORT_OPTIONS = FAVORITE_SORT_OPTIONS
+private val DOWNLOADED_SORT_OPTIONS = listOf(TrackSort.CREATED) + FAVORITE_SORT_OPTIONS
+
+/** A-Z sections are computed over tracks; the list reserves one header item. */
+private fun List<AlphabetSection>.withListHeaderOffset(): List<AlphabetSection> =
+    map { it.copy(itemIndex = it.itemIndex + TRACK_LIST_HEADER_ITEM_COUNT) }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LibraryScreen(
     onPlayQueue: (List<Track>, Int) -> Unit,
-    onOpenDownloads: () -> Unit,
     onExitApp: () -> Unit = {},
     viewModel: LibraryViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
@@ -128,12 +149,19 @@ fun LibraryScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var searchFilter by rememberSaveable { mutableStateOf(LibrarySearchFilter.ALL) }
     var searchCategory by rememberSaveable { mutableStateOf<String?>(null) }
-    BackHandler {
-        if (searchMode) searchMode = false else onExitApp()
-    }
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var sourcePickerTrack by remember { mutableStateOf<Track?>(null) }
+    var favoriteSort by rememberSaveable { mutableStateOf(TrackSort.TITLE) }
+    var favoriteAscending by rememberSaveable { mutableStateOf(true) }
+    var historySort by rememberSaveable { mutableStateOf(TrackSort.RECENT) }
+    var historyAscending by rememberSaveable { mutableStateOf(true) }
+
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
     val allFavorites by viewModel.allFavorites.collectAsStateWithLifecycle()
     val history by viewModel.history.collectAsStateWithLifecycle()
+    val importedTracks by viewModel.importedTracks.collectAsStateWithLifecycle()
+    val downloadedTracks by viewModel.downloadedTracks.collectAsStateWithLifecycle()
+    val downloadedBytes by viewModel.downloadedBytes.collectAsStateWithLifecycle()
     val localTracks by viewModel.localTracks.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
@@ -144,11 +172,8 @@ fun LibraryScreen(
     val favoriteIds by viewModel.favoriteIds.collectAsStateWithLifecycle()
     val favoriteFolders by viewModel.favoriteFolders.collectAsStateWithLifecycle()
     val downloadedIds by viewModel.downloadedIds.collectAsStateWithLifecycle()
+    val preferredSources by viewModel.preferredSources.collectAsStateWithLifecycle()
 
-    var selectionMode by rememberSaveable { mutableStateOf(false) }
-    var libraryHeaderVisible by remember { mutableStateOf(true) }
-    var sort by rememberSaveable { mutableStateOf(TrackSort.TITLE) }
-    var ascending by rememberSaveable { mutableStateOf(true) }
     var showNewCategory by rememberSaveable { mutableStateOf(false) }
     var newCategoryName by rememberSaveable { mutableStateOf("") }
     var showImportOptions by rememberSaveable { mutableStateOf(false) }
@@ -156,26 +181,20 @@ fun LibraryScreen(
     var localInfoLocation by remember { mutableStateOf("") }
 
     val context = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { LibraryTab.entries.size })
-    val sortedFavorites = remember(favorites, sort, ascending) {
-        TrackSorter.sort(favorites, sort, ascending)
+    val folderCategories = remember(categories, defaultCategory) {
+        (categories + defaultCategory).distinct()
     }
-    val sortedHistory = remember(history, sort, ascending) {
-        TrackSorter.sort(history, sort, ascending)
+
+    val sortedFavorites = remember(favorites, favoriteSort, favoriteAscending) {
+        TrackSorter.sort(favorites, favoriteSort, favoriteAscending)
     }
-    val sortedLocal = remember(localTracks, sort, ascending) {
-        TrackSorter.sort(localTracks, sort, ascending)
+    val sortedHistory = remember(history, historySort, historyAscending) {
+        TrackSorter.sort(history, historySort, historyAscending)
     }
-    val favoriteSections = remember(sortedFavorites, sort) {
-        TrackSorter.sections(sortedFavorites, sort)
-    }
-    val historySections = remember(sortedHistory, sort) {
-        TrackSorter.sections(sortedHistory, sort)
-    }
-    val localSections = remember(sortedLocal, sort) {
-        TrackSorter.sections(sortedLocal, sort)
-    }
+
     val normalizedSearch = remember(searchQuery) { TextNormalizer.normalize(searchQuery) }
     val searchResults = remember(
         normalizedSearch,
@@ -210,11 +229,11 @@ fun LibraryScreen(
             filtered.filter(::matches).distinctBy { it.id }
         }
     }
-    val sortedSearch = remember(searchResults, sort, ascending) {
-        TrackSorter.sort(searchResults, sort, ascending)
+    val sortedSearch = remember(searchResults, favoriteSort, favoriteAscending) {
+        TrackSorter.sort(searchResults, favoriteSort, favoriteAscending)
     }
-    val searchSections = remember(sortedSearch, sort) {
-        TrackSorter.sections(sortedSearch, sort)
+    val searchSections = remember(sortedSearch, favoriteSort) {
+        TrackSorter.sections(sortedSearch, favoriteSort).withListHeaderOffset()
     }
 
     val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -264,10 +283,25 @@ fun LibraryScreen(
         if (granted) viewModel.importLocalMusic() else permissionLauncher.launch(permission)
     }
 
-    LaunchedEffect(pagerState.currentPage) {
+    fun exitSelection() {
         selectionMode = false
-        libraryHeaderVisible = true
         viewModel.clearSelection()
+    }
+
+    BackHandler {
+        when {
+            selectionMode -> exitSelection()
+            searchMode -> {
+                searchMode = false
+                searchQuery = ""
+                keyboard?.hide()
+            }
+            else -> onExitApp()
+        }
+    }
+
+    LaunchedEffect(pagerState.currentPage) {
+        exitSelection()
     }
 
     LaunchedEffect(message) {
@@ -278,21 +312,17 @@ fun LibraryScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 20.dp, end = 8.dp, top = 20.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "音乐库",
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.headlineSmall,
-            )
+        TrackScreenHeader(title = "音乐库") {
             IconButton(
                 onClick = {
-                    searchMode = !searchMode
-                    if (!searchMode) searchQuery = ""
+                    if (searchMode) {
+                        searchMode = false
+                        searchQuery = ""
+                        keyboard?.hide()
+                    } else {
+                        searchMode = true
+                    }
+                    exitSelection()
                 },
             ) {
                 Icon(
@@ -310,20 +340,38 @@ fun LibraryScreen(
                     searchFilter = it
                     if (it != LibrarySearchFilter.FAVORITES) searchCategory = null
                 },
-                categories = categories,
+                categories = folderCategories,
                 selectedCategory = searchCategory,
                 onCategoryChange = { searchCategory = it },
                 results = sortedSearch,
                 sections = searchSections,
-                sort = sort,
-                ascending = ascending,
-                onSort = { sort = it },
-                onToggleOrder = { ascending = !ascending },
+                sort = favoriteSort,
+                ascending = favoriteAscending,
+                onSort = { favoriteSort = it },
+                onToggleOrder = { favoriteAscending = !favoriteAscending },
                 favoriteIds = favoriteIds,
                 favoriteFolders = favoriteFolders,
                 downloadedIds = downloadedIds,
+                preferredSources = preferredSources,
+                onSourceClick = { sourcePickerTrack = it },
                 onPlayQueue = onPlayQueue,
                 onToggleFavorite = viewModel::toggleFavorite,
+                selectionMode = selectionMode,
+                selectedIds = selectedIds,
+                defaultCategory = defaultCategory,
+                downloadQualities = viewModel::downloadQualities,
+                onStartSelection = { selectionMode = true },
+                onToggleSelection = viewModel::toggleSelection,
+                onSelectAll = { viewModel.selectAll(sortedSearch) },
+                onCancelSelection = { exitSelection() },
+                onAddFavorites = { tracks, folders ->
+                    viewModel.addFavorites(tracks, folders)
+                    exitSelection()
+                },
+                onDownloadSelected = { tracks, quality ->
+                    viewModel.downloadSelected(tracks, quality)
+                    exitSelection()
+                },
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -332,160 +380,167 @@ fun LibraryScreen(
                     Tab(
                         selected = pagerState.currentPage == index,
                         onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
-                        text = { Text(tab.label) },
+                        text = { ListTabLabel(tab.label) },
                     )
                 }
             }
 
-        AnimatedVisibility(
-            visible = pagerState.currentPage != 0 || libraryHeaderVisible,
-            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
-        ) {
-            SortBar(
-                sort = sort,
-                ascending = ascending,
-                onSort = { sort = it },
-                onToggleOrder = { ascending = !ascending },
-            )
-        }
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                // Page swiping must not change folders while selecting tracks.
+                userScrollEnabled = !selectionMode,
+            ) { page ->
+                when (LibraryTab.entries[page]) {
+                    LibraryTab.FAVORITES -> FavoritesTabContent(
+                        favorites = sortedFavorites,
+                        categories = folderCategories,
+                        selectedCategory = selectedCategory,
+                        defaultCategory = defaultCategory,
+                        favoriteFolders = favoriteFolders,
+                        downloadedIds = downloadedIds,
+                        preferredSources = preferredSources,
+                        selectionMode = selectionMode,
+                        selectedIds = selectedIds,
+                        sort = favoriteSort,
+                        ascending = favoriteAscending,
+                        onSort = { favoriteSort = it },
+                        onToggleOrder = { favoriteAscending = !favoriteAscending },
+                        onSelectCategory = { category ->
+                            exitSelection()
+                            viewModel.setCategory(category)
+                        },
+                        onCreateCategory = { showNewCategory = true },
+                        onManageOrder = viewModel::saveCategoryOrder,
+                        onPlayQueue = onPlayQueue,
+                        onSourceClick = { sourcePickerTrack = it },
+                        onSelectionModeChange = { enabled ->
+                            selectionMode = enabled
+                            if (!enabled) viewModel.clearSelection()
+                        },
+                        onToggleSelection = viewModel::toggleSelection,
+                        onSelectAll = { viewModel.selectAll(sortedFavorites) },
+                        onClearSelection = { exitSelection() },
+                        onAddFavorites = { tracks, folders ->
+                            viewModel.addFavorites(tracks, folders)
+                            exitSelection()
+                        },
+                        onRemoveFromSelection = { tracks, folder ->
+                            viewModel.removeFavorites(tracks, folder)
+                            exitSelection()
+                        },
+                        onDeleteCategory = viewModel::deleteCategory,
+                        onDownloadSelected = { tracks, quality ->
+                            viewModel.downloadSelected(tracks, quality)
+                            exitSelection()
+                        },
+                        downloadQualities = viewModel::downloadQualities,
+                        modifier = Modifier.fillMaxSize(),
+                    )
 
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-        ) { page ->
-            when (LibraryTab.entries[page]) {
-                LibraryTab.FAVORITES -> FavoritesTabContent(
-                    favorites = sortedFavorites,
-                    sections = favoriteSections,
-                    categories = categories,
-                    selectedCategory = selectedCategory,
-                    defaultCategory = defaultCategory,
-                    favoriteFolders = favoriteFolders,
-                    downloadedIds = downloadedIds,
-                    selectionMode = selectionMode,
-                    selectedIds = selectedIds,
-                    selectedTracks = sortedFavorites.filter { it.id in selectedIds },
-                    onSelectCategory = { category ->
-                        selectionMode = false
-                        viewModel.clearSelection()
-                        viewModel.setCategory(category)
-                    },
-                    onCreateCategory = { showNewCategory = true },
-                    onPlayQueue = onPlayQueue,
-                    onSelectionModeChange = {
-                        selectionMode = it
-                        if (!it) viewModel.clearSelection()
-                    },
-                    onToggleSelection = viewModel::toggleSelection,
-                    onSelectAll = { viewModel.selectAll(sortedFavorites) },
-                    onClearSelection = {
-                        selectionMode = false
-                        viewModel.clearSelection()
-                    },
-                    onAddFavorites = { tracks, folders ->
-                        viewModel.addFavorites(tracks, folders)
-                        selectionMode = false
-                    },
-                    onRemoveFromSelection = { tracks, folder ->
-                        viewModel.removeFavorites(tracks, folder)
-                        selectionMode = false
-                    },
-                    onDeleteCategory = viewModel::deleteCategory,
-                    onDownloadSelected = { tracks, quality ->
-                        viewModel.downloadSelected(tracks, quality)
-                        selectionMode = false
-                    },
-                    downloadQualities = viewModel::downloadQualities,
-                    onHeaderVisibilityChange = { libraryHeaderVisible = it },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                    LibraryTab.HISTORY -> HistoryTabContent(
+                        history = sortedHistory,
+                        categories = folderCategories,
+                        defaultCategory = defaultCategory,
+                        favoriteFolders = favoriteFolders,
+                        downloadedIds = downloadedIds,
+                        preferredSources = preferredSources,
+                        selectionMode = selectionMode,
+                        selectedIds = selectedIds,
+                        sort = historySort,
+                        ascending = historyAscending,
+                        onSort = { historySort = it },
+                        onToggleOrder = { historyAscending = !historyAscending },
+                        onSelectionModeChange = { enabled ->
+                            selectionMode = enabled
+                            if (!enabled) viewModel.clearSelection()
+                        },
+                        onToggleSelection = viewModel::toggleSelection,
+                        onSelectAll = { viewModel.selectAll(sortedHistory) },
+                        onClearSelection = { exitSelection() },
+                        onAddFavorites = { tracks, folders ->
+                            viewModel.addFavorites(tracks, folders)
+                            exitSelection()
+                        },
+                        onDownloadSelected = { tracks, quality ->
+                            viewModel.downloadSelected(tracks, quality)
+                            exitSelection()
+                        },
+                        downloadQualities = viewModel::downloadQualities,
+                        onPlayQueue = onPlayQueue,
+                        onSourceClick = { sourcePickerTrack = it },
+                        onToggleFavorite = viewModel::toggleFavorite,
+                        onClearHistory = viewModel::clearHistory,
+                        onDeleteHistory = viewModel::deleteHistorySelection,
+                        modifier = Modifier.fillMaxSize(),
+                    )
 
-                LibraryTab.HISTORY -> HistoryTabContent(
-                    history = sortedHistory,
-                    sections = historySections,
-                    categories = categories,
-                    defaultCategory = defaultCategory,
-                    favoriteFolders = favoriteFolders,
-                    downloadedIds = downloadedIds,
-                    selectionMode = selectionMode,
-                    selectedIds = selectedIds,
-                    onSelectionModeChange = {
-                        selectionMode = it
-                        if (!it) viewModel.clearSelection()
-                    },
-                    onToggleSelection = viewModel::toggleSelection,
-                    onSelectAll = { viewModel.selectAll(sortedHistory) },
-                    onClearSelection = {
-                        selectionMode = false
-                        viewModel.clearSelection()
-                    },
-                    onAddFavorites = { tracks, folders ->
-                        viewModel.addFavorites(tracks, folders)
-                        selectionMode = false
-                    },
-                    onDownloadSelected = { tracks, quality ->
-                        viewModel.downloadSelected(tracks, quality)
-                        selectionMode = false
-                    },
-                    downloadQualities = viewModel::downloadQualities,
-                    onPlayQueue = onPlayQueue,
-                    onToggleFavorite = viewModel::toggleFavorite,
-                    onClearHistory = viewModel::clearHistory,
-                    modifier = Modifier.fillMaxSize(),
-                )
-
-                LibraryTab.LOCAL -> LocalTabContent(
-                    tracks = sortedLocal,
-                    sections = localSections,
-                    favoriteIds = favoriteIds,
-                    favoriteFolders = favoriteFolders,
-                    downloadedIds = downloadedIds,
-                    categories = categories,
-                    defaultCategory = defaultCategory,
-                    selectionMode = selectionMode,
-                    selectedIds = selectedIds,
-                    onSelectionModeChange = {
-                        selectionMode = it
-                        if (!it) viewModel.clearSelection()
-                    },
-                    onToggleSelection = viewModel::toggleSelection,
-                    onSelectAll = { viewModel.selectAll(sortedLocal) },
-                    onClearSelection = {
-                        selectionMode = false
-                        viewModel.clearSelection()
-                    },
-                    onAddFavorites = { tracks, folders ->
-                        viewModel.addFavorites(tracks, folders)
-                        selectionMode = false
-                    },
-                    onDownloadSelected = { tracks, quality ->
-                        viewModel.downloadSelected(tracks, quality)
-                        selectionMode = false
-                    },
-                    onDeleteSelected = {
-                        viewModel.deleteLocalSelection(sortedLocal)
-                        selectionMode = false
-                    },
-                    downloadQualities = viewModel::downloadQualities,
-                    onPlayQueue = onPlayQueue,
-                    onRequestImport = { showImportOptions = true },
-                    onOpenDownloads = onOpenDownloads,
-                    onShowLocation = { track ->
-                        scope.launch {
-                            localInfoLocation = withContext(Dispatchers.IO) {
-                                resolveLocalLocation(context, track)
+                    LibraryTab.LOCAL -> LocalTabContent(
+                        importedTracks = importedTracks,
+                        downloadedTracks = downloadedTracks,
+                        downloadedBytes = downloadedBytes,
+                        favoriteIds = favoriteIds,
+                        favoriteFolders = favoriteFolders,
+                        downloadedIds = downloadedIds,
+                        categories = folderCategories,
+                        defaultCategory = defaultCategory,
+                        preferredSources = preferredSources,
+                        selectionMode = selectionMode,
+                        selectedIds = selectedIds,
+                        onSelectionModeChange = { enabled ->
+                            selectionMode = enabled
+                            if (!enabled) viewModel.clearSelection()
+                        },
+                        onToggleSelection = viewModel::toggleSelection,
+                        onSelectAll = { tracks -> viewModel.selectAll(tracks) },
+                        onClearSelection = { exitSelection() },
+                        onAddFavorites = { tracks, folders ->
+                            viewModel.addFavorites(tracks, folders)
+                            exitSelection()
+                        },
+                        onDownloadSelected = { tracks, quality ->
+                            viewModel.downloadSelected(tracks, quality)
+                            exitSelection()
+                        },
+                        onDeleteSelection = { tracks ->
+                            viewModel.deleteLocalSelection(tracks)
+                            exitSelection()
+                        },
+                        onDeleteDownloaded = { tracks ->
+                            viewModel.removeDownloadedSelection(tracks)
+                            exitSelection()
+                        },
+                        downloadQualities = viewModel::downloadQualities,
+                        onPlayQueue = onPlayQueue,
+                        onSourceClick = { sourcePickerTrack = it },
+                        onRequestImport = { showImportOptions = true },
+                        onShowLocation = { track ->
+                            scope.launch {
+                                localInfoLocation = withContext(Dispatchers.IO) {
+                                    resolveLocalLocation(context, track)
+                                }
+                                localInfoTrack = track
                             }
-                            localInfoTrack = track
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
-        }
+    }
+
+    sourcePickerTrack?.let { track ->
+        SourcePickerDialog(
+            track = track,
+            preferredProviderId = preferredSources[track.id],
+            onSelect = { providerId ->
+                viewModel.selectSourcePreference(track.id, providerId)
+                sourcePickerTrack = null
+            },
+            onDismiss = { sourcePickerTrack = null },
+        )
     }
 
     if (showImportOptions) {
@@ -564,7 +619,7 @@ fun LibraryScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LibrarySearchContent(
     query: String,
@@ -583,19 +638,42 @@ private fun LibrarySearchContent(
     favoriteIds: Set<String>,
     favoriteFolders: Map<String, Set<String>>,
     downloadedIds: Set<String>,
+    preferredSources: Map<String, String>,
+    onSourceClick: (Track) -> Unit,
     onPlayQueue: (List<Track>, Int) -> Unit,
     onToggleFavorite: (Track) -> Unit,
+    selectionMode: Boolean,
+    selectedIds: Set<String>,
+    defaultCategory: String,
+    downloadQualities: suspend (List<Track>) -> List<Int>,
+    onStartSelection: () -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onCancelSelection: () -> Unit,
+    onAddFavorites: (List<Track>, Set<String>) -> Unit,
+    onDownloadSelected: (List<Track>, Int?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    var dragLetter by remember { mutableStateOf<String?>(null) }
-    val currentSection by remember(listState, sections) {
-        derivedStateOf {
-            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
-        }
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val selection = rememberSelectionActionsState(
+        selectionMode = selectionMode,
+        selectedIds = selectedIds,
+        tracks = results,
+        defaultCategory = defaultCategory,
+        downloadQualities = downloadQualities,
+    )
+
+    LaunchedEffect(Unit) {
+        // Search is opened from the header icon, so focus the field immediately
+        // and show the keyboard after the first layout pass.
+        focusRequester.requestFocus()
+        withFrameNanos { }
+        keyboard?.show()
     }
     LaunchedEffect(query, filter, selectedCategory) {
+        if (selectionMode) onCancelSelection()
         if (results.isNotEmpty()) listState.scrollToItem(0)
     }
 
@@ -605,7 +683,8 @@ private fun LibrarySearchContent(
             onValueChange = onQueryChange,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp)
+                .focusRequester(focusRequester),
             placeholder = { Text("搜索歌名、专辑名或歌手名") },
             leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
             trailingIcon = {
@@ -652,15 +731,10 @@ private fun LibrarySearchContent(
         }
         SortBar(
             sort = sort,
+            options = FAVORITE_SORT_OPTIONS,
             ascending = ascending,
             onSort = onSort,
             onToggleOrder = onToggleOrder,
-        )
-        Text(
-            text = if (query.isBlank()) "输入关键词开始搜索" else "找到 ${results.size} 首",
-            modifier = Modifier.padding(horizontal = 16.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         when {
             query.isBlank() -> EmptyState(
@@ -675,112 +749,100 @@ private fun LibrarySearchContent(
                 icon = Icons.Rounded.Search,
             )
 
-            else -> Box(modifier = Modifier.weight(1f)) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        start = 12.dp,
-                        end = 30.dp,
-                        bottom = 20.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    itemsIndexed(results, key = { _, track -> track.id }) { index, track ->
-                        TrackRow(
-                            track = track,
-                            onClick = { onPlayQueue(results, index) },
-                            isFavorite = track.id in favoriteIds,
-                            onToggleFavorite = { onToggleFavorite(track) },
-                            downloaded = track.id in downloadedIds,
-                            categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
-                        )
-                    }
-                }
-                AlphabetIndex(
-                    sections = sections,
-                    currentSection = currentSection,
-                    onSelect = { section ->
-                        scope.launch { listState.scrollToItem(section.itemIndex) }
+            else -> TrackListPanel(
+                items = results,
+                itemKey = { it.id },
+                validKey = { it.id },
+                spec = TrackListHeaderSpec(
+                    countText = "找到 ${results.size} 首",
+                    selectionMode = selectionMode,
+                    selectedCount = selectedIds.size,
+                ),
+                listState = listState,
+                sections = sections,
+                ascending = ascending,
+                selectionMode = selectionMode,
+                onStartSelection = {
+                    keyboard?.hide()
+                    onStartSelection()
+                },
+                onSelect = onToggleSelection,
+                onSelectAll = onSelectAll,
+                onCancelSelection = onCancelSelection,
+                onSort = {},
+                onToggleOrder = {},
+                emptyContent = {
+                    EmptyState(
+                        title = "没有找到相关歌曲",
+                        description = "试试更短的关键词，或切换到其他筛选条件。",
+                        icon = Icons.Rounded.Search,
+                    )
+                },
+                modifier = Modifier.weight(1f),
+                countActions = {
+                    CompactTextButton(
+                        text = "选择",
+                        onClick = {
+                            keyboard?.hide()
+                            onStartSelection()
+                        },
+                    )
+                },
+                selectionBar = {
+                    TrackSelectionActionBar(
+                        categories = (categories + defaultCategory).distinct(),
+                        state = selection,
+                        onFavorite = { onAddFavorites(results, selection.chosenCategories) },
+                        onDownload = { onDownloadSelected(results, selection.chosenQuality) },
+                        favoriteEnabled = selectedIds.isNotEmpty() &&
+                            selection.chosenCategories.isNotEmpty(),
+                        downloadEnabled = selectedIds.isNotEmpty() &&
+                            selection.qualities.isNotEmpty(),
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                },
+            ) { index, track ->
+                TrackRow(
+                    track = track,
+                    onClick = {
+                        if (selectionMode) onToggleSelection(track.id)
+                        else onPlayQueue(results, index)
                     },
-                    onDragLetter = { dragLetter = it },
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .fillMaxHeight()
-                        .padding(end = 2.dp),
-                )
-                AlphabetDragBubble(
-                    letter = dragLetter,
-                    modifier = Modifier.align(Alignment.Center),
+                    isFavorite = track.id in favoriteIds,
+                    onToggleFavorite = if (selectionMode) null else {
+                        { onToggleFavorite(track) }
+                    },
+                    downloaded = track.id in downloadedIds,
+                    categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
+                    preferredProviderId = preferredSources[track.id],
+                    onSourceClick = { onSourceClick(track) },
+                    selected = if (selectionMode) track.id in selectedIds else null,
                 )
             }
         }
     }
 }
 
-@Composable
-private fun SortBar(
-    sort: TrackSort,
-    ascending: Boolean,
-    onSort: (TrackSort) -> Unit,
-    onToggleOrder: () -> Unit,
-) {
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 30.dp)
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "排序",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(4.dp))
-            TrackSort.entries.forEach { option ->
-                FilterChip(
-                    selected = sort == option,
-                    onClick = { onSort(option) },
-                    label = { Text(option.label, style = MaterialTheme.typography.labelSmall) },
-                    modifier = Modifier
-                        .height(28.dp)
-                        .padding(end = 4.dp),
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onToggleOrder, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    imageVector = if (ascending) {
-                        Icons.Rounded.ArrowUpward
-                    } else {
-                        Icons.Rounded.ArrowDownward
-                    },
-                    contentDescription = if (ascending) "升序" else "降序",
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun FavoritesTabContent(
     favorites: List<Track>,
-    sections: List<AlphabetSection>,
     categories: List<String>,
     selectedCategory: String?,
     defaultCategory: String,
     favoriteFolders: Map<String, Set<String>>,
     downloadedIds: Set<String>,
+    preferredSources: Map<String, String>,
     selectionMode: Boolean,
     selectedIds: Set<String>,
-    selectedTracks: List<Track>,
+    sort: TrackSort,
+    ascending: Boolean,
+    onSort: (TrackSort) -> Unit,
+    onToggleOrder: () -> Unit,
     onSelectCategory: (String?) -> Unit,
     onCreateCategory: () -> Unit,
+    onManageOrder: (List<String>) -> Unit,
     onPlayQueue: (List<Track>, Int) -> Unit,
+    onSourceClick: (Track) -> Unit,
     onSelectionModeChange: (Boolean) -> Unit,
     onToggleSelection: (String) -> Unit,
     onSelectAll: () -> Unit,
@@ -790,261 +852,120 @@ private fun FavoritesTabContent(
     onDeleteCategory: (String) -> Unit,
     onDownloadSelected: (List<Track>, Int?) -> Unit,
     downloadQualities: suspend (List<Track>) -> List<Int>,
-    onHeaderVisibilityChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    var dragLetter by remember { mutableStateOf<String?>(null) }
-    val currentSection by remember(listState, sections) {
-        derivedStateOf {
-            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
-        }
-    }
-    val validIds = remember(favorites) { favorites.map { it.id }.toSet() }
-    var chosenCategories by remember(defaultCategory) { mutableStateOf(setOf(defaultCategory)) }
-    var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
-    var chosenQuality by remember { mutableStateOf<Int?>(null) }
-    var headerVisible by remember { mutableStateOf(true) }
+    val selection = rememberSelectionActionsState(
+        selectionMode = selectionMode,
+        selectedIds = selectedIds,
+        tracks = favorites,
+        defaultCategory = defaultCategory,
+        downloadQualities = downloadQualities,
+    )
     var manageCategories by remember { mutableStateOf(false) }
     var pendingDeleteCategory by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(listState) {
-        var previousIndex = 0
-        var previousOffset = 0
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collect { (index, offset) ->
-                val scrollingDown = index > previousIndex ||
-                    (index == previousIndex && offset > previousOffset)
-                headerVisible = !scrollingDown || (index == 0 && offset == 0)
-                previousIndex = index
-                previousOffset = offset
-            }
-    }
-    LaunchedEffect(headerVisible) {
-        onHeaderVisibilityChange(headerVisible)
+    val spec = TrackListHeaderSpec(
+        countText = "共 ${favorites.size} 首",
+        selectionMode = selectionMode,
+        selectedCount = selectedIds.size,
+        sort = sort,
+        sortOptions = FAVORITE_SORT_OPTIONS,
+        ascending = ascending,
+        categories = categories,
+        selectedCategory = selectedCategory,
+    )
+    val sections = remember(favorites, sort) {
+        TrackSorter.sections(favorites, sort).withListHeaderOffset()
     }
 
-    LaunchedEffect(selectedIds, favorites) {
-        qualities = if (selectedIds.isEmpty()) emptyList() else downloadQualities(selectedTracks)
-        if (chosenQuality !in qualities) chosenQuality = qualities.firstOrNull()
-    }
-
-    Box(modifier = modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            AnimatedVisibility(
-                visible = headerVisible,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
-            ) {
-                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                    Column {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            item {
-                                FilterChip(
-                                    selected = selectedCategory == null,
-                                    onClick = { onSelectCategory(null) },
-                                    label = {
-                                        Text("全部", style = MaterialTheme.typography.labelSmall)
-                                    },
-                                    modifier = Modifier.height(28.dp),
-                                )
-                            }
-                            items(categories) { category ->
-                                FilterChip(
-                                    selected = selectedCategory == category,
-                                    onClick = { onSelectCategory(category) },
-                                    label = {
-                                        Text(
-                                            category,
-                                            style = MaterialTheme.typography.labelSmall,
-                                        )
-                                    },
-                                    modifier = Modifier.height(28.dp),
-                                )
-                            }
-                            item {
-                                FilterChip(
-                                    selected = false,
-                                    onClick = onCreateCategory,
-                                    label = {
-                                        Text("+ 新建", style = MaterialTheme.typography.labelSmall)
-                                    },
-                                    modifier = Modifier.height(28.dp),
-                                )
-                            }
-                            item {
-                                FilterChip(
-                                    selected = false,
-                                    onClick = { manageCategories = true },
-                                    label = {
-                                        Text("管理", style = MaterialTheme.typography.labelSmall)
-                                    },
-                                    modifier = Modifier.height(28.dp),
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 30.dp)
-                                .padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = if (selectionMode) {
-                                    "已选 ${selectedIds.size} 首"
-                                } else {
-                                    "共 ${favorites.size} 首"
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.weight(1f))
-                            if (!selectionMode) {
-                                TextButton(
-                                    enabled = favorites.isNotEmpty(),
-                                    onClick = { onPlayQueue(favorites, 0) },
-                                    modifier = Modifier.height(30.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp),
-                                ) { Text("播放全部", style = MaterialTheme.typography.labelMedium) }
-                                TextButton(
-                                    onClick = { onSelectionModeChange(true) },
-                                    modifier = Modifier.height(30.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp),
-                                ) { Text("选择", style = MaterialTheme.typography.labelMedium) }
-                            }
-                        }
-                    }
-                }
+    TrackListPanel(
+        spec = spec,
+        listState = listState,
+        items = favorites,
+        itemKey = { it.id },
+        validKey = { it.id },
+        sections = sections,
+        ascending = ascending,
+        selectionMode = selectionMode,
+        onStartSelection = { onSelectionModeChange(true) },
+        onSelect = onToggleSelection,
+        onSelectAll = onSelectAll,
+        onCancelSelection = onClearSelection,
+        onSort = onSort,
+        onToggleOrder = onToggleOrder,
+        onCategory = onSelectCategory,
+        countActions = {
+            if (favorites.isNotEmpty()) {
+                CompactTextButton(
+                    text = "播放全部",
+                    onClick = { onPlayQueue(favorites, 0) },
+                )
             }
-
-            if (favorites.isEmpty()) {
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    EmptyState(
-                        title = if (selectedCategory == null) "还没有收藏歌曲" else "这个收藏夹是空的",
-                        description = "在搜索结果或播放页收藏歌曲；默认收藏夹为“$defaultCategory”。",
-                        icon = Icons.Rounded.FavoriteBorder,
-                    )
-                }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .dragSelect(
-                            enabled = true,
-                            listState = listState,
-                            validKeys = validIds,
-                            onSelect = { id ->
-                                if (!selectionMode) onSelectionModeChange(true)
-                                onToggleSelection(id)
-                            },
-                        ),
-                    contentPadding = PaddingValues(
-                        start = 12.dp,
-                        end = 30.dp,
-                        bottom = if (selectionMode) 100.dp else 20.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    itemsIndexed(favorites, key = { _, track -> track.id }) { index, track ->
-                        TrackRow(
-                            track = track,
-                            onClick = {
-                                if (selectionMode) onToggleSelection(track.id)
-                                else onPlayQueue(favorites, index)
-                            },
-                            isFavorite = true,
-                            showFavoriteState = false,
-                            onToggleFavorite = null,
-                            downloaded = track.id in downloadedIds,
-                            categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
-                            selected = if (selectionMode) track.id in selectedIds else null,
-                        )
-                    }
-                }
-            }
-        }
-
-        AlphabetIndex(
-            sections = sections,
-            currentSection = currentSection,
-            onSelect = { section -> scope.launch { listState.scrollToItem(section.itemIndex) } },
-            onDragLetter = { dragLetter = it },
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .padding(end = 2.dp),
-        )
-        AlphabetDragBubble(
-            letter = dragLetter,
-            modifier = Modifier.align(Alignment.Center),
-        )
-
-        if (selectionMode) {
-            TrackSelectionBar(
-                count = selectedIds.size,
+            CompactTextButton(
+                text = "选择",
+                onClick = { onSelectionModeChange(true) },
+            )
+        },
+        categoryTrailing = {
+            CompactTextButton(text = "+ 新建", onClick = onCreateCategory)
+            CompactTextButton(text = "管理", onClick = { manageCategories = true })
+        },
+        emptyContent = {
+            EmptyState(
+                title = if (selectedCategory == null) "还没有收藏歌曲" else "这个收藏夹是空的",
+                description = "在搜索结果或播放页收藏歌曲；默认收藏夹为“$defaultCategory”。",
+                icon = Icons.Rounded.FavoriteBorder,
+            )
+        },
+        modifier = modifier,
+        selectionBar = {
+            TrackSelectionActionBar(
                 categories = (categories + defaultCategory).distinct(),
-                chosenCategories = chosenCategories,
-                onCategoriesChange = { chosenCategories = it },
-                qualities = qualities,
-                chosenQuality = chosenQuality,
-                onQualityChange = { chosenQuality = it },
-                onFavorite = { onAddFavorites(favorites, chosenCategories) },
-                onDownload = { onDownloadSelected(favorites, chosenQuality) },
-                onSelectAll = onSelectAll,
-                onCancel = onClearSelection,
-                onDelete = {
-                    onRemoveFromSelection(
-                        favorites.filter { it.id in selectedIds },
-                        selectedCategory,
-                    )
-                },
-                deleteLabel = if (selectedCategory == null) "取消收藏" else "移出本夹",
+                state = selection,
+                onFavorite = { onAddFavorites(favorites, selection.chosenCategories) },
+                onDownload = { onDownloadSelected(favorites, selection.chosenQuality) },
+                favoriteEnabled = selectedIds.isNotEmpty() && selection.chosenCategories.isNotEmpty(),
+                downloadEnabled = selectedIds.isNotEmpty() && selection.qualities.isNotEmpty(),
+                extraAction = SelectionExtraAction(
+                    icon = Icons.Rounded.HeartBroken,
+                    label = "取消收藏",
+                    enabled = selectedIds.isNotEmpty(),
+                    onClick = {
+                        onRemoveFromSelection(
+                            favorites.filter { it.id in selectedIds },
+                            selectedCategory,
+                        )
+                    },
+                ),
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
-        }
+        },
+    ) { index, track ->
+        TrackRow(
+            track = track,
+            onClick = {
+                if (selectionMode) onToggleSelection(track.id)
+                else onPlayQueue(favorites, index)
+            },
+            isFavorite = true,
+            onToggleFavorite = null,
+            showFavoriteState = !selectionMode,
+            downloaded = track.id in downloadedIds,
+            categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
+            preferredProviderId = preferredSources[track.id],
+            onSourceClick = { onSourceClick(track) },
+            selected = if (selectionMode) track.id in selectedIds else null,
+        )
     }
 
     if (manageCategories) {
-        AlertDialog(
-            onDismissRequest = { manageCategories = false },
-            title = { Text("管理收藏夹") },
-            text = {
-                if (categories.isEmpty()) {
-                    Text("还没有收藏夹")
-                } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
-                        items(categories) { category ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = category,
-                                    modifier = Modifier.weight(1f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                TextButton(onClick = { pendingDeleteCategory = category }) {
-                                    Text("删除")
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { manageCategories = false }) { Text("关闭") }
-            },
+        CategoryManagerDialog(
+            categories = categories,
+            protectedNames = setOf(DEFAULT_FAVORITE_CATEGORY, defaultCategory),
+            onReorder = onManageOrder,
+            onDelete = { pendingDeleteCategory = it },
+            onDismiss = { manageCategories = false },
         )
     }
 
@@ -1075,154 +996,19 @@ private fun FavoritesTabContent(
 }
 
 @Composable
-private fun TrackSelectionBar(
-    count: Int,
-    categories: List<String>,
-    chosenCategories: Set<String>,
-    onCategoriesChange: (Set<String>) -> Unit,
-    qualities: List<Int>,
-    chosenQuality: Int?,
-    onQualityChange: (Int) -> Unit,
-    onFavorite: () -> Unit,
-    onDownload: () -> Unit,
-    onSelectAll: () -> Unit,
-    onCancel: () -> Unit,
-    modifier: Modifier = Modifier,
-    onDelete: (() -> Unit)? = null,
-    deleteLabel: String = "删除",
-) {
-    var categoryDialog by remember { mutableStateOf(false) }
-    var qualityMenu by remember { mutableStateOf(false) }
-    var draftCategories by remember(chosenCategories) { mutableStateOf(chosenCategories) }
-
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        tonalElevation = 8.dp,
-        shadowElevation = 8.dp,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
-        ) {
-            Box {
-                CompactTextButton(
-                    text = when {
-                        chosenCategories.isEmpty() -> "选择收藏夹 ▾"
-                        chosenCategories.size == 1 -> "${chosenCategories.first()} ▾"
-                        else -> "${chosenCategories.size} 个收藏夹 ▾"
-                    },
-                    onClick = {
-                        draftCategories = chosenCategories
-                        categoryDialog = true
-                    },
-                )
-                if (categoryDialog) {
-                    AlertDialog(
-                        onDismissRequest = { categoryDialog = false },
-                        title = { Text("收藏到") },
-                        text = {
-                            LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
-                                items(categories) { category ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Checkbox(
-                                            checked = category in draftCategories,
-                                            onCheckedChange = { checked ->
-                                                draftCategories = if (checked) {
-                                                    draftCategories + category
-                                                } else {
-                                                    draftCategories - category
-                                                }
-                                            },
-                                        )
-                                        Text(category)
-                                    }
-                                }
-                            }
-                        },
-                        confirmButton = {
-                            TextButton(
-                                onClick = {
-                                    categoryDialog = false
-                                    onCategoriesChange(draftCategories)
-                                },
-                            ) { Text("确定") }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { categoryDialog = false }) { Text("取消") }
-                        },
-                    )
-                }
-            }
-            CompactTextButton(
-                text = "收藏",
-                onClick = onFavorite,
-                enabled = count > 0 && chosenCategories.isNotEmpty(),
-            )
-            Spacer(Modifier.weight(1f))
-            if (qualities.isNotEmpty()) {
-                Box {
-                    CompactTextButton(
-                        text = "${chosenQuality?.let(::qualityShortLabel) ?: "标准"} ▾",
-                        onClick = { qualityMenu = true },
-                    )
-                    DropdownMenu(
-                        expanded = qualityMenu,
-                        onDismissRequest = { qualityMenu = false },
-                    ) {
-                        qualities.forEach { quality ->
-                            DropdownMenuItem(
-                                text = { Text(qualityLabel(quality)) },
-                                onClick = {
-                                    qualityMenu = false
-                                    onQualityChange(quality)
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-            CompactTextButton(text = "下载", onClick = onDownload, enabled = count > 0)
-            CompactTextButton(text = "全选", onClick = onSelectAll, enabled = count > 0)
-            if (onDelete != null) {
-                CompactTextButton(text = deleteLabel, onClick = onDelete, enabled = count > 0)
-            }
-            CompactTextButton(text = "取消", onClick = onCancel)
-        }
-    }
-}
-
-@Composable
-private fun CompactTextButton(
-    text: String,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-) {
-    TextButton(
-        onClick = onClick,
-        enabled = enabled,
-        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-    ) {
-        Text(text = text, maxLines = 1)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
 private fun HistoryTabContent(
     history: List<Track>,
-    sections: List<AlphabetSection>,
     categories: List<String>,
     defaultCategory: String,
     favoriteFolders: Map<String, Set<String>>,
     downloadedIds: Set<String>,
+    preferredSources: Map<String, String>,
     selectionMode: Boolean,
     selectedIds: Set<String>,
+    sort: TrackSort,
+    ascending: Boolean,
+    onSort: (TrackSort) -> Unit,
+    onToggleOrder: () -> Unit,
     onSelectionModeChange: (Boolean) -> Unit,
     onToggleSelection: (String) -> Unit,
     onSelectAll: () -> Unit,
@@ -1231,330 +1017,393 @@ private fun HistoryTabContent(
     onDownloadSelected: (List<Track>, Int?) -> Unit,
     downloadQualities: suspend (List<Track>) -> List<Int>,
     onPlayQueue: (List<Track>, Int) -> Unit,
+    onSourceClick: (Track) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onClearHistory: () -> Unit,
+    onDeleteHistory: (List<Track>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    var dragLetter by remember { mutableStateOf<String?>(null) }
-    val currentSection by remember(listState, sections) {
-        derivedStateOf {
-            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
-        }
-    }
-    val validIds = remember(history) { history.map { it.id }.toSet() }
-    val selectedTracks = remember(history, selectedIds) {
-        history.filter { it.id in selectedIds }
-    }
-    var chosenCategories by remember(defaultCategory) { mutableStateOf(setOf(defaultCategory)) }
-    var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
-    var chosenQuality by remember { mutableStateOf<Int?>(null) }
+    val selection = rememberSelectionActionsState(
+        selectionMode = selectionMode,
+        selectedIds = selectedIds,
+        tracks = history,
+        defaultCategory = defaultCategory,
+        downloadQualities = downloadQualities,
+    )
 
-    LaunchedEffect(selectedIds, history) {
-        qualities = if (selectedIds.isEmpty()) emptyList() else downloadQualities(selectedTracks)
-        if (chosenQuality !in qualities) chosenQuality = qualities.firstOrNull()
+    val spec = TrackListHeaderSpec(
+        countText = "最近播放 ${history.size} 首",
+        selectionMode = selectionMode,
+        selectedCount = selectedIds.size,
+        sort = sort,
+        sortOptions = HISTORY_SORT_OPTIONS,
+        ascending = ascending,
+        categories = null,
+    )
+    val sections = remember(history, sort) {
+        TrackSorter.sections(history, sort).withListHeaderOffset()
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 32.dp)
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = if (selectionMode) {
-                            "已选 ${selectedIds.size} 首"
-                        } else {
-                            "最近播放 ${history.size} 首"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (selectionMode) {
-                        TextButton(
-                            onClick = onClearSelection,
-                            modifier = Modifier.height(30.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                        ) { Text("取消", style = MaterialTheme.typography.labelMedium) }
-                    } else {
-                        TextButton(
-                            onClick = onClearHistory,
-                            modifier = Modifier.height(30.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                        ) { Text("清空记录", style = MaterialTheme.typography.labelMedium) }
-                        if (history.isNotEmpty()) {
-                            TextButton(
-                                onClick = { onSelectionModeChange(true) },
-                                modifier = Modifier.height(30.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp),
-                            ) { Text("选择", style = MaterialTheme.typography.labelMedium) }
-                        }
-                    }
-                }
+    TrackListPanel(
+        spec = spec,
+        listState = listState,
+        items = history,
+        itemKey = { it.id },
+        validKey = { it.id },
+        sections = sections,
+        ascending = ascending,
+        selectionMode = selectionMode,
+        onStartSelection = { onSelectionModeChange(true) },
+        onSelect = onToggleSelection,
+        onSelectAll = onSelectAll,
+        onCancelSelection = onClearSelection,
+        onSort = onSort,
+        onToggleOrder = onToggleOrder,
+        countActions = {
+            CompactTextButton(text = "清空记录", onClick = onClearHistory)
+            if (history.isNotEmpty()) {
+                CompactTextButton(
+                    text = "选择",
+                    onClick = { onSelectionModeChange(true) },
+                )
             }
-            if (history.isEmpty()) {
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    EmptyState(
-                        title = "还没有播放记录",
-                        description = "播放过的歌曲会自动记录在这里。",
-                        icon = Icons.Rounded.History,
-                    )
-                }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .dragSelect(
-                            enabled = true,
-                            listState = listState,
-                            validKeys = validIds,
-                            onSelect = { id ->
-                                if (!selectionMode) onSelectionModeChange(true)
-                                onToggleSelection(id)
-                            },
-                        ),
-                    contentPadding = PaddingValues(
-                        start = 12.dp,
-                        end = 30.dp,
-                        bottom = if (selectionMode) 100.dp else 20.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    itemsIndexed(history, key = { _, track -> track.id }) { index, track ->
-                        TrackRow(
-                            track = track,
-                            onClick = {
-                                if (selectionMode) onToggleSelection(track.id)
-                                else onPlayQueue(history, index)
-                            },
-                            isFavorite = track.id in favoriteFolders,
-                            showFavoriteState = false,
-                            onToggleFavorite = if (selectionMode) {
-                                null
-                            } else {
-                                { onToggleFavorite(track) }
-                            },
-                            downloaded = track.id in downloadedIds,
-                            categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
-                            selected = if (selectionMode) track.id in selectedIds else null,
-                        )
-                    }
-                }
-            }
-        }
-
-        AlphabetIndex(
-            sections = sections,
-            currentSection = currentSection,
-            onSelect = { section -> scope.launch { listState.scrollToItem(section.itemIndex) } },
-            onDragLetter = { dragLetter = it },
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .padding(end = 2.dp),
-        )
-        AlphabetDragBubble(
-            letter = dragLetter,
-            modifier = Modifier.align(Alignment.Center),
-        )
-
-        if (selectionMode) {
-            TrackSelectionBar(
-                count = selectedIds.size,
+        },
+        emptyContent = {
+            EmptyState(
+                title = "还没有播放记录",
+                description = "播放过的歌曲会自动记录在这里。",
+                icon = Icons.Rounded.History,
+            )
+        },
+        modifier = modifier,
+        selectionBar = {
+            TrackSelectionActionBar(
                 categories = (categories + defaultCategory).distinct(),
-                chosenCategories = chosenCategories,
-                onCategoriesChange = { chosenCategories = it },
-                qualities = qualities,
-                chosenQuality = chosenQuality,
-                onQualityChange = { chosenQuality = it },
-                onFavorite = { onAddFavorites(history, chosenCategories) },
-                onDownload = { onDownloadSelected(history, chosenQuality) },
-                onSelectAll = onSelectAll,
-                onCancel = onClearSelection,
+                state = selection,
+                onFavorite = { onAddFavorites(history, selection.chosenCategories) },
+                onDownload = { onDownloadSelected(history, selection.chosenQuality) },
+                favoriteEnabled = selectedIds.isNotEmpty() && selection.chosenCategories.isNotEmpty(),
+                downloadEnabled = selectedIds.isNotEmpty() && selection.qualities.isNotEmpty(),
+                extraAction = SelectionExtraAction(
+                    icon = Icons.Rounded.Delete,
+                    label = "删除",
+                    enabled = selectedIds.isNotEmpty(),
+                    onClick = { onDeleteHistory(history.filter { it.id in selectedIds }) },
+                ),
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
-        }
+        },
+    ) { index, track ->
+        TrackRow(
+            track = track,
+            onClick = {
+                if (selectionMode) onToggleSelection(track.id)
+                else onPlayQueue(history, index)
+            },
+            isFavorite = track.id in favoriteFolders,
+            showFavoriteState = false,
+            onToggleFavorite = if (selectionMode) null else {
+                { onToggleFavorite(track) }
+            },
+            downloaded = track.id in downloadedIds,
+            categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
+            preferredProviderId = preferredSources[track.id],
+            onSourceClick = { onSourceClick(track) },
+            selected = if (selectionMode) track.id in selectedIds else null,
+        )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LocalTabContent(
-    tracks: List<Track>,
-    sections: List<AlphabetSection>,
+    importedTracks: List<Track>,
+    downloadedTracks: List<Track>,
+    downloadedBytes: Long,
     favoriteIds: Set<String>,
     favoriteFolders: Map<String, Set<String>>,
     downloadedIds: Set<String>,
     categories: List<String>,
     defaultCategory: String,
+    preferredSources: Map<String, String>,
     selectionMode: Boolean,
     selectedIds: Set<String>,
     onSelectionModeChange: (Boolean) -> Unit,
     onToggleSelection: (String) -> Unit,
-    onSelectAll: () -> Unit,
+    onSelectAll: (List<Track>) -> Unit,
     onClearSelection: () -> Unit,
     onAddFavorites: (List<Track>, Set<String>) -> Unit,
     onDownloadSelected: (List<Track>, Int?) -> Unit,
-    onDeleteSelected: () -> Unit,
+    onDeleteSelection: (List<Track>) -> Unit,
+    onDeleteDownloaded: (List<Track>) -> Unit,
     downloadQualities: suspend (List<Track>) -> List<Int>,
     onPlayQueue: (List<Track>, Int) -> Unit,
+    onSourceClick: (Track) -> Unit,
     onRequestImport: () -> Unit,
-    onOpenDownloads: () -> Unit,
     onShowLocation: (Track) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var localFilter by rememberSaveable { mutableStateOf(LocalFilter.ALL) }
+    var sort by rememberSaveable { mutableStateOf(TrackSort.TITLE) }
+    var ascending by rememberSaveable { mutableStateOf(true) }
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    var dragLetter by remember { mutableStateOf<String?>(null) }
-    val currentSection by remember(listState, sections) {
-        derivedStateOf {
-            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
+
+    val tracks = remember(localFilter, importedTracks, downloadedTracks) {
+        val merged = importedTracks + downloadedTracks
+        when (localFilter) {
+            LocalFilter.ALL -> merged.distinctBy { track ->
+                track.sources.firstNotNullOfOrNull { it.localUri } ?: track.id
+            }
+            LocalFilter.IMPORTED -> importedTracks
+            LocalFilter.DOWNLOADED -> downloadedTracks
         }
     }
-    val validIds = remember(tracks) { tracks.map { it.id }.toSet() }
-    val selectedTracks = remember(tracks, selectedIds) {
-        tracks.filter { it.id in selectedIds }
+    val sorted = remember(tracks, sort, ascending) {
+        TrackSorter.sort(tracks, sort, ascending)
     }
-    var chosenCategories by remember(defaultCategory) { mutableStateOf(setOf(defaultCategory)) }
-    var qualities by remember { mutableStateOf<List<Int>>(emptyList()) }
-    var chosenQuality by remember { mutableStateOf<Int?>(null) }
-
-    LaunchedEffect(selectedIds, tracks) {
-        qualities = if (selectedIds.isEmpty()) emptyList() else downloadQualities(selectedTracks)
-        if (chosenQuality !in qualities) chosenQuality = qualities.firstOrNull()
+    val sortOptions = if (localFilter == LocalFilter.DOWNLOADED) {
+        DOWNLOADED_SORT_OPTIONS
+    } else {
+        IMPORTED_SORT_OPTIONS
+    }
+    val effectiveSort = if (sort in sortOptions) sort else sortOptions.first()
+    val sections = remember(sorted, effectiveSort) {
+        TrackSorter.sections(sorted, effectiveSort).withListHeaderOffset()
+    }
+    val selectedTracks = remember(sorted, selectedIds) {
+        sorted.filter { it.id in selectedIds }
+    }
+    val selection = rememberSelectionActionsState(
+        selectionMode = selectionMode,
+        selectedIds = selectedIds,
+        tracks = sorted,
+        defaultCategory = defaultCategory,
+        downloadQualities = downloadQualities,
+    )
+    LaunchedEffect(localFilter) {
+        onClearSelection()
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 30.dp)
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (selectionMode) {
-                        "已选 ${selectedIds.size} 首"
-                    } else {
-                        "本地与已下载 ${tracks.size} 首"
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
+    val countText = when (localFilter) {
+        LocalFilter.ALL -> "本地 ${importedTracks.size} 首 · 已下载 ${downloadedTracks.size} 首"
+        LocalFilter.IMPORTED -> "本地 ${importedTracks.size} 首"
+        LocalFilter.DOWNLOADED -> "已下载 ${downloadedTracks.size} 首 · 共 ${formatBytes(downloadedBytes)}"
+    }
+    val spec = TrackListHeaderSpec(
+        countText = countText,
+        selectionMode = selectionMode,
+        selectedCount = selectedIds.size,
+        sort = effectiveSort,
+        sortOptions = sortOptions,
+        ascending = ascending,
+        categories = listOf(LocalFilter.IMPORTED.label, LocalFilter.DOWNLOADED.label),
+        selectedCategory = when (localFilter) {
+            LocalFilter.ALL -> null
+            LocalFilter.IMPORTED -> LocalFilter.IMPORTED.label
+            LocalFilter.DOWNLOADED -> LocalFilter.DOWNLOADED.label
+        },
+    )
+
+    TrackListPanel(
+        spec = spec,
+        listState = listState,
+        items = sorted,
+        itemKey = { it.id },
+        validKey = { it.id },
+        sections = sections,
+        ascending = ascending,
+        selectionMode = selectionMode,
+        onStartSelection = { onSelectionModeChange(true) },
+        onSelect = onToggleSelection,
+        onSelectAll = { onSelectAll(sorted) },
+        onCancelSelection = onClearSelection,
+        onSort = { sort = it },
+        onToggleOrder = { ascending = !ascending },
+        onCategory = { category ->
+            localFilter = when (category) {
+                LocalFilter.IMPORTED.label -> LocalFilter.IMPORTED
+                LocalFilter.DOWNLOADED.label -> LocalFilter.DOWNLOADED
+                else -> LocalFilter.ALL
+            }
+        },
+        countActions = {
+            CompactTextButton(text = "导入", onClick = onRequestImport)
+            if (sorted.isNotEmpty()) {
+                CompactTextButton(
+                    text = "选择",
+                    onClick = { onSelectionModeChange(true) },
                 )
-                if (!selectionMode) {
-                    TextButton(
-                        onClick = onRequestImport,
-                        modifier = Modifier.height(30.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text("导入", style = MaterialTheme.typography.labelMedium) }
-                    TextButton(
-                        onClick = onOpenDownloads,
-                        modifier = Modifier.height(30.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                    ) { Text("下载", style = MaterialTheme.typography.labelMedium) }
-                    if (tracks.isNotEmpty()) {
-                        TextButton(
-                            onClick = { onSelectionModeChange(true) },
-                            modifier = Modifier.height(30.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                        ) { Text("选择", style = MaterialTheme.typography.labelMedium) }
+            }
+        },
+        emptyContent = {
+            EmptyState(
+                title = "导入或下载音乐",
+                description = "点击导入可一键扫描媒体库，或手动选择文件/文件夹；已下载完成的歌曲会自动加入这里。",
+                icon = Icons.Rounded.LibraryMusic,
+            )
+        },
+        modifier = modifier,
+        selectionBar = {
+            TrackSelectionActionBar(
+                categories = (categories + defaultCategory).distinct(),
+                state = selection,
+                onFavorite = { onAddFavorites(sorted, selection.chosenCategories) },
+                onDownload = { onDownloadSelected(sorted, selection.chosenQuality) },
+                favoriteEnabled = selectedIds.isNotEmpty() && selection.chosenCategories.isNotEmpty(),
+                downloadEnabled = selectedIds.isNotEmpty() && selection.qualities.isNotEmpty(),
+                extraAction = SelectionExtraAction(
+                    icon = Icons.Rounded.Delete,
+                    label = "删除",
+                    enabled = selectedIds.isNotEmpty(),
+                    onClick = {
+                        if (localFilter == LocalFilter.DOWNLOADED) {
+                            onDeleteDownloaded(selectedTracks)
+                        } else {
+                            onDeleteSelection(selectedTracks)
+                        }
+                    },
+                ),
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        },
+    ) { index, track ->
+        TrackRow(
+            track = track,
+            onClick = {
+                if (selectionMode) onToggleSelection(track.id)
+                else onPlayQueue(sorted, index)
+            },
+            isFavorite = track.id in favoriteIds,
+            showFavoriteState = false,
+            onToggleFavorite = null,
+            downloaded = track.id in downloadedIds,
+            categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
+            preferredProviderId = preferredSources[track.id],
+            onSourceClick = { onSourceClick(track) },
+            infoAction = if (selectionMode) {
+                null
+            } else {
+                { onShowLocation(track) }
+            },
+            selected = if (selectionMode) track.id in selectedIds else null,
+        )
+    }
+}
+
+@Composable
+private fun CategoryManagerDialog(
+    categories: List<String>,
+    protectedNames: Set<String>,
+    onReorder: (List<String>) -> Unit,
+    onDelete: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var working by remember(categories) { mutableStateOf(categories) }
+    var draggingName by remember { mutableStateOf<String?>(null) }
+    var dragDelta by remember { mutableFloatStateOf(0f) }
+    val rowHeight = with(LocalDensity.current) { 44.dp.toPx() }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("管理收藏夹") },
+        text = {
+            if (categories.isEmpty()) {
+                Text("还没有收藏夹")
+            } else {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "长按拖动排序，默认收藏夹不可删除。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 360.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        working.forEach { category ->
+                            val isDragging = draggingName == category
+                            Surface(
+                                color = if (isDragging) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surface
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.DragHandle,
+                                        contentDescription = "拖动排序",
+                                        modifier = Modifier
+                                            .padding(horizontal = 4.dp)
+                                            .size(24.dp)
+                                            .pointerInput(category) {
+                                                detectDragGesturesAfterLongPress(
+                                                    onDragStart = {
+                                                        draggingName = category
+                                                        dragDelta = 0f
+                                                    },
+                                                    onDrag = { change, amount ->
+                                                        change.consume()
+                                                        dragDelta += amount.y
+                                                        val index = working.indexOf(category)
+                                                        if (index == -1) return@detectDragGesturesAfterLongPress
+                                                        if (dragDelta > rowHeight / 2 &&
+                                                            index < working.lastIndex
+                                                        ) {
+                                                            working = working.toMutableList().apply {
+                                                                add(index + 1, removeAt(index))
+                                                            }
+                                                            dragDelta -= rowHeight
+                                                        } else if (dragDelta < -rowHeight / 2 && index > 0) {
+                                                            working = working.toMutableList().apply {
+                                                                add(index - 1, removeAt(index))
+                                                            }
+                                                            dragDelta += rowHeight
+                                                        }
+                                                    },
+                                                    onDragEnd = {
+                                                        draggingName = null
+                                                        dragDelta = 0f
+                                                        onReorder(working)
+                                                    },
+                                                    onDragCancel = {
+                                                        draggingName = null
+                                                        dragDelta = 0f
+                                                        working = categories
+                                                    },
+                                                )
+                                            },
+                                    )
+                                    Text(
+                                        text = category,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (category !in protectedNames) {
+                                        TextButton(onClick = { onDelete(category) }) {
+                                            Text("删除")
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
-        if (tracks.isEmpty()) {
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                EmptyState(
-                    title = "导入或下载音乐",
-                    description = "点击导入可一键扫描媒体库，或手动选择文件/文件夹；已下载完成的歌曲会自动加入这里。",
-                    icon = Icons.Rounded.LibraryMusic,
-                )
-            }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .dragSelect(
-                        enabled = true,
-                        listState = listState,
-                        validKeys = validIds,
-                        onSelect = { id ->
-                            if (!selectionMode) onSelectionModeChange(true)
-                            onToggleSelection(id)
-                        },
-                    ),
-                contentPadding = PaddingValues(
-                    start = 12.dp,
-                    end = 30.dp,
-                    bottom = if (selectionMode) 100.dp else 20.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                itemsIndexed(tracks, key = { _, track -> track.id }) { index, track ->
-                    TrackRow(
-                        track = track,
-                        onClick = {
-                            if (selectionMode) {
-                                onToggleSelection(track.id)
-                            } else {
-                                onPlayQueue(tracks, index)
-                            }
-                        },
-                        isFavorite = track.id in favoriteIds,
-                        showFavoriteState = false,
-                        onToggleFavorite = null,
-                        downloaded = track.id in downloadedIds,
-                        categoryLabel = favoriteFolders[track.id]?.joinToString(" · "),
-                        infoAction = if (selectionMode) null else ({ onShowLocation(track) }),
-                        selected = if (selectionMode) track.id in selectedIds else null,
-                    )
-                }
-            }
-        }
-    }
-        AlphabetIndex(
-            sections = sections,
-            currentSection = currentSection,
-            onSelect = { section -> scope.launch { listState.scrollToItem(section.itemIndex) } },
-            onDragLetter = { dragLetter = it },
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .padding(end = 2.dp),
-        )
-        AlphabetDragBubble(
-            letter = dragLetter,
-            modifier = Modifier.align(Alignment.Center),
-        )
-        if (selectionMode) {
-            TrackSelectionBar(
-                count = selectedIds.size,
-                categories = (categories + defaultCategory).distinct(),
-                chosenCategories = chosenCategories,
-                onCategoriesChange = { chosenCategories = it },
-                qualities = qualities,
-                chosenQuality = chosenQuality,
-                onQualityChange = { chosenQuality = it },
-                onFavorite = { onAddFavorites(tracks, chosenCategories) },
-                onDownload = { onDownloadSelected(tracks, chosenQuality) },
-                onSelectAll = onSelectAll,
-                onCancel = onClearSelection,
-                onDelete = onDeleteSelected,
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
-        }
-    }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+    )
 }
 
 private fun resolveLocalLocation(context: Context, track: Track): String {

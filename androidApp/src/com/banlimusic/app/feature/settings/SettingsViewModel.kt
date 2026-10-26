@@ -97,6 +97,9 @@ class SettingsViewModel(
     fun setConsecutiveFailureLimit(limit: Int) =
         viewModelScope.launch { settings.setConsecutiveFailureLimit(limit) }
 
+    fun setAutoSwitchPlaybackSource(enabled: Boolean) =
+        viewModelScope.launch { settings.setAutoSwitchPlaybackSource(enabled) }
+
     fun setDefaultShowLyrics(enabled: Boolean) =
         viewModelScope.launch { settings.setDefaultShowLyrics(enabled) }
 

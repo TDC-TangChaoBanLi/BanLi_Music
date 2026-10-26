@@ -1,5 +1,5 @@
 /**
- * 文件作用：维护应用级 MediaController 连接、播放状态与失败重试策略。
+ * 文件作用：维护应用级 MediaController 连接、播放状态与来源切换入口。
  */
 package com.banlimusic.app.player
 
@@ -12,18 +12,21 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import com.banlimusic.app.core.datastore.SettingsRepository
+import com.banlimusic.app.core.datastore.SourcePreferenceStore
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.data.repository.DownloadRepository
-import com.banlimusic.app.system.notification.Notifications
+import com.banlimusic.app.domain.playback.SourceOrdering
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -54,21 +57,21 @@ data class PlaybackUiState(
 class PlaybackController(
     private val context: Context,
     private val json: Json,
-    private val settings: SettingsRepository,
     private val downloads: DownloadRepository,
+    private val sourcePreferences: SourcePreferenceStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(PlaybackUiState())
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
 
+    /** trackId → preferred provider chosen by the user from the (+n) picker. */
+    val preferredSources: StateFlow<Map<String, String>> = sourcePreferences.preferredSources
+        .stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
     private var controller: MediaController? = null
     private var connecting = false
     private var pendingAction: ((MediaController) -> Unit)? = null
     private var ticker: Job? = null
-    private var retryJob: Job? = null
-    private var retryAttempt = 0
-    private var consecutiveFailures = 0
-    private var failedMediaId: String? = null
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
@@ -76,25 +79,20 @@ class PlaybackController(
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            retryJob?.cancel()
-            retryAttempt = 0
-            failedMediaId = null
             _state.update { it.copy(errorMessage = null) }
             updateState()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            if (isPlaying) {
-                retryJob?.cancel()
-                retryAttempt = 0
-                consecutiveFailures = 0
-                failedMediaId = null
-            }
             updateState()
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            handlePlaybackFailure(error)
+            // Retry, source failover and queue skipping are owned by the service
+            // so background playback recovers even when no screen is attached.
+            _state.update {
+                it.copy(errorMessage = "播放失败，正在自动恢复")
+            }
         }
     }
 
@@ -143,16 +141,19 @@ class PlaybackController(
     }
 
     fun play(track: Track, queue: List<Track> = emptyList()) {
-        retryJob?.cancel()
-        retryAttempt = 0
-        consecutiveFailures = 0
-        failedMediaId = null
         scope.launch {
             val tracks = queue.ifEmpty { listOf(track) }
+            val preferences = runCatching { sourcePreferences.preferredSources.first() }
+                .getOrDefault(emptyMap())
+            val orderedTracks = tracks.map { item ->
+                item.copy(
+                    sources = SourceOrdering.reorderSources(item.sources, preferences[item.id]),
+                )
+            }
             val localUris = runCatching {
-                downloads.completedUris(tracks.map { it.id })
+                downloads.completedUris(orderedTracks.map { it.id })
             }.getOrDefault(emptyMap())
-            val items = tracks.map { item ->
+            val items = orderedTracks.map { item ->
                 val localUri = localUris[item.id]
                 if (localUri != null) {
                     TrackMediaItems.createLocal(item, localUri, json)
@@ -176,10 +177,6 @@ class PlaybackController(
     fun playFile(track: Track, file: File) = playFile(track, Uri.fromFile(file))
 
     fun playFile(track: Track, uri: Uri) {
-        retryJob?.cancel()
-        retryAttempt = 0
-        consecutiveFailures = 0
-        failedMediaId = null
         val item = TrackMediaItems.createLocal(track, uri, json)
         withController { player ->
             player.setMediaItem(item)
@@ -233,10 +230,6 @@ class PlaybackController(
     }
 
     fun stop() {
-        retryJob?.cancel()
-        retryAttempt = 0
-        consecutiveFailures = 0
-        failedMediaId = null
         withController { player ->
             player.stop()
             player.clearMediaItems()
@@ -291,67 +284,29 @@ class PlaybackController(
         }
     }
 
-    fun clearError() = _state.update { it.copy(errorMessage = null) }
-
-    private fun handlePlaybackFailure(error: PlaybackException) {
-        val mediaId = controller?.currentMediaItem?.mediaId
-        if (failedMediaId != mediaId) {
-            failedMediaId = mediaId
-            retryAttempt = 0
-        }
-        retryJob?.cancel()
-        retryJob = scope.launch {
-            val currentSettings = settings.current()
-            val attempt = retryAttempt
-            if (attempt < currentSettings.playbackRetryCount) {
-                val delayMs = RETRY_BASE_DELAY_MS shl attempt
-                _state.update {
-                    it.copy(
-                        errorMessage = "播放失败，${delayMs / 1_000} 秒后重试" +
-                            "（${attempt + 1}/${currentSettings.playbackRetryCount}）",
-                    )
-                }
-                delay(delayMs)
-                retryAttempt = attempt + 1
-                withController { player ->
-                    if (player.currentMediaItem?.mediaId == mediaId) {
-                        player.prepare()
-                        player.play()
-                    }
-                }
-            } else {
-                retryAttempt = 0
-                consecutiveFailures += 1
-                if (consecutiveFailures >= currentSettings.consecutiveFailureLimit) {
-                    _state.update {
-                        it.copy(errorMessage = "连续 $consecutiveFailures 首播放失败，已停止播放")
-                    }
-                    Notifications.notifyPlaybackStopped(
-                        context,
-                        "播放已停止",
-                        "已连续 $consecutiveFailures 首歌曲播放失败。请检查网络或切换音乐源。",
-                    )
-                    withController { player -> player.pause() }
-                } else {
-                    _state.update { it.copy(errorMessage = "播放失败，自动跳到下一首") }
-                    withController { player ->
-                        if (player.hasNextMediaItem()) {
-                            player.seekToNextMediaItem()
-                            player.prepare()
-                            player.play()
-                        } else {
-                            player.pause()
-                            Notifications.notifyPlaybackStopped(
-                                context,
-                                "播放失败",
-                                "已经是队列最后一首，播放已停止。",
-                            )
-                        }
-                    }
-                }
+    /** Persists the user's preferred source and restarts the current item in place. */
+    fun switchSource(providerId: String?) {
+        val player = controller ?: return
+        val item = player.currentMediaItem ?: return
+        val track = TrackMediaItems.trackOf(item, json) ?: return
+        val position = player.currentPosition
+        val wasPlaying = player.isPlaying
+        scope.launch {
+            sourcePreferences.setPreferred(track.id, providerId)
+            val ordered = track.copy(
+                sources = SourceOrdering.reorderSources(track.sources, providerId),
+            )
+            val newItem = TrackMediaItems.create(ordered, json)
+            withController { current ->
+                if (current.currentMediaItem?.mediaId != ordered.id) return@withController
+                current.replaceMediaItem(current.currentMediaItemIndex, newItem)
+                current.seekTo(position)
+                if (wasPlaying) current.play()
             }
         }
     }
+
+    fun clearError() = _state.update { it.copy(errorMessage = null) }
 
     private fun withController(action: (MediaController) -> Unit) {
         val player = controller
@@ -406,14 +361,9 @@ class PlaybackController(
     }
 
     fun release() {
-        retryJob?.cancel()
         ticker?.cancel()
         controller?.removeListener(listener)
         controller?.release()
         controller = null
-    }
-
-    private companion object {
-        const val RETRY_BASE_DELAY_MS = 2_000L
     }
 }

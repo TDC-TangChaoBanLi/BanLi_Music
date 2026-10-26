@@ -17,6 +17,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheKeyFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
@@ -29,10 +30,12 @@ import androidx.core.net.toUri
 import com.banlimusic.app.AppContainer
 import com.banlimusic.app.MainActivity
 import com.banlimusic.app.MusicApplication
+import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.network.JsonHttpClient
 import com.banlimusic.app.domain.playback.StreamUriCodec
+import com.banlimusic.app.system.notification.Notifications
 import com.banlimusic.app.widget.PlayerWidgetUpdater
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -57,6 +60,11 @@ class MusicPlaybackService : MediaSessionService() {
     private var lastRecordedMediaId: String? = null
     private var widgetTicker: Job? = null
     private var artworkJob: Job? = null
+    private var recoveryJob: Job? = null
+    private val attemptByMediaId = ConcurrentHashMap<String, Int>()
+    private var consecutiveFailures = 0
+    private var skippingAfterFailure = false
+    private var lastReadyMediaId: String? = null
     @Volatile
     private var favoriteIds: Set<String> = emptySet()
     @Volatile
@@ -120,8 +128,14 @@ class MusicPlaybackService : MediaSessionService() {
                 val uriText = uri.toString()
                 val encoded = uri.lastPathSegment.orEmpty()
                 val candidates = StreamUriCodec.decode(encoded)
-                val resolved = container.streamResolver.resolveBlockingInfo(candidates)
                 val mediaId = StreamUriCodec.mediaIdOf(uriText)
+                // Retry attempts rotate the candidate list so a broken source
+                // cannot trap playback in a loop with the same URL.
+                val rotate = mediaId?.let { attemptByMediaId[it] ?: 0 } ?: 0
+                val resolved = container.streamResolver.resolveBlockingInfo(
+                    candidates = candidates,
+                    rotate = rotate,
+                )
                 val quality = playbackQuality(container)
                 val cacheKey = mediaId?.let { StreamUriCodec.cacheKey(it, quality) }
                 if (mediaId != null && cacheKey != null) {
@@ -149,6 +163,9 @@ class MusicPlaybackService : MediaSessionService() {
             }
         }
 
+        val loadRetries = runBlocking {
+            container.settingsRepository.current().playbackRetryCount.coerceAtLeast(1)
+        }
         val exoPlayer = ExoPlayer.Builder(this)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(
@@ -161,7 +178,10 @@ class MusicPlaybackService : MediaSessionService() {
                             cacheKeyFor(dataSpec, container)
                         })
                         .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR),
-                ),
+                )
+                    // Media3 retries transient HTTP failures a few times before
+                    // surfacing a player error to the recovery logic below.
+                    .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(loadRetries)),
             )
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -209,6 +229,12 @@ class MusicPlaybackService : MediaSessionService() {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (skippingAfterFailure) {
+                    skippingAfterFailure = false
+                } else {
+                    consecutiveFailures = 0
+                }
+                lastReadyMediaId = null
                 rememberTrack(mediaItem)
                 maybeRecordPlayback(exoPlayer)
                 refreshMediaButtons()
@@ -223,7 +249,22 @@ class MusicPlaybackService : MediaSessionService() {
                 rememberTracks(exoPlayer)
             }
 
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    val mediaId = exoPlayer.currentMediaItem?.mediaId
+                    if (mediaId != null && mediaId == lastReadyMediaId) return
+                    lastReadyMediaId = mediaId
+                    consecutiveFailures = 0
+                    if (mediaId != null) attemptByMediaId.remove(mediaId)
+                }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) {
+                    consecutiveFailures = 0
+                    val mediaId = exoPlayer.currentMediaItem?.mediaId
+                    if (mediaId != null) attemptByMediaId.remove(mediaId)
+                }
                 maybeRecordPlayback(exoPlayer)
                 persistQueue(container)
                 updateWidgetWithRetry(exoPlayer)
@@ -244,6 +285,7 @@ class MusicPlaybackService : MediaSessionService() {
 
             override fun onPlayerError(error: PlaybackException) {
                 updateWidget(exoPlayer)
+                recoverFromError(exoPlayer, error)
             }
         })
 
@@ -378,6 +420,86 @@ class MusicPlaybackService : MediaSessionService() {
             positionMs = current.currentPosition,
         )
     }
+
+    /**
+     * Owns retry, rate-limit backoff, source failover and queue skipping. The
+     * previous implementation lived in the UI controller, where the consecutive
+     * failure counter never reset during uninterrupted background playback and
+     * eventually stopped the queue.
+     */
+    private fun recoverFromError(player: ExoPlayer, error: PlaybackException) {
+        val mediaId = player.currentMediaItem?.mediaId ?: return
+        val container = (application as MusicApplication).container
+        recoveryJob?.cancel()
+        recoveryJob = scope.launch {
+            val settings = container.settingsRepository.current()
+            val rateLimited = error.causeChain()
+                .filterIsInstance<MusicException.RateLimited>()
+                .firstOrNull()
+            val attempt = attemptByMediaId[mediaId] ?: 0
+            if (attempt < settings.playbackRetryCount) {
+                attemptByMediaId[mediaId] = attempt + 1
+                invalidateStreamCache(container, player, settings.qualityKbps)
+                if (rateLimited != null) {
+                    // Retrying inside the same rate limit window can never succeed.
+                    delay(rateLimited.retryAfterMs.coerceIn(1_000L, MAX_RATE_LIMIT_WAIT_MS))
+                } else {
+                    delay(RETRY_BASE_DELAY_MS shl attempt)
+                }
+                if (player.currentMediaItem?.mediaId == mediaId) {
+                    player.prepare()
+                    player.play()
+                }
+            } else if (rateLimited != null) {
+                // A rate limit is transient and must not count as a broken track.
+                attemptByMediaId.remove(mediaId)
+                player.pause()
+                Notifications.notifyPlaybackStopped(
+                    this@MusicPlaybackService,
+                    "请求过于频繁",
+                    "已暂停播放，请约 ${(rateLimited.retryAfterMs / 1000).coerceAtLeast(1)} 秒后重试。",
+                )
+            } else {
+                attemptByMediaId.remove(mediaId)
+                consecutiveFailures += 1
+                if (consecutiveFailures >= settings.consecutiveFailureLimit) {
+                    player.pause()
+                    Notifications.notifyPlaybackStopped(
+                        this@MusicPlaybackService,
+                        "播放已停止",
+                        "已连续 $consecutiveFailures 首歌曲播放失败。请检查网络或切换音乐源。",
+                    )
+                } else if (player.hasNextMediaItem()) {
+                    skippingAfterFailure = true
+                    player.seekToNextMediaItem()
+                    player.prepare()
+                    player.play()
+                } else {
+                    player.pause()
+                    Notifications.notifyPlaybackStopped(
+                        this@MusicPlaybackService,
+                        "播放失败",
+                        "已经是队列最后一首，播放已停止。",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun invalidateStreamCache(
+        container: AppContainer,
+        player: ExoPlayer,
+        qualityKbps: Int,
+    ) {
+        val uri = player.currentMediaItem?.localConfiguration?.uri?.toString() ?: return
+        val encoded = StreamUriCodec.encodedOf(uri) ?: return
+        val candidates = StreamUriCodec.decode(encoded)
+        if (candidates.isEmpty()) return
+        runCatching { container.streamResolver.invalidate(candidates, qualityKbps) }
+    }
+
+    private fun Throwable.causeChain(): Sequence<Throwable> =
+        generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH)
 
     private fun rememberTracks(player: Player) {
         for (index in 0 until player.mediaItemCount) {
@@ -616,6 +738,10 @@ class MusicPlaybackService : MediaSessionService() {
     }
 
     companion object {
+        private const val RETRY_BASE_DELAY_MS = 2_000L
+        private const val MAX_RATE_LIMIT_WAIT_MS = 60_000L
+        private const val MAX_CAUSE_DEPTH = 8
+
         const val ACTION_TOGGLE_PLAY = "com.banlimusic.app.action.TOGGLE_PLAY"
         const val ACTION_NEXT = "com.banlimusic.app.action.NEXT"
         const val ACTION_PREVIOUS = "com.banlimusic.app.action.PREVIOUS"

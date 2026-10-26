@@ -171,6 +171,7 @@ class LibraryRepository(
 
     suspend fun deleteCategory(name: String) {
         val normalized = normalizeFolder(name)
+        if (normalized == DEFAULT_FAVORITE_CATEGORY) return
         val now = System.currentTimeMillis()
         database.withTransaction {
             dao.tombstoneMembershipsInFolder(normalized, now)
@@ -391,6 +392,11 @@ class LibraryRepository(
     }
 
     suspend fun clearSearchHistory() = dao.clearSearchHistory()
+
+    suspend fun deleteHistory(trackIds: Collection<String>) {
+        if (trackIds.isEmpty()) return
+        dao.deleteHistory(trackIds.toList())
+    }
 
     suspend fun clearHistory() = dao.clearHistory()
 

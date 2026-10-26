@@ -66,6 +66,7 @@ import coil3.compose.AsyncImage
 import com.banlimusic.app.MusicApplication
 import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
+import com.banlimusic.app.domain.playback.SourceOrdering
 
 fun providerLabel(providerId: String): String = when (providerId) {
     "gd-netease" -> "网易云"
@@ -248,17 +249,23 @@ fun sourceDisplayNameAnnotated(providerId: String): androidx.compose.ui.text.Ann
         append(label)
     }
 
-private val NON_PROVIDER_SOURCE_IDS = setOf("local", "download")
+val NON_PROVIDER_SOURCE_IDS = setOf("local", "download")
 
 /**
  * Renders every meaningful source for a track: the API provider, a "本地" badge for
  * imported files and an extra "已下载" badge for downloaded copies.
  */
 @Composable
-fun TrackSourceBadges(track: Track, downloaded: Boolean = false) {
-    val providerSources = track.sources.filterNot { it.providerId in NON_PROVIDER_SOURCE_IDS }
-    val hasLocalImport = track.sources.any { it.providerId == "local" }
-    val hasDownload = downloaded || track.sources.any { it.providerId == "download" }
+fun TrackSourceBadges(
+    track: Track,
+    downloaded: Boolean = false,
+    preferredProviderId: String? = null,
+    onSourceClick: (() -> Unit)? = null,
+) {
+    val orderedSources = SourceOrdering.reorderSources(track.sources, preferredProviderId)
+    val providerSources = orderedSources.filterNot { it.providerId in NON_PROVIDER_SOURCE_IDS }
+    val hasLocalImport = orderedSources.any { it.providerId == "local" }
+    val hasDownload = downloaded || orderedSources.any { it.providerId == "download" }
     if (hasLocalImport) {
         SourceBadge("local")
     } else {
@@ -269,6 +276,13 @@ fun TrackSourceBadges(track: Track, downloaded: Boolean = false) {
                 text = "+${providerSources.size - 1}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
+                modifier = if (onSourceClick != null) {
+                    Modifier
+                        .clickable(onClick = onSourceClick)
+                        .padding(horizontal = 2.dp)
+                } else {
+                    Modifier
+                },
             )
         }
     }
@@ -293,6 +307,10 @@ fun TrackRow(
     /** Marks tracks that already have a completed download, even if the saved
      * favourite JSON has no download source. */
     downloaded: Boolean = false,
+    /** User-chosen preferred provider, shown first in the source badges. */
+    preferredProviderId: String? = null,
+    /** Opens the source picker when the row has several sources. */
+    onSourceClick: (() -> Unit)? = null,
     /** Optional info action rendered as a trailing icon (e.g. local file location). */
     infoAction: (() -> Unit)? = null,
     selected: Boolean? = null,
@@ -371,7 +389,12 @@ fun TrackRow(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TrackSourceBadges(track, downloaded = downloaded)
+                TrackSourceBadges(
+                    track = track,
+                    downloaded = downloaded,
+                    preferredProviderId = preferredProviderId,
+                    onSourceClick = onSourceClick,
+                )
                 if (!categoryLabel.isNullOrBlank()) {
                     Spacer(modifier = Modifier.weight(1f))
                     Surface(
@@ -420,14 +443,15 @@ fun TrackRow(
                     )
                 }
             } else if (showFavoriteState && isFavorite) {
-                Icon(
-                    imageVector = Icons.Rounded.Favorite,
-                    contentDescription = "已收藏",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .padding(horizontal = 8.dp)
-                        .size(16.dp),
-                )
+                // Same box and icon size as the tappable heart in history rows.
+                Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Rounded.Favorite,
+                        contentDescription = "已收藏",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
         trailing?.invoke()

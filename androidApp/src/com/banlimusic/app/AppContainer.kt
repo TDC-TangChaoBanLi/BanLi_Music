@@ -17,6 +17,7 @@ import com.banlimusic.app.core.datastore.MAX_API_LIMIT_PER_WINDOW
 import com.banlimusic.app.core.datastore.MAX_CACHE_MAX_BYTES
 import com.banlimusic.app.core.datastore.MIN_GD_REQUEST_INTERVAL_MS
 import com.banlimusic.app.core.datastore.SettingsRepository
+import com.banlimusic.app.core.datastore.SourcePreferenceStore
 import com.banlimusic.app.core.datastore.SyncStateStore
 import com.banlimusic.app.core.security.AndroidTokenStore
 import com.banlimusic.app.core.sync.OneDriveConfig
@@ -26,6 +27,7 @@ import com.banlimusic.app.core.limiter.SlidingWindowRateLimiter
 import com.banlimusic.app.core.network.JsonHttpClient
 import com.banlimusic.app.core.network.NetworkMonitor
 import com.banlimusic.app.data.repository.DefaultMusicRepository
+import com.banlimusic.app.data.repository.DownloadManifestRepository
 import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.LocalMusicRepository
@@ -58,6 +60,9 @@ class AppContainer(private val context: Context) {
     }
 
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(context) }
+
+    /** Per-track preferred playback source chosen from the (+n) picker. */
+    val sourcePreferenceStore: SourcePreferenceStore by lazy { SourcePreferenceStore(context) }
 
     val database: MusicDatabase by lazy { MusicDatabase.get(context) }
 
@@ -129,6 +134,15 @@ class AppContainer(private val context: Context) {
         LocalMusicRepository(context, database.localMusicDao(), json)
     }
 
+    val downloadManifestRepository: DownloadManifestRepository by lazy {
+        DownloadManifestRepository(
+            context = context,
+            dao = database.downloadDao(),
+            json = json,
+            metadataCache = mediaMetadataCache,
+        )
+    }
+
     val downloadRepository: DownloadRepository by lazy {
         DownloadRepository(
             context = context,
@@ -137,6 +151,7 @@ class AppContainer(private val context: Context) {
             playbackCache = playbackCache,
             json = json,
             settings = settingsRepository,
+            manifest = downloadManifestRepository,
         )
     }
 
@@ -165,7 +180,12 @@ class AppContainer(private val context: Context) {
     }
 
     val playbackController: PlaybackController by lazy {
-        PlaybackController(context, json, settingsRepository, downloadRepository)
+        PlaybackController(
+            context = context,
+            json = json,
+            downloads = downloadRepository,
+            sourcePreferences = sourcePreferenceStore,
+        )
     }
 
     // --- OneDrive sync -----------------------------------------------------

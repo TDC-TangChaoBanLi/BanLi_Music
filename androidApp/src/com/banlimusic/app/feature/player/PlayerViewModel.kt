@@ -17,6 +17,7 @@ import com.banlimusic.app.player.PlaybackController
 import com.banlimusic.app.player.PlaybackUiState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +44,8 @@ class PlayerViewModel(
 
     val playbackState: StateFlow<PlaybackUiState> = playback.state
 
+    val preferredSources: StateFlow<Map<String, String>> = playback.preferredSources
+
     val appSettings: StateFlow<AppSettings> = settings.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings())
 
@@ -64,6 +67,10 @@ class PlayerViewModel(
     private var artworkJob: Job? = null
     private var lyricsJob: Job? = null
     private var loadedTrackId: String? = null
+    private var lyricsTrackId: String? = null
+
+    /** True while the lyrics page is on screen (including after ON_RESUME). */
+    private var lyricsVisible = false
 
     init {
         viewModelScope.launch {
@@ -75,48 +82,83 @@ class PlayerViewModel(
                     loadedTrackId = track?.id
                     artworkJob?.cancel()
                     lyricsJob?.cancel()
+                    lyricsTrackId = null
                     _artworkUrl.value = track?.artworkUrl
                     _lyrics.value = LyricsUiState()
-                    if (track != null) loadArtwork(track)
+                    if (track != null) {
+                        loadArtwork(track)
+                        // Auto-advance in the background must refresh lyrics when
+                        // the user returns to the still-open lyrics page.
+                        if (lyricsVisible) ensureLyrics()
+                    }
                 }
         }
     }
 
+    /** Called by the player screen when the lyrics page becomes visible/resumed. */
+    fun setLyricsVisible(visible: Boolean) {
+        lyricsVisible = visible
+        if (visible) ensureLyrics()
+    }
+
     private fun loadArtwork(track: Track) {
         artworkJob = viewModelScope.launch {
-            try {
-                val url = music.artwork(track) ?: return@launch
-                _artworkUrl.value = url
-                playback.updateArtwork(track.id, url)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Throwable) {
-                // Artwork is optional; keep the placeholder.
+            val attempts = appSettings.value.playbackRetryCount.coerceIn(0, 10) + 1
+            repeat(attempts) { attempt ->
+                try {
+                    val url = music.artwork(track) ?: return@launch
+                    _artworkUrl.value = url
+                    playback.updateArtwork(track.id, url)
+                    return@launch
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    if (attempt < attempts - 1) delay(RETRY_BASE_DELAY_MS shl attempt)
+                }
             }
         }
     }
 
     fun ensureLyrics() {
         val track = playback.state.value.currentTrack ?: return
-        if (_lyrics.value.requested && _lyrics.value.lyrics != null) return
-        if (_lyrics.value.loading) return
+        val current = _lyrics.value
+        if (lyricsTrackId == track.id) {
+            if (current.loading) return
+            // A successful (or empty) response is final for this track; only a
+            // previous error is retried when the page is shown again.
+            if (current.requested && (current.lyrics != null || current.error == null)) return
+        }
         lyricsJob?.cancel()
+        lyricsTrackId = track.id
         _lyrics.value = LyricsUiState(loading = true, requested = true)
         lyricsJob = viewModelScope.launch {
-            try {
-                val lyrics = music.lyrics(track)
-                _lyrics.value = LyricsUiState(lyrics = lyrics, requested = true)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                _lyrics.value = LyricsUiState(error = error.userMessage(), requested = true)
+            val attempts = appSettings.value.playbackRetryCount.coerceIn(0, 10) + 1
+            var lastError: String? = null
+            repeat(attempts) { attempt ->
+                try {
+                    val lyrics = music.lyrics(track)
+                    _lyrics.value = LyricsUiState(lyrics = lyrics, requested = true)
+                    return@launch
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    lastError = error.userMessage()
+                    if (attempt < attempts - 1) delay(RETRY_BASE_DELAY_MS shl attempt)
+                }
             }
+            _lyrics.value = LyricsUiState(error = lastError, requested = true)
         }
     }
 
     fun reloadLyrics() {
+        lyricsTrackId = null
         _lyrics.value = LyricsUiState()
         ensureLyrics()
+    }
+
+    /** Chooses the preferred provider for the current track and restarts it in place. */
+    fun selectSource(providerId: String?) {
+        playback.switchSource(providerId)
     }
 
     fun downloadCurrent(qualityKbps: Int? = null) {
@@ -169,4 +211,8 @@ class PlayerViewModel(
     fun cyclePlayMode() = playback.cyclePlayMode()
 
     fun clearError() = playback.clearError()
+
+    private companion object {
+        const val RETRY_BASE_DELAY_MS = 2_000L
+    }
 }

@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.banlimusic.app.core.common.userMessage
 import com.banlimusic.app.core.datastore.SettingsRepository
+import com.banlimusic.app.core.datastore.SourcePreferenceStore
+import com.banlimusic.app.core.datastore.orderFavoriteCategories
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.data.repository.LibraryRepository
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -43,7 +46,12 @@ class SearchViewModel(
     private val library: LibraryRepository,
     private val downloads: DownloadRepository,
     private val settings: SettingsRepository,
+    private val sourcePreferences: SourcePreferenceStore,
 ) : ViewModel() {
+
+    /** trackId → preferred provider picked from the (+n) badge. */
+    val preferredSources: StateFlow<Map<String, String>> = sourcePreferences.preferredSources
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
@@ -62,8 +70,12 @@ class SearchViewModel(
         .map { it.defaultFavoriteCategory }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "默认收藏")
 
-    val favoriteCategories: StateFlow<List<String>> = library.observeFavoriteCategories()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val favoriteCategories: StateFlow<List<String>> = combine(
+        library.observeFavoriteCategories(),
+        settings.settings,
+    ) { folders, appSettings ->
+        orderFavoriteCategories(folders, appSettings.favoriteCategoryOrder)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Application track ids whose audio is already downloaded. */
     val downloadedIds: StateFlow<Set<String>> = downloads.observeTasks()
@@ -174,19 +186,23 @@ class SearchViewModel(
         _uiState.update { it.copy(selectedIds = emptySet(), selectionMode = false) }
     }
 
-    suspend fun downloadQualities(): List<Int> {
-        val tracks = _uiState.value.results.filter { it.id in _uiState.value.selectedIds }
+    /** Quality tiers for [tracks], defaulting to the current selection. */
+    suspend fun downloadQualities(
+        tracks: Collection<Track> = _uiState.value.results.filter {
+            it.id in _uiState.value.selectedIds
+        },
+    ): List<Int> {
         if (tracks.isEmpty()) return emptyList()
         return runCatching { music.downloadQualities(tracks) }.getOrDefault(emptyList())
     }
 
-    fun batchFavorite(category: String = defaultFavoriteCategory.value) {
+    fun batchFavorite(categories: Set<String> = setOf(defaultFavoriteCategory.value)) {
         val state = _uiState.value
         val tracks = state.results.filter { it.id in state.selectedIds }
-        if (tracks.isEmpty()) return
+        if (tracks.isEmpty() || categories.isEmpty()) return
         viewModelScope.launch {
-            library.addFavorites(tracks, category)
-            _message.value = "已收藏 ${tracks.size} 首到“$category”"
+            library.addFavorites(tracks, categories)
+            _message.value = "已收藏 ${tracks.size} 首到“${categories.joinToString("、")}”"
             clearSelection()
         }
     }
@@ -200,6 +216,10 @@ class SearchViewModel(
             _message.value = "已加入下载队列：$queued 首"
             clearSelection()
         }
+    }
+
+    fun setPreferredSource(trackId: String, providerId: String?) {
+        viewModelScope.launch { sourcePreferences.setPreferred(trackId, providerId) }
     }
 
     fun consumeMessage() {

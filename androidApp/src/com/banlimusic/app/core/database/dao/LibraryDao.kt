@@ -166,6 +166,9 @@ interface LibraryDao {
     )
     suspend fun touchHistory(trackId: String, trackJson: String, playedAt: Long): Int
 
+    @Query("DELETE FROM play_history WHERE trackId IN (:trackIds)")
+    suspend fun deleteHistory(trackIds: List<String>)
+
     @Query("DELETE FROM play_history")
     suspend fun clearHistory()
 

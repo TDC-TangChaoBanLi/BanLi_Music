@@ -64,6 +64,7 @@ import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Settings
@@ -711,6 +712,13 @@ private fun PlaybackSettings(settings: AppSettings, viewModel: SettingsViewModel
             description = "关闭后点按列表只播放，不自动打开全屏播放器",
             checked = settings.openPlayerOnTrackClick,
             onCheckedChange = viewModel::setOpenPlayerOnTrackClick,
+        )
+        SettingsSwitchRow(
+            icon = Icons.Rounded.SwapHoriz,
+            title = "播放失败自动换源",
+            description = "当前来源播放失败时，按顺序尝试这首歌的其他来源",
+            checked = settings.autoSwitchPlaybackSource,
+            onCheckedChange = viewModel::setAutoSwitchPlaybackSource,
         )
         SettingsSlider(
             icon = Icons.Rounded.Replay,

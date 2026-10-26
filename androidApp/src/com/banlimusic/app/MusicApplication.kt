@@ -29,6 +29,11 @@ class MusicApplication : Application() {
                 PlayerWidgetUpdater.setTheme(this@MusicApplication, settings.widgetTheme)
                 container.syncScheduler.apply(settings.sync)
             }
+            // Pick up files copied back into an app-readable download directory.
+            runCatching {
+                val target = container.downloadRepository.downloadTarget()
+                container.downloadManifestRepository.syncFromTarget(target)
+            }
             runCatching { container.oneDriveSyncRepository.maybeSyncOnStart() }
         }
     }

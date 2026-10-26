@@ -49,6 +49,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.banlimusic.app.core.datastore.AppSettings
+import com.banlimusic.app.core.datastore.resolveNavStart
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.feature.downloads.DownloadsScreen
 import com.banlimusic.app.feature.home.HomeScreen
@@ -88,6 +89,9 @@ private fun destinationsFor(ids: List<String>): List<BottomDestination> {
     return selected.ifEmpty { allDestinations }
 }
 
+private val topLevelRoutes = allDestinations.map { it.route }.toSet()
+
+
 @Composable
 fun AppRoot(
     container: AppContainer,
@@ -99,7 +103,15 @@ fun AppRoot(
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = backStackEntry?.destination?.route ?: initialSettings.defaultNavItem
+    // Resolved once so a later settings update cannot reset navigation mid-session.
+    val startDestination = remember {
+        resolveNavStart(
+            lastVisited = initialSettings.lastNavItem,
+            defaultItem = initialSettings.defaultNavItem,
+            validItems = topLevelRoutes,
+        )
+    }
+    val currentRoute = backStackEntry?.destination?.route ?: startDestination
     val playbackState by container.playbackController.state.collectAsStateWithLifecycle()
     val favoriteIds by container.libraryRepository.observeFavoriteIds()
         .collectAsStateWithLifecycle(initialValue = emptySet())
@@ -111,6 +123,13 @@ fun AppRoot(
     val playback = container.playbackController
     val scope = rememberCoroutineScope()
     val showNavigation = currentRoute != Routes.PLAYER
+
+    // Remember the page so pressing back to exit and reopening restores it.
+    LaunchedEffect(currentRoute) {
+        if (backStackEntry != null && currentRoute in topLevelRoutes) {
+            container.settingsRepository.setLastNavItem(currentRoute)
+        }
+    }
 
     fun navigateTo(route: String) {
         navController.navigate(route) {
@@ -199,7 +218,7 @@ fun AppRoot(
                             navigateTopLevel = ::navigateTo,
                             onExitApp = onExitApp,
                             navOrder = destinations.map { it.route },
-                            startDestination = settings.defaultNavItem,
+                            startDestination = startDestination,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
@@ -259,7 +278,7 @@ fun AppRoot(
                     navigateTopLevel = ::navigateTo,
                     onExitApp = onExitApp,
                     navOrder = destinations.map { it.route },
-                    startDestination = settings.defaultNavItem,
+                    startDestination = startDestination,
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -336,7 +355,6 @@ private fun AppNavHost(
         composable(Routes.LIBRARY) {
             LibraryScreen(
                 onPlayQueue = playQueue,
-                onOpenDownloads = { navigateTopLevel(Routes.DOWNLOADS) },
                 onExitApp = onExitApp,
             )
         }

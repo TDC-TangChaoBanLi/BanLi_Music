@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -37,8 +38,11 @@ fun Modifier.dragSelect(
         coroutineScope {
             val edgeThreshold = 72.dp.toPx()
             val scrollStep = 14.dp.toPx()
+            val reversalSlop = viewConfiguration.touchSlop
             var lastKey: String? = null
             var pointerY = 0f
+            var lastPointerY = 0f
+            var lastDirection = 0
             var autoScroll: Job? = null
 
             fun keyAt(y: Float): String? {
@@ -118,6 +122,8 @@ fun Modifier.dragSelect(
 
                 lastKey = null
                 pointerY = down.position.y
+                lastPointerY = pointerY
+                lastDirection = 0
                 handle(pointerY)
                 if (nearEdge()) startAutoScroll()
                 try {
@@ -127,7 +133,22 @@ fun Modifier.dragSelect(
                         // Consuming in the Initial pass keeps the list's own
                         // scroll detector from stealing the drag.
                         change.consume()
-                        pointerY = change.position.y
+                        val newY = change.position.y
+                        val deltaY = newY - lastPointerY
+                        if (abs(deltaY) > reversalSlop) {
+                            val direction = if (deltaY > 0) 1 else -1
+                            if (lastDirection != 0 &&
+                                direction != lastDirection &&
+                                lastKey != null
+                            ) {
+                                // Reversing direction must also undo the item at
+                                // the turning point, not only the previous rows.
+                                onSelect(lastKey!!)
+                            }
+                            lastDirection = direction
+                            lastPointerY = newY
+                        }
+                        pointerY = newY
                         handle(pointerY)
                         if (nearEdge()) startAutoScroll() else stopAutoScroll()
                         if (!change.pressed) break

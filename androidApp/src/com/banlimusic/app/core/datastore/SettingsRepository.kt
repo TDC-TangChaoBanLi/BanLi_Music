@@ -40,6 +40,7 @@ class SettingsRepository(private val context: Context) {
         val allowMobileNetwork = booleanPreferencesKey("allow_mobile_network")
         val playbackRetryCount = intPreferencesKey("playback_retry_count")
         val consecutiveFailureLimit = intPreferencesKey("consecutive_failure_limit")
+        val autoSwitchPlaybackSource = booleanPreferencesKey("playback_auto_switch_source")
         val defaultShowLyrics = booleanPreferencesKey("default_show_lyrics")
         val searchPageSize = intPreferencesKey("search_page_size")
         val apiLimitPerWindow = intPreferencesKey("api_limit_per_window")
@@ -53,6 +54,7 @@ class SettingsRepository(private val context: Context) {
         val bottomNavItems = stringPreferencesKey("bottom_nav_items")
         val agreementAccepted = booleanPreferencesKey("agreement_accepted")
         val defaultFavoriteCategory = stringPreferencesKey("default_favorite_category")
+        val favoriteCategoryOrder = stringPreferencesKey("favorite_category_order")
         val autoImportLocalMusic = booleanPreferencesKey("auto_import_local_music")
         val widgetTheme = stringPreferencesKey("widget_theme")
         val highRefreshRateLists = booleanPreferencesKey("high_refresh_rate_lists")
@@ -65,6 +67,7 @@ class SettingsRepository(private val context: Context) {
         val gdSearchPageSize = intPreferencesKey("provider_gd_search_page_size")
         val customSources = stringPreferencesKey("provider_custom_sources_json")
         val defaultNavItem = stringPreferencesKey("default_nav_item")
+        val lastNavItem = stringPreferencesKey("last_nav_item")
 
         // Cloud sync preferences; transient sync state lives in SyncStateStore.
         val syncAuto = booleanPreferencesKey("sync_auto_enabled")
@@ -118,6 +121,7 @@ class SettingsRepository(private val context: Context) {
                 playbackRetryCount = (preferences[Keys.playbackRetryCount] ?: 3).coerceIn(0, 10),
                 consecutiveFailureLimit = (preferences[Keys.consecutiveFailureLimit] ?: 3)
                     .coerceIn(1, 10),
+                autoSwitchPlaybackSource = preferences[Keys.autoSwitchPlaybackSource] ?: true,
                 defaultShowLyrics = preferences[Keys.defaultShowLyrics] ?: false,
                 downloadDirectory = preferences[Keys.downloadDirectory].orEmpty(),
                 downloadQualityKbps = QualityTiers.normalize(
@@ -134,6 +138,9 @@ class SettingsRepository(private val context: Context) {
                 defaultFavoriteCategory = preferences[Keys.defaultFavoriteCategory]
                     ?.takeIf { it.isNotBlank() }
                     ?: DEFAULT_FAVORITE_CATEGORY,
+                favoriteCategoryOrder = parseFavoriteCategoryOrder(
+                    preferences[Keys.favoriteCategoryOrder],
+                ),
                 autoImportLocalMusic = preferences[Keys.autoImportLocalMusic] ?: false,
                 widgetTheme = preferences[Keys.widgetTheme]
                     ?.let { runCatching { WidgetTheme.valueOf(it) }.getOrNull() }
@@ -141,6 +148,7 @@ class SettingsRepository(private val context: Context) {
                 highRefreshRateLists = preferences[Keys.highRefreshRateLists] ?: true,
                 openPlayerOnTrackClick = preferences[Keys.openPlayerOnTrackClick] ?: true,
                 defaultNavItem = sanitizeDefaultNavItem(preferences[Keys.defaultNavItem], navItems),
+                lastNavItem = preferences[Keys.lastNavItem].orEmpty(),
             )
         }
 
@@ -192,6 +200,10 @@ class SettingsRepository(private val context: Context) {
         it[Keys.consecutiveFailureLimit] = limit.coerceIn(1, 10)
     }
 
+    suspend fun setAutoSwitchPlaybackSource(enabled: Boolean) = context.settingsDataStore.edit {
+        it[Keys.autoSwitchPlaybackSource] = enabled
+    }
+
     suspend fun setDefaultShowLyrics(enabled: Boolean) = context.settingsDataStore.edit {
         it[Keys.defaultShowLyrics] = enabled
     }
@@ -240,6 +252,10 @@ class SettingsRepository(private val context: Context) {
         it[Keys.bottomNavItems] = sanitizeNavItems(items).joinToString(",")
     }
 
+    suspend fun setLastNavItem(route: String) = context.settingsDataStore.edit {
+        it[Keys.lastNavItem] = route
+    }
+
     suspend fun setDefaultNavItem(item: String) = context.settingsDataStore.edit { preferences ->
         val navItems = parseNavItems(preferences[Keys.bottomNavItems])
         preferences[Keys.defaultNavItem] = sanitizeDefaultNavItem(item, navItems)
@@ -251,6 +267,12 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDefaultFavoriteCategory(category: String) = context.settingsDataStore.edit {
         it[Keys.defaultFavoriteCategory] = category.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY }
+    }
+
+    suspend fun setFavoriteCategoryOrder(order: List<String>) = context.settingsDataStore.edit {
+        it[Keys.favoriteCategoryOrder] = json.encodeToString(
+            order.map(String::trim).filter(String::isNotEmpty).distinct(),
+        )
     }
 
     suspend fun setSyncAutoSync(enabled: Boolean) = context.settingsDataStore.edit {
@@ -285,6 +307,13 @@ class SettingsRepository(private val context: Context) {
         if (raw.isNullOrBlank()) return emptyList()
         return runCatching {
             json.decodeFromString<List<CustomSourceSettings>>(raw)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun parseFavoriteCategoryOrder(raw: String?): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            json.decodeFromString<List<String>>(raw)
         }.getOrDefault(emptyList())
     }
 

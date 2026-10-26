@@ -31,6 +31,11 @@ class TtlCache<K, V>(
     }
 
     @Synchronized
+    fun remove(key: K) {
+        entries.remove(key)
+    }
+
+    @Synchronized
     fun clear() {
         entries.clear()
     }

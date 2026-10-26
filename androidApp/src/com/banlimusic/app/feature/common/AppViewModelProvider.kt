@@ -31,6 +31,7 @@ object AppViewModelProvider {
                 library = app().container.libraryRepository,
                 downloads = app().container.downloadRepository,
                 settings = app().container.settingsRepository,
+                sourcePreferences = app().container.sourcePreferenceStore,
             )
         }
         initializer {
@@ -40,12 +41,14 @@ object AppViewModelProvider {
                 downloads = app().container.downloadRepository,
                 music = app().container.musicRepository,
                 settings = app().container.settingsRepository,
+                sourcePreferenceStore = app().container.sourcePreferenceStore,
             )
         }
         initializer {
             DownloadsViewModel(
                 downloads = app().container.downloadRepository,
                 playback = app().container.playbackController,
+                manifest = app().container.downloadManifestRepository,
             )
         }
         initializer {

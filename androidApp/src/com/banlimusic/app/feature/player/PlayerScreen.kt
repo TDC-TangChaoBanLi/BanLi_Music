@@ -5,6 +5,7 @@ package com.banlimusic.app.feature.player
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -85,6 +86,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.Player
@@ -94,11 +97,13 @@ import com.banlimusic.app.core.model.TrackAction
 import com.banlimusic.app.domain.playback.LrcParser
 import com.banlimusic.app.domain.playback.stripTimestamps
 import com.banlimusic.app.feature.common.AppViewModelProvider
+import com.banlimusic.app.feature.common.SourcePickerDialog
 import com.banlimusic.app.player.PlaybackUiState
 import com.banlimusic.app.ui.components.EmptyState
 import com.banlimusic.app.ui.components.TrackArtwork
 import com.banlimusic.app.ui.components.formatPlaybackTime
 import com.banlimusic.app.ui.components.qualityLabel
+import com.banlimusic.app.ui.components.NON_PROVIDER_SOURCE_IDS
 import com.banlimusic.app.ui.components.sourceDisplayNameAnnotated
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -119,6 +124,7 @@ fun PlayerScreen(
     val favoriteCategories by viewModel.favoriteCategories.collectAsStateWithLifecycle()
     val appSettings by viewModel.appSettings.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyrics.collectAsStateWithLifecycle()
+    val preferredSources by viewModel.preferredSources.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val pagerState = rememberPagerState(
@@ -155,12 +161,17 @@ fun PlayerScreen(
         }
     }
     LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage == 1) viewModel.ensureLyrics()
+        viewModel.setLyricsVisible(pagerState.currentPage == 1)
     }
     LaunchedEffect(appSettings.defaultShowLyrics) {
         val target = if (appSettings.defaultShowLyrics) 1 else 0
         if (pagerState.currentPage != target) pagerState.scrollToPage(target)
-        if (target == 1) viewModel.ensureLyrics()
+        if (target == 1) viewModel.setLyricsVisible(true)
+    }
+    // Returning from HOME must request lyrics again for the track that started
+    // playing while the app was in the background.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (pagerState.currentPage == 1) viewModel.setLyricsVisible(true)
     }
 
     Box(
@@ -235,6 +246,8 @@ fun PlayerScreen(
                                 onPrevious = viewModel::previous,
                                 onNext = viewModel::next,
                                 onCyclePlayMode = viewModel::cyclePlayMode,
+                                preferredProviderId = preferredSources[track.id],
+                                onSelectSource = viewModel::selectSource,
                             )
                         } else {
                             LyricsPage(
@@ -306,6 +319,8 @@ private fun PosterPage(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onCyclePlayMode: () -> Unit,
+    preferredProviderId: String?,
+    onSelectSource: (String?) -> Unit,
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isWide = LocalConfiguration.current.smallestScreenWidthDp >= 600
@@ -345,6 +360,8 @@ private fun PosterPage(
                     onPrevious = onPrevious,
                     onNext = onNext,
                     onCyclePlayMode = onCyclePlayMode,
+                    preferredProviderId = preferredProviderId,
+                    onSelectSource = onSelectSource,
                     modifier = Modifier
                         .weight(1.1f)
                         .verticalScroll(rememberScrollState()),
@@ -387,6 +404,8 @@ private fun PosterPage(
                     onPrevious = onPrevious,
                     onNext = onNext,
                     onCyclePlayMode = onCyclePlayMode,
+                    preferredProviderId = preferredProviderId,
+                    onSelectSource = onSelectSource,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
@@ -420,8 +439,11 @@ private fun PlayerDetails(
     onNext: () -> Unit,
     onCyclePlayMode: () -> Unit,
     modifier: Modifier = Modifier,
+    preferredProviderId: String? = null,
+    onSelectSource: (String?) -> Unit = {},
 ) {
     var favoriteMenu by remember { mutableStateOf(false) }
+    var showSourcePicker by remember(track.id) { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -457,19 +479,31 @@ private fun PlayerDetails(
                     )
                 }
             }
-            if (track.sources.size > 1) {
+            if (track.sources.count { it.providerId !in NON_PROVIDER_SOURCE_IDS } > 1) {
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.clickable { showSourcePicker = true },
                 ) {
                     Text(
-                        text = "${track.sources.size} 个来源",
+                        text = "${track.sources.count { it.providerId !in NON_PROVIDER_SOURCE_IDS }} 个来源",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
             }
+        }
+        if (showSourcePicker) {
+            SourcePickerDialog(
+                track = track,
+                preferredProviderId = preferredProviderId,
+                onSelect = { providerId ->
+                    showSourcePicker = false
+                    onSelectSource(providerId)
+                },
+                onDismiss = { showSourcePicker = false },
+            )
         }
         Spacer(Modifier.height(18.dp))
         ProgressSection(state = state, onSeek = onSeek)

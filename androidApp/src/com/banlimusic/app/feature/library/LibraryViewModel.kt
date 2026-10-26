@@ -6,7 +6,10 @@ package com.banlimusic.app.feature.library
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.banlimusic.app.core.datastore.DEFAULT_FAVORITE_CATEGORY
 import com.banlimusic.app.core.datastore.SettingsRepository
+import com.banlimusic.app.core.datastore.SourcePreferenceStore
+import com.banlimusic.app.core.datastore.orderFavoriteCategories
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.model.TrackAction
 import com.banlimusic.app.core.model.TrackSource
@@ -21,6 +24,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -32,8 +36,13 @@ class LibraryViewModel(
     private val localMusic: LocalMusicRepository,
     private val downloads: DownloadRepository,
     private val music: MusicRepository,
-    settings: SettingsRepository,
+    private val settings: SettingsRepository,
+    private val sourcePreferenceStore: SourcePreferenceStore,
 ) : ViewModel() {
+
+    /** trackId → preferred provider selected from the source picker. */
+    val preferredSources: StateFlow<Map<String, String>> = sourcePreferenceStore.preferredSources
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     private val _selectedCategory = MutableStateFlow<String?>(null)
     val selectedCategory: StateFlow<String?> = _selectedCategory.asStateFlow()
@@ -46,8 +55,13 @@ class LibraryViewModel(
     val allFavorites: StateFlow<List<Track>> = library.observeFavorites()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val categories: StateFlow<List<String>> = library.observeFavoriteCategories()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** Folder list honouring the user's drag order; unknown folders append by name. */
+    val categories: StateFlow<List<String>> = combine(
+        library.observeFavoriteCategories(),
+        settings.settings,
+    ) { folders, appSettings ->
+        orderFavoriteCategories(folders, appSettings.favoriteCategoryOrder)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val favoriteIds: StateFlow<Set<String>> = library.observeFavoriteIds()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
@@ -69,27 +83,46 @@ class LibraryViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
+    /** Tracks imported from MediaStore or SAF. */
+    val importedTracks: StateFlow<List<Track>> = localMusic.observeTracks()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Tracks whose download finished, including entries imported from a manifest. */
+    val downloadedTracks: StateFlow<List<Track>> = downloads.observeTasks()
+        .map { tasks ->
+            tasks
+                .filter { it.status == DownloadStatus.COMPLETED && !it.filePath.isNullOrBlank() }
+                .map { task ->
+                    val uri = task.filePath.orEmpty()
+                    // Keep the original provider sources so artwork and lyrics can still
+                    // be resolved on demand even when the sidecar files were not saved.
+                    val localSource = TrackSource(
+                        providerId = "download",
+                        providerTrackId = uri,
+                        availableActions = setOf(TrackAction.STREAM),
+                        localUri = uri,
+                        durationMs = task.track.durationMs,
+                    )
+                    task.track.copy(
+                        sources = listOf(localSource) +
+                            task.track.sources.filter { it.localUri == null },
+                    )
+                }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val downloadedBytes: StateFlow<Long> = downloads.observeTasks()
+        .map { tasks ->
+            tasks
+                .filter { it.status == DownloadStatus.COMPLETED }
+                .sumOf { it.totalBytes }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+
     val localTracks: StateFlow<List<Track>> = combine(
-        localMusic.observeTracks(),
-        downloads.observeTasks(),
-    ) { imported, tasks ->
-        val downloaded = tasks
-            .filter { it.status == DownloadStatus.COMPLETED && !it.filePath.isNullOrBlank() }
-            .map { task ->
-                val uri = task.filePath.orEmpty()
-                // Keep the original provider sources so artwork and lyrics can still
-                // be resolved on demand even when the sidecar files were not saved.
-                val localSource = TrackSource(
-                    providerId = "download",
-                    providerTrackId = uri,
-                    availableActions = setOf(TrackAction.STREAM),
-                    localUri = uri,
-                    durationMs = task.track.durationMs,
-                )
-                task.track.copy(
-                    sources = listOf(localSource) + task.track.sources.filter { it.localUri == null },
-                )
-            }
+        importedTracks,
+        downloadedTracks,
+    ) { imported, downloaded ->
         (imported + downloaded).distinctBy { track ->
             track.sources.firstNotNullOfOrNull { it.localUri } ?: track.id
         }
@@ -122,6 +155,17 @@ class LibraryViewModel(
 
     fun clearHistory() {
         viewModelScope.launch { library.clearHistory() }
+    }
+
+    /** Removes only the selected play-history rows. */
+    fun deleteHistorySelection(tracks: List<Track>) {
+        val selected = tracks.filter { it.id in _selectedIds.value }
+        if (selected.isEmpty()) return
+        viewModelScope.launch {
+            library.deleteHistory(selected.map { it.id })
+            _message.value = "已删除 ${selected.size} 条播放记录"
+            clearSelection()
+        }
     }
 
     fun importLocalMusic() {
@@ -170,8 +214,8 @@ class LibraryViewModel(
     }
 
     /**
-     * Removes the selected imported records. Downloaded tracks are not touched:
-     * their files belong to the download page, so the user is told where to go.
+     * Removes selected imported records and download rows. Imported originals
+     * are never deleted; download files follow the download page's policy.
      */
     fun deleteLocalSelection(tracks: List<Track>) {
         val selected = tracks.filter { it.id in _selectedIds.value }
@@ -179,16 +223,24 @@ class LibraryViewModel(
         val imported = selected.filter { track ->
             track.sources.any { it.providerId == "local" }
         }
-        val downloadedCount = selected.size - imported.size
+        val downloaded = selected.filter { track ->
+            track.sources.any { it.providerId == "download" }
+        }
         viewModelScope.launch {
             if (imported.isNotEmpty()) localMusic.delete(imported.map { it.id })
+            if (downloaded.isNotEmpty()) {
+                val wanted = downloaded.map { it.id }.toSet()
+                downloads.observeTasks().first()
+                    .filter { it.track.id in wanted }
+                    .forEach { downloads.remove(it.id) }
+            }
             _message.value = buildString {
                 if (imported.isNotEmpty()) {
                     append("已移除 ${imported.size} 首导入记录（未删除原始文件）")
                 }
-                if (downloadedCount > 0) {
+                if (downloaded.isNotEmpty()) {
                     if (isNotEmpty()) append("；")
-                    append("$downloadedCount 首为已下载歌曲，如需删除请到 下载-已下载 中删除源文件")
+                    append("已删除 ${downloaded.size} 首下载歌曲及其文件")
                 }
             }
             clearSelection()
@@ -200,6 +252,10 @@ class LibraryViewModel(
             localMusic.clear()
             _message.value = "已清空本地音乐记录（不会删除原始文件）"
         }
+    }
+
+    fun selectSourcePreference(trackId: String, providerId: String?) {
+        viewModelScope.launch { sourcePreferenceStore.setPreferred(trackId, providerId) }
     }
 
     fun toggleSelection(trackId: String) {
@@ -263,9 +319,33 @@ class LibraryViewModel(
 
     fun deleteCategory(name: String) {
         viewModelScope.launch {
+            val defaultCategory = settings.current().defaultFavoriteCategory
+            if (name == DEFAULT_FAVORITE_CATEGORY || name == defaultCategory) {
+                _message.value = "默认收藏夹不能删除"
+                return@launch
+            }
             library.deleteCategory(name)
             if (_selectedCategory.value == name) _selectedCategory.value = null
             _message.value = "已删除收藏夹“$name”"
+        }
+    }
+
+    /** Persists the folder order after a drag operation. */
+    fun saveCategoryOrder(order: List<String>) {
+        viewModelScope.launch { settings.setFavoriteCategoryOrder(order) }
+    }
+
+    /** Removes the download records (and their files) for the selected tracks. */
+    fun removeDownloadedSelection(tracks: List<Track>) {
+        val selected = tracks.filter { it.id in _selectedIds.value }
+        if (selected.isEmpty()) return
+        viewModelScope.launch {
+            val wanted = selected.map { it.id }.toSet()
+            downloads.observeTasks().first()
+                .filter { it.track.id in wanted }
+                .forEach { downloads.remove(it.id) }
+            _message.value = "已删除 ${selected.size} 首已下载歌曲及其文件"
+            clearSelection()
         }
     }
 
@@ -284,6 +364,15 @@ class LibraryViewModel(
         if (normalized.isEmpty()) return
         viewModelScope.launch {
             library.ensureCategory(normalized)
+            // New folders are appended to the stored order so they appear at the
+            // right end instead of jumping into the alphabetical middle.
+            val folders = library.observeFavoriteCategories().first()
+            val currentOrder = settings.current().favoriteCategoryOrder
+            val previousOrder = orderFavoriteCategories(
+                all = folders.filter { it != normalized },
+                storedOrder = currentOrder,
+            )
+            settings.setFavoriteCategoryOrder(previousOrder + normalized)
             _message.value = "已创建收藏夹“$normalized”"
         }
     }

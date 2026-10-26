@@ -11,16 +11,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,13 +33,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.banlimusic.app.domain.sort.AlphabetSection
+import kotlinx.coroutines.launch
 
 private val INDEX_LETTERS = listOf("#") + ('A'..'Z').map { it.toString() }
 
 /**
  * Vertical A-Z rail. Tapping jumps immediately; long-pressing and dragging
  * scrolls continuously as the finger moves. The rail only jumps to sections
- * that exist in the current sorted/filtered list.
+ * that exist in the current sorted/filtered list. When the list is sorted
+ * descending the labels are drawn in reverse so the rail follows the list.
  */
 @Composable
 fun AlphabetIndex(
@@ -44,17 +49,21 @@ fun AlphabetIndex(
     currentSection: String?,
     onSelect: (AlphabetSection) -> Unit,
     modifier: Modifier = Modifier,
+    descending: Boolean = false,
     onDragLetter: (String?) -> Unit = {},
 ) {
     if (sections.isEmpty()) return
     val sectionByLabel = remember(sections) { sections.associateBy { it.label } }
+    val letters = remember(descending) {
+        if (descending) INDEX_LETTERS.reversed() else INDEX_LETTERS
+    }
     var heightPx by remember { mutableIntStateOf(1) }
 
     fun selectAt(y: Float) {
-        val index = ((y / heightPx) * INDEX_LETTERS.size)
+        val index = ((y / heightPx) * letters.size)
             .toInt()
-            .coerceIn(0, INDEX_LETTERS.lastIndex)
-        val label = INDEX_LETTERS[index]
+            .coerceIn(0, letters.lastIndex)
+        val label = letters[index]
         sectionByLabel[label]?.let(onSelect)
         onDragLetter(label)
     }
@@ -84,7 +93,7 @@ fun AlphabetIndex(
             verticalArrangement = Arrangement.SpaceEvenly,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            INDEX_LETTERS.forEach { letter ->
+            letters.forEach { letter ->
                 val active = letter == currentSection
                 Text(
                     text = letter,
@@ -98,6 +107,46 @@ fun AlphabetIndex(
                 )
             }
         }
+    }
+}
+
+/**
+ * Full-size overlay that owns the rail state, click-to-scroll and the drag
+ * bubble. Callers only provide the list state and sorted sections.
+ */
+@Composable
+fun AlphabetOverlay(
+    sections: List<AlphabetSection>,
+    ascending: Boolean,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    if (sections.isEmpty()) return
+    val scope = rememberCoroutineScope()
+    var dragLetter by remember { mutableStateOf<String?>(null) }
+    val currentSection by remember(listState, sections) {
+        derivedStateOf {
+            sections.lastOrNull { it.itemIndex <= listState.firstVisibleItemIndex }?.label
+        }
+    }
+    Box(modifier = modifier) {
+        AlphabetIndex(
+            sections = sections,
+            currentSection = currentSection,
+            descending = !ascending,
+            onSelect = { section ->
+                scope.launch { listState.scrollToItem(section.itemIndex) }
+            },
+            onDragLetter = { dragLetter = it },
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .padding(end = 2.dp),
+        )
+        AlphabetDragBubble(
+            letter = dragLetter,
+            modifier = Modifier.align(Alignment.Center),
+        )
     }
 }
 

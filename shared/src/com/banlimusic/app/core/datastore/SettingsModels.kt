@@ -85,6 +85,11 @@ data class AppSettings(
     val allowMobileNetwork: Boolean = true,
     val playbackRetryCount: Int = 3,
     val consecutiveFailureLimit: Int = 3,
+    /**
+     * When playback of the current source fails, try the other sources of the
+     * same track (rotating after each retry) instead of stopping.
+     */
+    val autoSwitchPlaybackSource: Boolean = true,
     val defaultShowLyrics: Boolean = false,
     val downloadDirectory: String = "",
     /** Directory scanned for the desktop local-music library. */
@@ -108,6 +113,8 @@ data class AppSettings(
     val bottomNavItems: List<String> = DEFAULT_BOTTOM_NAV_ITEMS,
     val agreementAccepted: Boolean = false,
     val defaultFavoriteCategory: String = DEFAULT_FAVORITE_CATEGORY,
+    /** User defined order of favourite folders; unknown folders fall back to name order. */
+    val favoriteCategoryOrder: List<String> = emptyList(),
     val autoImportLocalMusic: Boolean = false,
     val widgetTheme: WidgetTheme = WidgetTheme.SYSTEM,
     /** Requests a ~90Hz display mode while browsing track lists. */
@@ -116,6 +123,8 @@ data class AppSettings(
     val openPlayerOnTrackClick: Boolean = true,
     /** Tab opened on a cold start. All navigation items always stay visible. */
     val defaultNavItem: String = DEFAULT_NAV_ITEM,
+    /** Last top-level page the user left the app from; empty means use the default. */
+    val lastNavItem: String = "",
 ) {
     val qualityKbps: Int get() = providers.gd.playbackQualityKbps
     val enabledSources: Set<String> get() = providers.gd.enabledSourceKeys
@@ -159,4 +168,27 @@ fun sanitizeNavItems(items: List<String>): List<String> {
 fun sanitizeDefaultNavItem(item: String?, navItems: List<String>): String {
     val sanitizedItems = sanitizeNavItems(navItems)
     return item?.takeIf { it in sanitizedItems } ?: DEFAULT_NAV_ITEM
+}
+
+/**
+ * Cold-start page: prefer the page the user left from, then the configured
+ * default, then home. Only known top-level routes are accepted.
+ */
+fun resolveNavStart(
+    lastVisited: String?,
+    defaultItem: String?,
+    validItems: Set<String>,
+): String = lastVisited?.takeIf { it in validItems }
+    ?: defaultItem?.takeIf { it in validItems }
+    ?: DEFAULT_NAV_ITEM
+
+/**
+ * Applies the persisted folder order and appends folders that were never
+ * reordered, so a newly created folder always shows at the right end.
+ */
+fun orderFavoriteCategories(all: List<String>, storedOrder: List<String>): List<String> {
+    val available = all.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    if (available.isEmpty()) return emptyList()
+    val known = storedOrder.map { it.trim() }.filter { it in available }.distinct()
+    return known + available.filter { it !in known }.sorted()
 }

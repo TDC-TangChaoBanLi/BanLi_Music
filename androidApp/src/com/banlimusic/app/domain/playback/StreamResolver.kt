@@ -8,8 +8,8 @@ import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.common.TtlCache
 import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.model.QualityTiers
-import com.banlimusic.app.core.network.NetworkMonitor
 import com.banlimusic.app.core.model.StreamInfo
+import com.banlimusic.app.core.network.NetworkMonitor
 import com.banlimusic.app.data.source.MusicProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
@@ -22,17 +22,32 @@ class StreamResolver(
 ) {
     private val cache = TtlCache<String, StreamInfo>(maxEntries = 32, ttlMs = 5 * 60_000L)
 
-    /** Tries every candidate source until one returns a URL (auto source switching). */
-    suspend fun resolve(candidates: List<StreamCandidate>, qualityKbps: Int? = null): StreamInfo {
+    /**
+     * Resolves a playable URL. With auto source switching enabled every
+     * candidate is tried in order; [rotate] lets playback retries start with a
+     * different source so a broken URL cannot trap the queue in a retry loop.
+     */
+    suspend fun resolve(
+        candidates: List<StreamCandidate>,
+        qualityKbps: Int? = null,
+        rotate: Int = 0,
+    ): StreamInfo {
         if (candidates.isEmpty()) throw MusicException.NoPlayableSource()
         val current = settings.current()
         if (!current.allowMobileNetwork && networkMonitor?.isMetered() == true) {
             throw MusicException.Unavailable("已关闭移动网络播放，请连接 Wi-Fi 或在设置中允许移动网络")
         }
-        // Playback retry handles failures; do not silently switch to another source.
-        val effective = candidates.take(1)
+        // When auto switching is disabled the retry rotation is ignored so the
+        // preferred source is always used, exactly as the setting promises.
+        val effective = if (current.autoSwitchPlaybackSource) {
+            SourceOrdering.rotate(candidates, rotate)
+        } else {
+            candidates.take(1)
+        }
         val quality = QualityTiers.normalize(qualityKbps ?: current.qualityKbps)
-        val cacheKey = effective.joinToString(";") { "${it.providerId}:${it.providerTrackId}" } + ":$quality"
+        // The key follows the first candidate: switching the preferred source
+        // produces a new key, while retrying the same one reuses the cache.
+        val cacheKey = "${effective.first().providerId}:${effective.first().providerTrackId}:$quality"
         cache.get(cacheKey)?.let { return it }
 
         var lastError: Throwable? = null
@@ -69,15 +84,28 @@ class StreamResolver(
     fun resolveBlocking(
         candidates: List<StreamCandidate>,
         qualityKbps: Int? = null,
-    ): android.net.Uri = resolveBlockingInfo(candidates, qualityKbps).info.url.toUri()
+        rotate: Int = 0,
+    ): android.net.Uri = resolveBlockingInfo(candidates, qualityKbps, rotate).info.url.toUri()
 
     fun resolveBlockingInfo(
         candidates: List<StreamCandidate>,
         qualityKbps: Int? = null,
+        rotate: Int = 0,
     ): ResolvedStream = runBlocking {
         val quality = QualityTiers.normalize(qualityKbps ?: settings.current().qualityKbps)
-        val info = withTimeout(30_000L) { resolve(candidates, quality) }
+        val info = withTimeout(30_000L) { resolve(candidates, quality, rotate) }
         ResolvedStream(info = info, qualityKbps = info.bitrateKbps ?: quality)
+    }
+
+    /** Drops cached URLs before a retry so an expired URL is not reused. */
+    fun invalidate(candidates: List<StreamCandidate>, qualityKbps: Int? = null) {
+        if (candidates.isEmpty()) return
+        val quality = QualityTiers.normalize(
+            qualityKbps ?: runBlocking { settings.current().qualityKbps },
+        )
+        candidates.forEach { candidate ->
+            cache.remove("${candidate.providerId}:${candidate.providerTrackId}:$quality")
+        }
     }
 
     fun clearCache() = cache.clear()

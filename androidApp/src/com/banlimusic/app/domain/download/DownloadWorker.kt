@@ -3,6 +3,7 @@
  */
 package com.banlimusic.app.domain.download
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.ServiceInfo
@@ -135,7 +136,8 @@ class DownloadWorker(
             val location = publish(tempFile, target, fileName, track)
             tempFile.delete()
             repository.updateProgress(taskId, length, if (latestTotal > 0) latestTotal else length)
-            writeSidecars(container, track, target, fileName, entity)
+            val sidecars = writeSidecars(container, track, target, fileName, entity)
+            recordManifest(container, track, target, fileName, entity, length, quality, sidecars)
             container.cacheRepository.removeTrack(track.id)
             container.cacheRepository.trimTo(settings.cacheMaxBytes)
             repository.updateStatus(taskId, DownloadStatus.COMPLETED, filePath = location)
@@ -235,26 +237,62 @@ class DownloadWorker(
         else -> "audio/mpeg"
     }
 
+    /**
+     * Writes the portable manifest entry so copying the download directory to
+     * another device keeps track metadata, provider sources and lyric text.
+     */
+    private suspend fun recordManifest(
+        container: AppContainer,
+        track: Track,
+        target: DownloadTarget,
+        fileName: String,
+        entity: DownloadTaskEntity,
+        sizeBytes: Long,
+        qualityKbps: Int,
+        sidecars: SidecarResult,
+    ) {
+        runCatching {
+            container.downloadManifestRepository.record(
+                target = target,
+                entry = com.banlimusic.app.core.model.DownloadManifestEntry(
+                    trackId = track.id,
+                    fileName = fileName,
+                    track = track,
+                    qualityKbps = qualityKbps,
+                    downloadedAt = System.currentTimeMillis(),
+                    sizeBytes = sizeBytes,
+                    lyricsText = sidecars.lyricsText,
+                    artworkFileName = sidecars.artworkFileName,
+                ),
+            )
+        }
+    }
+
+    private data class SidecarResult(
+        val lyricsText: String? = null,
+        val artworkFileName: String? = null,
+    )
+
     private suspend fun writeSidecars(
         container: AppContainer,
         track: Track,
         target: DownloadTarget,
         fileName: String,
         entity: DownloadTaskEntity,
-    ) {
-        val directory = when (target) {
-            is DownloadTarget.Directory -> target.directory
-            DownloadTarget.MediaStoreMusic -> File(
-                applicationContext.filesDir,
-                "BanLiMusic/Sidecars",
-            ).apply { mkdirs() }
-        }
+    ): SidecarResult {
         val baseName = fileName.substringBeforeLast('.')
+        var lyricsText: String? = null
         if (entity.downloadLyrics) {
             try {
                 val lyrics = container.musicRepository.lyrics(track)
                 if (lyrics != null && !lyrics.isEmpty) {
-                    File(directory, "$baseName.lrc").writeText(lyrics.raw)
+                    lyricsText = lyrics.raw
+                    writeSidecar(
+                        target = target,
+                        name = "$baseName.lrc",
+                        bytes = lyrics.raw.toByteArray(),
+                        mimeType = "text/plain",
+                    )
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -262,36 +300,101 @@ class DownloadWorker(
                 // Sidecar files are optional; the audio download still succeeds.
             }
         }
+        var artworkName: String? = null
         if (entity.downloadArtwork) {
             try {
                 val artworkUrl = container.musicRepository.artwork(track)
-                if (!artworkUrl.isNullOrBlank()) {
-                    val target = File(directory, "$baseName.jpg")
-                    if (artworkUrl.startsWith("file://")) {
-                        val cached = Uri.parse(artworkUrl).path?.let(::File)
-                        if (cached != null && cached.exists()) {
-                            cached.copyTo(target, overwrite = true)
-                        }
-                    } else {
-                        val request = Request.Builder()
-                            .url(artworkUrl)
-                            .header("User-Agent", JsonHttpClient.USER_AGENT)
-                            .build()
-                        container.downloadHttpClient.newCall(request).execute().use { response ->
-                            if (response.isSuccessful) {
-                                response.body.byteStream().use { input ->
-                                    target.outputStream().use { output ->
-                                        input.copyTo(output)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                val bytes = artworkUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                    readArtwork(container, url)
+                }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    artworkName = "$baseName.jpg"
+                    writeSidecar(target, artworkName, bytes, "image/jpeg")
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Throwable) {
                 // Sidecar files are optional.
+            }
+        }
+        return SidecarResult(lyricsText = lyricsText, artworkFileName = artworkName)
+    }
+
+    private suspend fun readArtwork(container: AppContainer, url: String): ByteArray? =
+        withContext(Dispatchers.IO) {
+            if (url.startsWith("file://")) {
+                val cached = Uri.parse(url).path?.let(::File)
+                return@withContext cached
+                    ?.takeIf { it.exists() }
+                    ?.let { runCatching { it.readBytes() }.getOrNull() }
+            }
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", JsonHttpClient.USER_AGENT)
+                .build()
+            container.downloadHttpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) response.body?.bytes() else null
+            }
+        }
+
+    /** Writes lyric/artwork files next to the audio so a copied folder keeps them. */
+    private fun writeSidecar(
+        target: DownloadTarget,
+        name: String,
+        bytes: ByteArray,
+        mimeType: String,
+    ) {
+        when (target) {
+            is DownloadTarget.Directory -> runCatching {
+                File(target.directory, name).writeBytes(bytes)
+            }
+
+            DownloadTarget.MediaStoreMusic -> writeMediaStoreSidecar(name, bytes, mimeType)
+        }
+    }
+
+    private fun writeMediaStoreSidecar(name: String, bytes: ByteArray, mimeType: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        runCatching {
+            val resolver = applicationContext.contentResolver
+            val collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+            val relativePath = "${Environment.DIRECTORY_MUSIC}/BanLiMusic"
+            resolver.query(
+                collection,
+                arrayOf(MediaStore.Files.FileColumns._ID),
+                "${MediaStore.Files.FileColumns.DISPLAY_NAME} = ? AND " +
+                    "${MediaStore.Files.FileColumns.RELATIVE_PATH} = ?",
+                arrayOf(name, "$relativePath/"),
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    resolver.delete(
+                        ContentUris.withAppendedId(collection, cursor.getLong(0)),
+                        null,
+                        null,
+                    )
+                }
+            }
+            val values = ContentValues().apply {
+                put(MediaStore.Files.FileColumns.DISPLAY_NAME, name)
+                put(MediaStore.Files.FileColumns.MIME_TYPE, mimeType)
+                put(MediaStore.Files.FileColumns.RELATIVE_PATH, relativePath)
+                put(MediaStore.Files.FileColumns.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(collection, values) ?: return@runCatching
+            try {
+                resolver.openOutputStream(uri)?.use { output -> output.write(bytes) }
+                resolver.update(
+                    uri,
+                    ContentValues().apply {
+                        put(MediaStore.Files.FileColumns.IS_PENDING, 0)
+                    },
+                    null,
+                    null,
+                )
+            } catch (error: Throwable) {
+                runCatching { resolver.delete(uri, null, null) }
+                throw error
             }
         }
     }

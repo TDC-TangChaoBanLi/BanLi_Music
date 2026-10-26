@@ -30,6 +30,20 @@ class TrackSorterTest {
     }
 
     @Test
+    fun timeSortsKeepInputOrderAndHaveNoSections() {
+        val tracks = listOf(
+            track("3", "Newest", "A"),
+            track("2", "Middle", "B"),
+            track("1", "Oldest", "C"),
+        )
+
+        assertEquals(tracks, TrackSorter.sort(tracks, TrackSort.RECENT, ascending = true))
+        assertEquals(tracks.reversed(), TrackSorter.sort(tracks, TrackSort.RECENT, ascending = false))
+        assertTrue(TrackSorter.sections(tracks, TrackSort.RECENT).isEmpty())
+        assertTrue(TrackSorter.sections(tracks, TrackSort.CREATED).isEmpty())
+    }
+
+    @Test
     fun descendingSectionsAreReversed() {
         val tracks = listOf(
             track("1", "晴天", "周杰伦"),

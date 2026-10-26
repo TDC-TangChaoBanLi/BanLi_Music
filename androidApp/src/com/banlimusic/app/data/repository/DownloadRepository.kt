@@ -40,6 +40,7 @@ class DownloadRepository(
     private val playbackCache: PlaybackCache,
     private val json: Json,
     private val settings: SettingsRepository,
+    private val manifest: DownloadManifestRepository,
     private val workManager: WorkManager = WorkManager.getInstance(context),
 ) {
 
@@ -200,13 +201,28 @@ class DownloadRepository(
         val entity = dao.getById(id) ?: return
         deleteLocation(entity.filePath)
         deleteTemp(id)
+        removeManifestEntries(listOf(entity))
         dao.delete(id)
     }
 
     suspend fun clearCompleted() {
         val completed = dao.getCompleted()
         completed.forEach { entity -> deleteLocation(entity.filePath) }
+        removeManifestEntries(completed)
         dao.deleteCompleted()
+    }
+
+    /** Keeps the portable manifest in sync when downloads disappear. */
+    private suspend fun removeManifestEntries(entities: List<DownloadTaskEntity>) {
+        if (entities.isEmpty()) return
+        val target = downloadTarget()
+        entities.forEach { entity ->
+            manifest.remove(
+                target = target,
+                trackId = entity.trackId.ifBlank { entity.id.substringBeforeLast('@') },
+                qualityKbps = entity.qualityKbps.takeIf { it > 0 },
+            )
+        }
     }
 
     suspend fun getEntity(id: String): DownloadTaskEntity? = dao.getById(id)
