@@ -50,7 +50,7 @@ BanLiMusic 提供 Android 客户端与 Compose Desktop 桌面端，二者共用 
 ## 下载与安装
 
 - **Android**：支持 Android 8.0（API 26）及以上。发布包命名为 `BanLiMusic-<version>-release.apk`，安装前请在系统中允许来自浏览器的未知来源安装。
-- **桌面端**：Linux x64 便携版 `BanLiMusic-<version>-linux-x64.tar.gz` 内置 runtime，解压即可运行；另提供 Linux/Windows 的 no-jre 版（需 Java 17+）、deb/rpm 与 exe/msi 安装包。详见 [发布与打包](doc/development/release.md#桌面端发布包)。
+- **桌面端**：Linux x64 便携版 `BanLiMusic-<version>-linux-x64.tar.gz` 内置 runtime，解压即可运行；另提供 Linux/Windows 的 no-jre 便携版、no-jre deb/rpm/MSI（需 Java 17+），以及带 runtime 的 deb/rpm 与 exe/msi 安装包。详见 [发布与打包](doc/development/release.md#桌面端发布包)。
 
 ## 数据来源与声明
 
