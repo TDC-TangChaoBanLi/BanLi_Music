@@ -7,12 +7,13 @@
 | 目录 | 作用 |
 | --- | --- |
 | `drawable/` | 矢量图标、通知小图标、播放控制图标、小组件背景与进度条等 XML drawable。 |
-| `drawable-nodpi/` | 不按屏幕密度缩放的位图资源，目前用于应用 LOGO。 |
 | `layout/` | 桌面小组件的 `RemoteViews` 布局。 |
 | `mipmap-anydpi-v26/` | Android 8.0+ 自适应启动图标（普通与圆形）。 |
 | `values/` | 通用颜色、字符串和主题定义。 |
 | `values-night/` | 深色模式下的主题覆盖。 |
 | `xml/` | AppWidgetProvider 的元数据配置。 |
+
+应用内 LOGO（关于页、桌面端窗口与安装包图标）统一来自 `shared/composeResources/drawable/banli_logo.png`，不在 Android `res` 中维护。
 
 ## 文件明细
 
@@ -31,10 +32,6 @@
 - `widget_artwork_placeholder.xml`：小组件没有海报时的占位图形。
 - `widget_bg_dark.xml` / `widget_bg_light.xml`：小组件黑色/白色磨砂背景。
 - `widget_progress.xml`：小组件底部播放进度条背景。
-
-### drawable-nodpi/
-
-- `banli_logo.png`：`BanLiMusic-LOGO.png` 的应用内 LOGO 资源，用于“关于”页面。
 
 ### layout/
 

@@ -477,21 +477,12 @@ private fun SettingsToggleRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                text = description,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
+    com.banlimusic.shared.ui.components.BanLiSettingsSwitchRow(
+        title = title,
+        description = description,
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+    )
 }
 
 @Composable

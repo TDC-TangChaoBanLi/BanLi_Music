@@ -111,7 +111,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -120,7 +119,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.banlimusic.app.R
 import com.banlimusic.app.core.cache.CachedTrack
 import com.banlimusic.app.core.datastore.AppSettings
 import com.banlimusic.app.core.datastore.BOTTOM_NAV_OPTIONS
@@ -144,9 +142,12 @@ import com.banlimusic.app.ui.components.formatBytes
 import com.banlimusic.app.ui.components.qualityLabel
 import com.banlimusic.app.ui.components.qualityShortLabel
 import com.banlimusic.app.widget.PlayerWidgetUpdater
+import com.banlimusic.shared.resources.Res
+import com.banlimusic.shared.resources.banli_logo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.painterResource
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -282,39 +283,12 @@ private fun SettingsHome(onSelect: (SettingsPage) -> Unit) {
 
 @Composable
 private fun SettingsNavRow(page: SettingsPage, onClick: () -> Unit) {
-    Card(
+    com.banlimusic.shared.ui.components.BanLiSettingsNavRow(
+        title = page.title,
+        description = page.description,
         onClick = onClick,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SettingsIcon(page.icon)
-            Spacer(Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = page.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = page.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Icon(
-                imageVector = Icons.Rounded.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+        icon = page.icon,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1641,7 +1615,7 @@ private fun AboutSettings(versionName: String) {
     SettingsCard(title = "关于 BanLiMusic", icon = Icons.Rounded.Info) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Image(
-                painter = painterResource(R.drawable.banli_logo),
+                painter = painterResource(Res.drawable.banli_logo),
                 contentDescription = "BanLiMusic 标志",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -1686,29 +1660,11 @@ private fun SettingsCard(
     icon: ImageVector,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                SettingsIcon(icon)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            content()
-        }
-    }
+    com.banlimusic.shared.ui.components.BanLiSettingsCard(
+        title = title,
+        leading = { SettingsIcon(icon) },
+        content = content,
+    )
 }
 
 @Composable
@@ -1749,27 +1705,13 @@ private fun SettingsSwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
+    com.banlimusic.shared.ui.components.BanLiSettingsSwitchRow(
+        icon = icon,
+        title = title,
+        description = description,
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+    )
 }
 
 @Composable

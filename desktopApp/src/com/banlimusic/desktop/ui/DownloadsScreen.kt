@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -20,10 +21,11 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,13 +37,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.banlimusic.app.domain.sort.TrackSort
+import com.banlimusic.app.domain.sort.TrackSorter
 import com.banlimusic.desktop.data.DesktopDownloadStatus
 import com.banlimusic.desktop.data.DesktopDownloadTask
+import com.banlimusic.shared.ui.components.ListTabLabel
+import com.banlimusic.shared.ui.components.TRACK_LIST_HEADER_ITEM_COUNT
+import com.banlimusic.shared.ui.components.TrackListHeaderSpec
+import com.banlimusic.shared.ui.components.TrackListPanel
+import com.banlimusic.shared.ui.components.TrackScreenHeader
+import com.banlimusic.shared.ui.components.formatBytes
 import java.awt.Desktop
 import java.io.File
+
+private val DOWNLOAD_SORT_OPTIONS = listOf(
+    TrackSort.CREATED,
+    TrackSort.TITLE,
+    TrackSort.ARTIST,
+)
 
 @Composable
 fun DesktopDownloadsScreen(state: DesktopAppState) {
@@ -51,65 +66,102 @@ fun DesktopDownloadsScreen(state: DesktopAppState) {
     val pending = tasks.filter { it.status != DesktopDownloadStatus.COMPLETED }
     var tab by remember { mutableIntStateOf(0) }
     var confirmClear by remember { mutableStateOf(false) }
+    var sort by remember { mutableStateOf(TrackSort.CREATED) }
+    var ascending by remember { mutableStateOf(true) }
+    val completedOrder = remember(completed, sort, ascending) {
+        val order = TrackSorter.sort(completed.map { it.track }, sort, ascending)
+            .map { it.id }
+            .withIndex()
+            .associate { it.value to it.index }
+        completed.sortedBy { order[it.track.id] ?: Int.MAX_VALUE }
+    }
+    val sections = remember(completedOrder, sort) {
+        TrackSorter.sections(completedOrder.map { it.track }, sort).map {
+            it.copy(itemIndex = it.itemIndex + TRACK_LIST_HEADER_ITEM_COUNT)
+        }
+    }
+    val totalBytes = remember(completedOrder) { completedOrder.sumOf { it.totalBytes } }
+    val listState = rememberLazyListState()
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 26.dp, vertical = 20.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "下载",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = "已下载 ${completed.size} 首，队列中 ${pending.size} 项",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+    Column(modifier = Modifier.fillMaxSize()) {
+        TrackScreenHeader(title = "下载") {
             if (completed.isNotEmpty()) {
                 TextButton(onClick = { confirmClear = true }) {
                     Text("清除已下载")
                 }
             }
         }
-        Spacer(Modifier.height(14.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
+        PrimaryTabRow(selectedTabIndex = tab) {
+            Tab(
                 selected = tab == 0,
                 onClick = { tab = 0 },
-                label = { Text("已下载") },
+                text = { ListTabLabel("已下载") },
             )
-            FilterChip(
+            Tab(
                 selected = tab == 1,
                 onClick = { tab = 1 },
-                label = { Text("下载列表") },
+                text = { ListTabLabel("下载列表") },
             )
         }
-        Spacer(Modifier.height(12.dp))
 
-        val visible = if (tab == 0) completed else pending
-        if (visible.isEmpty()) {
-            DesktopEmptyState(
-                title = if (tab == 0) "还没有已下载歌曲" else "没有进行中的下载",
-                description = if (tab == 0) {
-                    "在搜索、音乐库或播放页点击下载按钮，文件会保存到下载目录。"
-                } else {
-                    "下载任务会显示在这里，支持取消和失败重试。"
-                },
-                glyph = "↓",
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 16.dp),
-            ) {
-                items(visible, key = { it.id }) { task ->
-                    DownloadCard(
-                        task = task,
-                        state = state,
-                        categoryLabel = folders[task.track.id],
+        if (tab == 0) {
+            TrackListPanel(
+                items = completedOrder,
+                itemKey = { it.id },
+                validKey = { it.id },
+                spec = TrackListHeaderSpec(
+                    countText = "已下载 ${completedOrder.size} 首 · ${formatBytes(totalBytes)}",
+                    sort = sort,
+                    sortOptions = DOWNLOAD_SORT_OPTIONS,
+                    ascending = ascending,
+                ),
+                listState = listState,
+                sections = sections,
+                ascending = ascending,
+                selectionMode = false,
+                onStartSelection = {},
+                onSelect = {},
+                onSelectAll = {},
+                onCancelSelection = {},
+                onSort = { sort = it },
+                onToggleOrder = { ascending = !ascending },
+                emptyContent = {
+                    DesktopEmptyState(
+                        title = "还没有已下载歌曲",
+                        description = "在搜索、音乐库或播放页点击下载按钮，文件会保存到下载目录。",
                     )
+                },
+                footer = {
+                    Text(
+                        text = "下载目录可在设置中修改；桌面端当前使用 JLayer 播放 MP3。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                },
+                modifier = Modifier.weight(1f),
+            ) { _, task ->
+                DownloadCard(task = task, state = state, categoryLabel = folders[task.track.id])
+            }
+        } else {
+            if (pending.isEmpty()) {
+                DesktopEmptyState(
+                    title = "没有进行中的下载",
+                    description = "下载任务会显示在这里，支持取消和失败重试。",
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    items(pending, key = { it.id }) { task ->
+                        DownloadCard(
+                            task = task,
+                            state = state,
+                            categoryLabel = folders[task.track.id],
+                        )
+                    }
                 }
             }
         }
@@ -142,7 +194,9 @@ private fun DownloadCard(
     categoryLabel: String?,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),

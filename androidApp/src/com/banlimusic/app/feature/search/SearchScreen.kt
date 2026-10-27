@@ -1,58 +1,29 @@
 /**
- * 文件作用：搜索页界面，支持分页、多选、收藏与批量下载。
+ * 文件作用：搜索页的 Android 适配层，提供多选拖拽、收藏/下载操作与平台对话框。
  */
 package com.banlimusic.app.feature.search
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -60,18 +31,15 @@ import com.banlimusic.app.core.datastore.SUPPORTED_SOURCES
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.feature.common.AppViewModelProvider
 import com.banlimusic.app.feature.common.SourcePickerDialog
-import com.banlimusic.app.ui.components.CompactTextButton
-import com.banlimusic.app.ui.components.EmptyState
-import com.banlimusic.app.ui.components.ErrorCard
-import com.banlimusic.app.ui.components.SectionHeader
-import com.banlimusic.app.ui.components.TrackListHeaderSpec
 import com.banlimusic.app.ui.components.TrackRow
-import com.banlimusic.app.ui.components.TrackSelectionActionBar
-import com.banlimusic.app.ui.components.dragSelect
-import com.banlimusic.app.ui.components.rememberSelectionActionsState
-import com.banlimusic.app.ui.components.qualityLabel
-import com.banlimusic.app.ui.components.qualityShortLabel
-import com.banlimusic.app.ui.components.trackListHeader
+import com.banlimusic.shared.ui.components.CompactTextButton
+import com.banlimusic.shared.ui.components.TrackListHeaderSpec
+import com.banlimusic.shared.ui.components.TrackSelectionActionBar
+import com.banlimusic.shared.ui.components.dragSelect
+import com.banlimusic.shared.ui.components.rememberSelectionActionsState
+import com.banlimusic.shared.ui.components.trackListHeader
+import com.banlimusic.shared.ui.screens.BanLiSearchScreen
+import com.banlimusic.shared.ui.screens.SearchUiState
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
@@ -91,7 +59,6 @@ fun SearchScreen(
     val downloadedIds by viewModel.downloadedIds.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val preferredSources by viewModel.preferredSources.collectAsStateWithLifecycle()
-    val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
     val listState = rememberLazyListState()
     val validIds = remember(state.results) { state.results.map { it.id }.toSet() }
@@ -111,217 +78,107 @@ fun SearchScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = state.query,
-            onValueChange = viewModel::onQueryChange,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            placeholder = { Text("搜索歌曲、歌手或专辑") },
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-            trailingIcon = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (state.query.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.onQueryChange("") }) {
-                            Icon(Icons.Rounded.Close, contentDescription = "清空")
-                        }
-                    }
-                    IconButton(
-                        onClick = {
-                            viewModel.submit()
-                            keyboard?.hide()
-                        },
-                        enabled = state.query.isNotBlank() && !state.isSearching,
-                    ) {
-                        Icon(Icons.Rounded.Search, contentDescription = "搜索")
-                    }
-                }
+    val enabledSourceNames = SUPPORTED_SOURCES
+        .filter { it.id in enabledSources }
+        .joinToString("、") { it.label }
+
+    BanLiSearchScreen(
+        state = SearchUiState(
+            query = state.query,
+            results = state.results,
+            loading = state.isSearching,
+            loadingMore = state.isLoadingMore,
+            hasMore = state.hasMore,
+            error = state.error,
+            hasSearched = state.hasSearched,
+            history = history,
+            enabledSourceNames = enabledSourceNames,
+            selectionMode = state.selectionMode,
+            selectedIds = state.selectedIds,
+        ),
+        onQueryChange = viewModel::onQueryChange,
+        onSubmit = viewModel::submit,
+        onRetry = viewModel::retry,
+        onLoadMore = viewModel::loadMore,
+        onHistoryClick = viewModel::useHistory,
+        onClearHistory = viewModel::clearHistory,
+        searchIcon = Icons.Rounded.Search,
+        clearIcon = Icons.Rounded.Close,
+        listState = listState,
+        listModifier = Modifier.dragSelect(
+            enabled = true,
+            listState = listState,
+            validKeys = validIds,
+            onSelect = { id ->
+                if (!state.selectionMode) viewModel.setSelectionMode(true)
+                viewModel.toggleSelection(id)
             },
-            singleLine = true,
-            shape = RoundedCornerShape(18.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
-                onSearch = {
-                    viewModel.submit()
-                    keyboard?.hide()
-                },
-            ),
-        )
-
-        if (state.query.isBlank()) {
-            SearchLanding(
-                history = history,
-                enabledSources = enabledSources,
-                onQueryClick = viewModel::useHistory,
-                onClearHistory = viewModel::clearHistory,
-            )
-            return@Column
-        }
-
-        if (!state.hasSearched && !state.isSearching) {
-            SearchPrompt(
-                query = state.query,
-                onSearch = {
-                    viewModel.submit()
-                    keyboard?.hide()
-                },
-            )
-            return@Column
-        }
-
-        if (state.isSearching && state.results.isNotEmpty()) {
-            LinearProgressIndicator(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp),
-            )
-        }
-
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                state.isSearching && state.results.isEmpty() -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .align(Alignment.Center),
-                        strokeWidth = 3.dp,
-                    )
-                }
-
-                state.error != null && state.results.isEmpty() -> {
-                    ErrorCard(
-                        message = state.error.orEmpty(),
-                        onRetry = viewModel::retry,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
-
-                state.results.isEmpty() -> {
-                    EmptyState(
-                        title = "没有找到相关歌曲",
-                        description = "换个关键词试试，或在设置中启用更多音乐源。",
-                        modifier = Modifier.align(Alignment.Center),
-                    )
-                }
-
-                else -> {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.dragSelect(
-                            enabled = true,
-                            listState = listState,
-                            validKeys = validIds,
-                            onSelect = { id ->
-                                if (!state.selectionMode) viewModel.setSelectionMode(true)
-                                viewModel.toggleSelection(id)
-                            },
-                        ),
-                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        trackListHeader(
-                            spec = TrackListHeaderSpec(
-                                countText = "找到 ${state.results.size} 首",
-                                selectionMode = state.selectionMode,
-                                selectedCount = state.selectedIds.size,
-                            ),
-                            onSelectAll = viewModel::selectAll,
-                            onCancelSelection = viewModel::clearSelection,
-                            countActions = {
-                                if (state.error != null) {
-                                    Text(
-                                        text = "部分来源加载失败",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                }
-                                CompactTextButton(
-                                    text = "选择",
-                                    onClick = { viewModel.setSelectionMode(true) },
-                                )
-                            },
+        ),
+        header = {
+            trackListHeader(
+                spec = TrackListHeaderSpec(
+                    countText = "找到 ${state.results.size} 首",
+                    selectionMode = state.selectionMode,
+                    selectedCount = state.selectedIds.size,
+                ),
+                onSelectAll = viewModel::selectAll,
+                onCancelSelection = viewModel::clearSelection,
+                countActions = {
+                    if (state.error != null) {
+                        Text(
+                            text = "部分来源加载失败",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
                         )
-                        itemsIndexed(
-                            items = state.results,
-                            key = { _, track -> track.id },
-                        ) { index, track ->
-                            TrackRow(
-                                track = track,
-                                onClick = {
-                                    if (state.selectionMode) {
-                                        viewModel.toggleSelection(track.id)
-                                    } else {
-                                        keyboard?.hide()
-                                        onPlayQueue(state.results, index)
-                                    }
-                                },
-                                isFavorite = track.id in state.favoriteIds,
-                                downloaded = track.id in downloadedIds,
-                                categoryLabel = state.favoriteFolders[track.id]?.joinToString(" · "),
-                                preferredProviderId = preferredSources[track.id],
-                                onSourceClick = { sourcePickerTrack = track },
-                                onToggleFavorite = if (state.selectionMode) {
-                                    null
-                                } else {
-                                    { viewModel.toggleFavorite(track) }
-                                },
-                                selected = if (state.selectionMode) {
-                                    track.id in state.selectedIds
-                                } else {
-                                    null
-                                },
-                            )
-                        }
-                        item {
-                            if (state.hasMore) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(8.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    if (state.isLoadingMore) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(24.dp),
-                                            strokeWidth = 2.dp,
-                                        )
-                                    } else {
-                                        TextButton(onClick = viewModel::loadMore) {
-                                            Text("加载更多")
-                                        }
-                                    }
-                                }
-                            } else {
-                                Text(
-                                    text = "已经到底了",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                        Spacer(Modifier.width(4.dp))
                     }
-                }
-            }
-        }
-
-        if (state.selectionMode) {
-            TrackSelectionActionBar(
-                categories = (favoriteCategories + defaultCategory).distinct(),
-                state = selection,
-                onFavorite = { viewModel.batchFavorite(selection.chosenCategories) },
-                onDownload = { viewModel.batchDownload(selection.chosenQuality) },
-                favoriteEnabled = state.selectedIds.isNotEmpty() &&
-                    selection.chosenCategories.isNotEmpty(),
-                downloadEnabled = state.selectedIds.isNotEmpty() &&
-                    selection.qualities.isNotEmpty(),
+                    CompactTextButton(
+                        text = "选择",
+                        onClick = { viewModel.setSelectionMode(true) },
+                    )
+                },
             )
-        }
-    }
+        },
+        selectionBar = if (state.selectionMode) {
+            {
+                TrackSelectionActionBar(
+                    categories = (favoriteCategories + defaultCategory).distinct(),
+                    state = selection,
+                    onFavorite = { viewModel.batchFavorite(selection.chosenCategories) },
+                    onDownload = { viewModel.batchDownload(selection.chosenQuality) },
+                    favoriteEnabled = state.selectedIds.isNotEmpty() &&
+                        selection.chosenCategories.isNotEmpty(),
+                    downloadEnabled = state.selectedIds.isNotEmpty() &&
+                        selection.qualities.isNotEmpty(),
+                )
+            }
+        } else {
+            null
+        },
+        trackRow = { track, index, selected ->
+            TrackRow(
+                track = track,
+                onClick = {
+                    if (state.selectionMode) {
+                        viewModel.toggleSelection(track.id)
+                    } else {
+                        onPlayQueue(state.results, index)
+                    }
+                },
+                isFavorite = track.id in state.favoriteIds,
+                downloaded = track.id in downloadedIds,
+                categoryLabel = state.favoriteFolders[track.id]?.joinToString(" · "),
+                preferredProviderId = preferredSources[track.id],
+                onSourceClick = { sourcePickerTrack = track },
+                onToggleFavorite = if (state.selectionMode) {
+                    null
+                } else {
+                    { viewModel.toggleFavorite(track) }
+                },
+                selected = if (state.selectionMode) selected else null,
+            )
+        },
+    )
 
     sourcePickerTrack?.let { track ->
         SourcePickerDialog(
@@ -333,79 +190,5 @@ fun SearchScreen(
             },
             onDismiss = { sourcePickerTrack = null },
         )
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun SearchPrompt(
-    query: String,
-    onSearch: () -> Unit,
-) {
-    EmptyState(
-        title = "点击搜索",
-        description = "已输入“$query”。确认内容后点击搜索按钮，应用不会自动请求接口。",
-        icon = Icons.Rounded.Search,
-        modifier = Modifier.padding(horizontal = 20.dp),
-    )
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun SearchLanding(
-    history: List<String>,
-    enabledSources: Set<String>,
-    onQueryClick: (String) -> Unit,
-    onClearHistory: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp),
-    ) {
-        if (history.isNotEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "搜索历史",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onClearHistory) { Text("清空") }
-            }
-            Spacer(Modifier.height(4.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                history.forEach { query ->
-                    AssistChip(
-                        onClick = { onQueryClick(query) },
-                        label = { Text(query) },
-                    )
-                }
-            }
-        } else {
-            EmptyState(
-                title = "搜索音乐",
-                description = "输入歌名、歌手或专辑，结果会自动合并并去重。",
-                icon = Icons.Rounded.Search,
-            )
-        }
-
-        Spacer(Modifier.height(24.dp))
-        val names = SUPPORTED_SOURCES.filter { it.id in enabledSources }.joinToString("、") { it.label }
-        if (names.isNotBlank()) {
-            Text(
-                text = "已启用音源：$names",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "输入完成后点击搜索或键盘搜索键；应用不会自动发起请求。GD 音乐台限制每 5 分钟 50 次请求。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-            )
-        }
     }
 }

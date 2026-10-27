@@ -32,9 +32,93 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.banlimusic.app.player.PlaybackUiState
+import com.banlimusic.shared.ui.components.BanLiPlaybackBar
 
 @Composable
 fun MiniPlayer(
+    state: PlaybackUiState,
+    onClick: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onPrevious: () -> Unit = {},
+    isFavorite: Boolean = false,
+    onToggleFavorite: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val track = state.currentTrack ?: return
+    val fraction = if (state.durationMs > 0) {
+        (state.positionMs.toFloat() / state.durationMs.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    BanLiPlaybackBar(
+        title = state.title ?: track.title,
+        subtitle = state.artist ?: track.artistLine,
+        progress = fraction,
+        artwork = { artworkModifier ->
+            TrackArtwork(
+                track = track,
+                artworkUrl = state.artworkUrl,
+                modifier = artworkModifier,
+                cornerRadius = 9.dp,
+            )
+        },
+        onClick = onClick,
+        controls = {
+            IconButton(
+                onClick = onToggleFavorite,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = if (isFavorite) {
+                        Icons.Rounded.Favorite
+                    } else {
+                        Icons.Rounded.FavoriteBorder
+                    },
+                    contentDescription = if (isFavorite) "取消收藏" else "收藏",
+                    tint = if (isFavorite) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            IconButton(
+                onClick = onPrevious,
+                enabled = state.hasPrevious,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.SkipPrevious,
+                    contentDescription = "上一首",
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            IconButton(onClick = onTogglePlayPause, modifier = Modifier.size(42.dp)) {
+                Icon(
+                    imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = if (state.isPlaying) "暂停" else "播放",
+                )
+            }
+            IconButton(
+                onClick = onNext,
+                enabled = state.hasNext,
+                modifier = Modifier.size(38.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.SkipNext,
+                    contentDescription = "下一首",
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        },
+        modifier = modifier,
+    )
+}
+
+@Composable
+fun LegacyMiniPlayer(
     state: PlaybackUiState,
     onClick: () -> Unit,
     onTogglePlayPause: () -> Unit,

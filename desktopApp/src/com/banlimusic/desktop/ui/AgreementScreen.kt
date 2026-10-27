@@ -27,9 +27,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.banlimusic.shared.ui.agreement.BanLiAgreementScreen
 
 @Composable
 fun DesktopAgreementScreen(onAccept: () -> Unit, onExit: () -> Unit) {
+    BanLiAgreementScreen(
+        onAccept = onAccept,
+        onExit = onExit,
+        platformSections = {
+            Spacer(Modifier.height(12.dp))
+            AgreementTitle("桌面端说明")
+            AgreementText(
+                "桌面端复用 Android 端的共享核心，目前支持搜索、收藏和 MP3 播放" +
+                    "（标准/较高/高品音质）。无损音质需要后续接入新的解码后端。",
+            )
+            AgreementText(
+                "桌面端的收藏与缓存分别位于用户配置目录和缓存目录；删除这些目录会清除对应数据。",
+            )
+        },
+    )
+}
+
+@Composable
+private fun LegacyDesktopAgreementScreen(onAccept: () -> Unit, onExit: () -> Unit) {
     var accepted by remember { mutableStateOf(false) }
 
     Column(

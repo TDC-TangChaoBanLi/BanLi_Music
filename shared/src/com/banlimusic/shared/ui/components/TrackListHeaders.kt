@@ -1,7 +1,7 @@
 /**
  * 文件作用：提供可复用的列表头部插件（数量行、排序行、二级分类行）与折叠逻辑。
  */
-package com.banlimusic.app.ui.components
+package com.banlimusic.shared.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween

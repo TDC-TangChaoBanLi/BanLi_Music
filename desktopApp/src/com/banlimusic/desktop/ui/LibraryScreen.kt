@@ -1,9 +1,6 @@
 package com.banlimusic.desktop.ui
 
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,14 +8,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,15 +26,33 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.banlimusic.app.core.model.Track
+import com.banlimusic.app.domain.sort.TrackSort
+import com.banlimusic.app.domain.sort.TrackSorter
 import com.banlimusic.desktop.DesktopPaths
 import com.banlimusic.desktop.data.DesktopDownloadStatus
+import com.banlimusic.desktop.data.DesktopSettingsRepository
+import com.banlimusic.shared.ui.components.CompactTextButton
+import com.banlimusic.shared.ui.components.ListTabLabel
+import com.banlimusic.shared.ui.components.TRACK_LIST_HEADER_ITEM_COUNT
+import com.banlimusic.shared.ui.components.TrackListHeaderSpec
+import com.banlimusic.shared.ui.components.TrackListPanel
+import com.banlimusic.shared.ui.components.TrackScreenHeader
+import com.banlimusic.shared.ui.components.NewCategoryDialog
+import com.banlimusic.shared.ui.components.TrackSelectionActionBar
+import com.banlimusic.shared.ui.components.rememberSelectionActionsState
+import com.banlimusic.shared.ui.components.rememberTrackSelectionState
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
 import javax.swing.JFileChooser
+
+private val LIBRARY_SORT_OPTIONS = listOf(
+    TrackSort.TITLE,
+    TrackSort.ARTIST,
+    TrackSort.CREATED,
+)
 
 @Composable
 fun DesktopLibraryScreen(state: DesktopAppState) {
@@ -54,10 +68,13 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(0) }
     var folderFilter by remember { mutableStateOf<String?>(null) }
+    var sort by remember { mutableStateOf(TrackSort.TITLE) }
+    var ascending by remember { mutableStateOf(true) }
+    var showClearLocal by remember { mutableStateOf(false) }
     var showNewCategory by remember { mutableStateOf(false) }
     var infoTrack by remember { mutableStateOf<Track?>(null) }
-    var showClearLocal by remember { mutableStateOf(false) }
     val selection = rememberTrackSelectionState()
+    val listState = rememberLazyListState()
 
     val favoriteIds = favorites.mapTo(mutableSetOf()) { it.id }
     val downloadedIds = downloads
@@ -85,7 +102,22 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
             }
         }
     }
-    val selectedTracks = visible.filter { it.id in selection.selectedIds }
+    val sorted = remember(visible, sort, ascending) {
+        TrackSorter.sort(visible, sort, ascending)
+    }
+    val sections = remember(sorted, sort) {
+        TrackSorter.sections(sorted, sort).map {
+            it.copy(itemIndex = it.itemIndex + TRACK_LIST_HEADER_ITEM_COUNT)
+        }
+    }
+    val selectedTracks = sorted.filter { it.id in selection.selectedIds }
+    val actionsState = rememberSelectionActionsState(
+        selectionMode = selection.mode,
+        selectedIds = selection.selectedIds,
+        tracks = sorted,
+        defaultCategory = settings.defaultFavoriteCategory,
+        downloadQualities = { DesktopSettingsRepository.DESKTOP_QUALITIES },
+    )
     val localDirectory = settings.localMusicDirectory.ifBlank {
         DesktopPaths.localMusicDir.toString()
     }
@@ -93,67 +125,45 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
     LaunchedEffect(filter, query, folderFilter) {
         selection.exit()
     }
-    LaunchedEffect(visible) {
-        selection.retain(visible.mapTo(mutableSetOf()) { it.id })
+    LaunchedEffect(sorted) {
+        selection.retain(sorted.mapTo(mutableSetOf()) { it.id })
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 26.dp, vertical = 20.dp)) {
-        Text(
-            text = "音乐库",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "收藏 ${favorites.size} 首，最近播放 ${history.size} 首，本地 ${localTracks.size} 首",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
+    Column(modifier = Modifier.fillMaxSize()) {
+        TrackScreenHeader(title = "音乐库") {
+            Text(
+                text = "收藏 ${favorites.size} · 最近 ${history.size} · 本地 ${localTracks.size}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        PrimaryTabRow(selectedTabIndex = filter) {
+            Tab(
                 selected = filter == 0,
                 onClick = {
                     filter = 0
                     folderFilter = null
                 },
-                label = { Text("我的收藏") },
+                text = { ListTabLabel("收藏") },
             )
-            FilterChip(
+            Tab(
                 selected = filter == 1,
                 onClick = { filter = 1 },
-                label = { Text("最近播放") },
+                text = { ListTabLabel("最近播放") },
             )
-            FilterChip(
+            Tab(
                 selected = filter == 2,
                 onClick = { filter = 2 },
-                label = { Text("本地") },
+                text = { ListTabLabel("本地") },
             )
         }
 
-        if (filter == 0 && categories.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    selected = folderFilter == null,
-                    onClick = { folderFilter = null },
-                    label = { Text("全部收藏夹") },
-                )
-                categories.forEach { category ->
-                    FilterChip(
-                        selected = folderFilter == category,
-                        onClick = { folderFilter = category },
-                        label = { Text(category) },
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -171,25 +181,19 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = if (query.isBlank()) "共 ${visible.size} 首" else "匹配 ${visible.size} 首",
+                text = if (query.isBlank()) "共 ${sorted.size} 首" else "匹配 ${sorted.size} 首",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.weight(1f))
-            if (visible.isNotEmpty()) {
-                TextButton(
-                    onClick = {
-                        if (selection.mode) selection.exit() else selection.enter()
-                    },
-                ) {
-                    Text(if (selection.mode) "取消选择" else "选择")
-                }
-            }
         }
 
         if (filter == 2) {
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     text = "目录：$localDirectory",
                     modifier = Modifier.weight(1f),
@@ -215,7 +219,10 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
                 ) { Text("清空") }
             }
             if (state.localScanning) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     CircularProgressIndicator(modifier = Modifier.height(18.dp).width(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("正在扫描本地音乐…", style = MaterialTheme.typography.labelSmall)
@@ -224,85 +231,131 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
             state.localScanError?.let { error ->
                 Text(
                     text = error,
+                    modifier = Modifier.padding(horizontal = 20.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                 )
             }
         }
 
-        if (selection.mode) {
-            Spacer(Modifier.height(8.dp))
-            TrackSelectionBar(
-                selection = selection,
-                selectableIds = visible.map { it.id },
-                categories = categories,
-                onFavorite = { category ->
-                    state.addTracksToCategory(selectedTracks, category)
-                    selection.exit()
+        TrackListPanel(
+            items = sorted,
+            itemKey = { it.id },
+            validKey = { it.id },
+            spec = TrackListHeaderSpec(
+                countText = when (filter) {
+                    0 -> "收藏 ${sorted.size} 首"
+                    1 -> "最近播放 ${sorted.size} 首"
+                    else -> "本地 ${sorted.size} 首"
                 },
-                onCreateCategory = { showNewCategory = true },
-                onDownload = { quality ->
-                    state.downloadTracks(selectedTracks, quality)
-                    selection.exit()
-                },
-                initialQuality = settings.downloadQualityKbps,
-                allowDownload = filter != 2,
-            )
-        }
-
-        Spacer(Modifier.height(10.dp))
-        if (visible.isEmpty()) {
-            DesktopEmptyState(
-                title = when {
-                    filter == 0 && favorites.isEmpty() -> "还没有收藏歌曲"
-                    filter == 0 -> "该收藏夹没有歌曲"
-                    filter == 1 && history.isEmpty() -> "还没有播放记录"
-                    filter == 2 && localTracks.isEmpty() -> "还没有扫描本地音乐"
-                    else -> "没有匹配的歌曲"
-                },
-                description = when {
-                    filter == 2 && localTracks.isEmpty() ->
-                        "选择音乐目录并扫描后，本地歌曲会显示在这里。"
-                    filter == 0 && favorites.isEmpty() ->
-                        "在搜索结果中点击心形图标即可加入桌面音乐库。"
-                    filter == 1 && history.isEmpty() -> "播放歌曲后会自动记录在这里。"
-                    else -> "试试更短的关键词或切换栏目。"
-                },
-                glyph = "♫",
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(bottom = 12.dp),
-            ) {
-                items(visible, key = { it.id }) { track ->
-                    DesktopTrackRow(
-                        track = track,
-                        loader = state.container.artworkLoader,
-                        allowRemoteArtwork = settings.requestListArtwork,
-                        favorite = track.id in favoriteIds,
-                        current = playback.track?.id == track.id,
-                        onPlay = {
-                            if (selection.mode) selection.toggle(track.id)
-                            else state.play(track, visible)
-                        },
-                        onToggleFavorite = { state.toggleFavorite(track) },
-                        onDownload = if (filter == 2) null else {
-                            { state.download(track) }
-                        },
-                        showFavorite = filter == 1,
-                        downloaded = track.id in downloadedIds,
-                        categoryLabel = folders[track.id],
-                        selected = if (selection.mode) track.id in selection.selectedIds else null,
-                        onInfo = if (filter == 2) {
-                            { infoTrack = track }
-                        } else {
-                            null
+                selectionMode = selection.mode,
+                selectedCount = selection.selectedIds.size,
+                sort = sort,
+                sortOptions = LIBRARY_SORT_OPTIONS,
+                ascending = ascending,
+                categories = if (filter == 0) categories else null,
+                selectedCategory = folderFilter,
+                allCategoryLabel = "全部收藏夹",
+            ),
+            listState = listState,
+            sections = sections,
+            ascending = ascending,
+            selectionMode = selection.mode,
+            onStartSelection = selection::enter,
+            onSelect = selection::toggle,
+            onSelectAll = { selection.selectAll(sorted.map { it.id }) },
+            onCancelSelection = selection::exit,
+            onSort = { sort = it },
+            onToggleOrder = { ascending = !ascending },
+            onCategory = { folderFilter = it },
+            modifier = Modifier.weight(1f),
+            countActions = {
+                if (sorted.isNotEmpty()) {
+                    CompactTextButton(
+                        text = "选择",
+                        onClick = {
+                            selection.enter()
+                            selection.selectAll(sorted.map { it.id })
                         },
                     )
                 }
-            }
+                CompactTextButton(
+                    text = "新建收藏夹",
+                    onClick = { showNewCategory = true },
+                )
+            },
+            emptyContent = {
+                DesktopEmptyState(
+                    title = when {
+                        filter == 0 && favorites.isEmpty() -> "还没有收藏歌曲"
+                        filter == 0 -> "该收藏夹没有歌曲"
+                        filter == 1 && history.isEmpty() -> "还没有播放记录"
+                        filter == 2 && localTracks.isEmpty() -> "还没有扫描本地音乐"
+                        else -> "没有匹配的歌曲"
+                    },
+                    description = when {
+                        filter == 2 && localTracks.isEmpty() ->
+                            "选择音乐目录并扫描后，本地歌曲会显示在这里。"
+                        filter == 0 && favorites.isEmpty() ->
+                            "在搜索结果中点击心形图标即可加入桌面音乐库。"
+                        filter == 1 && history.isEmpty() -> "播放歌曲后会自动记录在这里。"
+                        else -> "试试更短的关键词或切换栏目。"
+                    },
+                )
+            },
+            selectionBar = {
+                TrackSelectionActionBar(
+                    categories = categories,
+                    state = actionsState,
+                    onFavorite = {
+                        val categoriesToAdd = actionsState.chosenCategories.ifEmpty {
+                            setOf(settings.defaultFavoriteCategory)
+                        }
+                        categoriesToAdd.forEach { category ->
+                            state.addTracksToCategory(selectedTracks, category)
+                        }
+                        selection.exit()
+                    },
+                    onDownload = {
+                        state.downloadTracks(
+                            selectedTracks,
+                            actionsState.chosenQuality ?: settings.downloadQualityKbps,
+                        )
+                        selection.exit()
+                    },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    favoriteEnabled = selectedTracks.isNotEmpty() &&
+                        actionsState.chosenCategories.isNotEmpty(),
+                    downloadEnabled = filter != 2 &&
+                        selectedTracks.isNotEmpty() &&
+                        actionsState.qualities.isNotEmpty(),
+                )
+            },
+        ) { _, track ->
+            DesktopTrackRow(
+                track = track,
+                loader = state.container.artworkLoader,
+                allowRemoteArtwork = settings.requestListArtwork,
+                favorite = track.id in favoriteIds,
+                current = playback.track?.id == track.id,
+                onPlay = {
+                    if (selection.mode) selection.toggle(track.id)
+                    else state.play(track, sorted)
+                },
+                onToggleFavorite = { state.toggleFavorite(track) },
+                onDownload = if (filter == 2) null else {
+                    { state.download(track) }
+                },
+                showFavorite = filter == 1,
+                downloaded = track.id in downloadedIds,
+                categoryLabel = folders[track.id],
+                selected = if (selection.mode) track.id in selection.selectedIds else null,
+                onInfo = if (filter == 2) {
+                    { infoTrack = track }
+                } else {
+                    null
+                },
+            )
         }
     }
 
@@ -312,8 +365,10 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
             onCreate = { name ->
                 showNewCategory = false
                 state.createFavoriteCategory(name) { category ->
-                    state.addTracksToCategory(selectedTracks, category)
-                    selection.exit()
+                    if (selectedTracks.isNotEmpty()) {
+                        state.addTracksToCategory(selectedTracks, category)
+                        selection.exit()
+                    }
                 }
             },
         )
@@ -329,7 +384,10 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
                     Text("歌手：${track.artistLine}")
                     track.album?.title?.let { Text("专辑：$it") }
                     Text("文件：${file?.absolutePath ?: "未知"}")
-                    Text("URI：${file?.toURI() ?: "未知"}", style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        "URI：${file?.toURI() ?: "未知"}",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
             },
             confirmButton = {

@@ -1,7 +1,7 @@
 /**
  * 文件作用：把列表头部、A-Z 索引、拖拽多选与底部操作栏组合成可复用列表面板。
  */
-package com.banlimusic.app.ui.components
+package com.banlimusic.shared.ui.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope

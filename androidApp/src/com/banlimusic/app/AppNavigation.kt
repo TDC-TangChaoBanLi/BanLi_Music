@@ -11,27 +11,14 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -61,6 +48,11 @@ import com.banlimusic.app.feature.search.SearchScreen
 import com.banlimusic.app.feature.settings.SettingsScreen
 import com.banlimusic.app.ui.components.LocalRequestListArtwork
 import com.banlimusic.app.ui.components.MiniPlayer
+import com.banlimusic.shared.ui.navigation.BanLiAppShell
+import com.banlimusic.shared.ui.navigation.BanLiBarPosition
+import com.banlimusic.shared.ui.navigation.BanLiDestination
+import com.banlimusic.shared.ui.navigation.BanLiNavigationLayout
+import com.banlimusic.shared.ui.navigation.BanLiNavigationSide
 import kotlinx.coroutines.launch
 
 object Routes {
@@ -187,117 +179,54 @@ fun AppRoot(
     CompositionLocalProvider(
         LocalRequestListArtwork provides settings.requestListArtwork,
     ) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val isTablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
-            if (isTablet) {
-                val navOnRight = settings.tabletNavPosition == TabletNavPosition.RIGHT
-                val miniPlayerAtTop =
-                    settings.tabletMiniPlayerPosition == TabletMiniPlayerPosition.TOP
-                Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
-                    ) {
-                        if (showNavigation && !navOnRight) {
-                            TabletNavigationRail(
-                                destinations = destinations,
-                                currentRoute = currentRoute,
-                                onNavigate = ::navigateTo,
-                            )
-                        }
-                        Column(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .weight(1f),
-                        ) {
-                            if (showNavigation && miniPlayerAtTop) {
-                                miniPlayer()
-                            }
-                            AppNavHost(
-                                navController = navController,
-                                playQueue = ::playQueue,
-                                navigateTopLevel = ::navigateTo,
-                                onExitApp = onExitApp,
-                                navOrder = destinations.map { it.route },
-                                startDestination = startDestination,
-                                verticalTransitions = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                            )
-                            if (showNavigation && !miniPlayerAtTop) {
-                                miniPlayer()
-                            }
-                        }
-                        if (showNavigation && navOnRight) {
-                            TabletNavigationRail(
-                                destinations = destinations,
-                                currentRoute = currentRoute,
-                                onNavigate = ::navigateTo,
-                            )
-                        }
-                    }
-                }
-            } else {
-                Scaffold(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    bottomBar = {
-                        if (showNavigation) {
-                            Column {
-                                miniPlayer()
-                                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                                    destinations.forEach { destination ->
-                                        NavigationBarItem(
-                                            selected = currentRoute == destination.route,
-                                            onClick = { navigateTo(destination.route) },
-                                            icon = {
-                                                Icon(
-                                                    destination.icon,
-                                                    contentDescription = destination.label,
-                                                )
-                                            },
-                                            label = { Text(destination.label) },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    },
-                ) { padding ->
-                    AppNavHost(
-                        navController = navController,
-                        playQueue = ::playQueue,
-                        navigateTopLevel = ::navigateTo,
-                        onExitApp = onExitApp,
-                        navOrder = destinations.map { it.route },
-                        startDestination = startDestination,
-                        verticalTransitions = false,
-                        modifier = Modifier.padding(padding),
-                    )
-                }
+        val configuration = LocalConfiguration.current
+        val isTablet = configuration.smallestScreenWidthDp >= 600
+        val sharedDestinations = remember(destinations) {
+            destinations.map { destination ->
+                BanLiDestination(
+                    route = destination.route,
+                    label = destination.label,
+                    icon = destination.icon,
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun TabletNavigationRail(
-    destinations: List<BottomDestination>,
-    currentRoute: String,
-    onNavigate: (String) -> Unit,
-) {
-    NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
-        destinations.forEach { destination ->
-            NavigationRailItem(
-                selected = currentRoute == destination.route,
-                onClick = { onNavigate(destination.route) },
-                icon = {
-                    Icon(destination.icon, contentDescription = destination.label)
-                },
-                label = { Text(destination.label) },
-            )
-        }
+        BanLiAppShell(
+            destinations = sharedDestinations,
+            currentRoute = currentRoute,
+            onNavigate = ::navigateTo,
+            navigationLayout = if (isTablet) {
+                BanLiNavigationLayout.SIDE
+            } else {
+                BanLiNavigationLayout.BOTTOM
+            },
+            showNavigation = showNavigation,
+            navigationSide = if (settings.tabletNavPosition == TabletNavPosition.RIGHT) {
+                BanLiNavigationSide.END
+            } else {
+                BanLiNavigationSide.START
+            },
+            navigationContainerColor = MaterialTheme.colorScheme.surface,
+            playerBar = if (showNavigation) miniPlayer else null,
+            playerBarPosition = if (
+                settings.tabletMiniPlayerPosition == TabletMiniPlayerPosition.TOP
+            ) {
+                BanLiBarPosition.TOP
+            } else {
+                BanLiBarPosition.BOTTOM
+            },
+            content = {
+                AppNavHost(
+                    navController = navController,
+                    playQueue = ::playQueue,
+                    navigateTopLevel = ::navigateTo,
+                    onExitApp = onExitApp,
+                    navOrder = destinations.map { it.route },
+                    startDestination = startDestination,
+                    verticalTransitions = isTablet,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            },
+        )
     }
 }
 

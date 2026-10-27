@@ -52,6 +52,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.banlimusic.app.core.common.TextNormalizer
 import com.banlimusic.app.core.model.Track
+import com.banlimusic.shared.ui.components.BanLiBadge
+import com.banlimusic.shared.ui.components.BanLiEmptyState
+import com.banlimusic.shared.ui.components.BanLiErrorCard
+import com.banlimusic.shared.ui.components.BanLiSettingsCard
+import com.banlimusic.shared.ui.components.BanLiTrackRow
+import com.banlimusic.shared.ui.components.formatPlaybackTime as sharedFormatPlaybackTime
 import java.util.Locale
 
 /** Icons missing from the small material-icons-core artifact. */
@@ -83,10 +89,7 @@ object DesktopIcons {
     }
 }
 
-fun formatPlaybackTime(millis: Long): String {
-    val totalSeconds = (millis / 1000).coerceAtLeast(0)
-    return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
-}
+fun formatPlaybackTime(millis: Long): String = sharedFormatPlaybackTime(millis)
 
 fun formatBytes(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
@@ -179,77 +182,58 @@ fun DesktopTrackRow(
     } else {
         MaterialTheme.colorScheme.surfaceContainerLow
     }
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onPlay),
-        shape = RoundedCornerShape(12.dp),
-        color = background,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (selected != null) {
-                Checkbox(
-                    checked = selected,
-                    onCheckedChange = null,
-                    modifier = Modifier.size(36.dp),
-                )
-                Spacer(Modifier.width(2.dp))
-            }
+    val subtitle = buildString {
+        append(track.artistLine)
+        track.album?.title?.takeIf { it.isNotBlank() }?.let {
+            append(" - ")
+            append(it)
+        }
+    }
+    BanLiTrackRow(
+        title = track.title,
+        subtitle = subtitle,
+        artwork = { modifier ->
             DesktopTrackArtwork(
                 track = track,
                 loader = loader,
                 allowRemote = allowRemoteArtwork,
-                modifier = Modifier.size(52.dp),
+                modifier = modifier,
             )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = track.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+        },
+        onClick = onPlay,
+        selected = selected,
+        containerColor = background,
+        shape = RoundedCornerShape(12.dp),
+        badges = {
+            track.sources.firstOrNull()?.let { source ->
+                BanLiBadge(
+                    text = desktopProviderLabel(source.providerId),
+                    modifier = Modifier.padding(end = 5.dp),
                 )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = buildString {
-                        append(track.artistLine)
-                        track.album?.title?.takeIf { it.isNotBlank() }?.let {
-                            append(" - ")
-                            append(it)
-                        }
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(3.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    track.sources.firstOrNull()?.let { source ->
-                        RowBadge(desktopProviderLabel(source.providerId))
-                    }
-                    if (downloaded) {
-                        RowBadge("已下载", highlighted = true)
-                    }
-                    categoryLabel?.takeIf { it.isNotBlank() }?.let {
-                        RowBadge(it, highlighted = true)
-                    }
-                    if (current) {
-                        Text(
-                            text = "正在播放",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
             }
+            if (downloaded) {
+                BanLiBadge(
+                    text = "已下载",
+                    modifier = Modifier.padding(end = 5.dp),
+                    highlighted = true,
+                )
+            }
+            categoryLabel?.takeIf { it.isNotBlank() }?.let {
+                BanLiBadge(
+                    text = it,
+                    modifier = Modifier.padding(end = 5.dp),
+                    highlighted = true,
+                )
+            }
+            if (current) {
+                Text(
+                    text = "正在播放",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        },
+        trailing = {
             Spacer(Modifier.width(10.dp))
             Text(
                 text = TextNormalizer.formatDurationMs(track.durationMs),
@@ -289,8 +273,8 @@ fun DesktopTrackRow(
             TextButton(onClick = onPlay) {
                 Text("播放")
             }
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -318,25 +302,10 @@ fun DesktopEmptyState(
     description: String,
     glyph: String = "♪",
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 60.dp, horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(
-            text = glyph,
-            fontSize = 36.sp,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(5.dp))
-        Text(
-            text = description,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    BanLiEmptyState(
+        title = title,
+        description = description,
+    )
 }
 
 @Composable
@@ -344,27 +313,7 @@ fun DesktopErrorBanner(
     message: String,
     onRetry: (() -> Unit)? = null,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-        ),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = message,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            if (onRetry != null) {
-                TextButton(onClick = onRetry) { Text("重试") }
-            }
-        }
-    }
+    BanLiErrorCard(message = message, onRetry = onRetry)
 }
 
 @Composable
@@ -373,25 +322,15 @@ fun SettingsCard(
     glyph: String,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(glyph, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            content()
-        }
-    }
+    BanLiSettingsCard(
+        title = title,
+        leading = {
+            Text(
+                text = glyph,
+                fontSize = 18.sp,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        },
+        content = content,
+    )
 }

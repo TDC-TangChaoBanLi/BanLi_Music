@@ -21,9 +21,75 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.banlimusic.shared.ui.components.BanLiPlaybackBar
 
 @Composable
 fun DesktopPlayerBar(state: DesktopAppState) {
+    val playback by state.playback.collectAsState()
+    val track = playback.track ?: return
+    BanLiPlaybackBar(
+        title = track.title,
+        subtitle = track.artistLine,
+        progress = playback.progress,
+        artwork = { artworkModifier ->
+            DesktopTrackArtwork(
+                track = track,
+                loader = state.container.artworkLoader,
+                allowRemote = true,
+                modifier = artworkModifier,
+                cornerRadius = 9.dp,
+            )
+        },
+        onClick = state::openPlayer,
+        controls = {
+            TextButton(onClick = state.container.player::previous) {
+                Text("◀◀", style = MaterialTheme.typography.labelLarge)
+            }
+            TextButton(
+                onClick = state.container.player::togglePause,
+                enabled = !playback.loading,
+            ) {
+                Text(
+                    text = if (playback.playing) "暂停" else "播放",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            TextButton(onClick = { state.container.player.next() }) {
+                Text("▶▶", style = MaterialTheme.typography.labelLarge)
+            }
+            TextButton(onClick = state.container.player::cyclePlayMode) {
+                Text(playback.playMode.label, style = MaterialTheme.typography.labelSmall)
+            }
+            TextButton(onClick = state.container.player::stop) {
+                Text("停止", style = MaterialTheme.typography.labelSmall)
+            }
+        },
+        extraInfo = {
+            when {
+                playback.loading -> Text(
+                    text = "正在解析播放地址…",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                playback.error != null -> Text(
+                    text = playback.error.orEmpty(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                playback.queue.size > 1 -> Text(
+                    text = "队列 ${playback.index + 1} / ${playback.queue.size}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    )
+}
+
+@Composable
+fun LegacyDesktopPlayerBar(state: DesktopAppState) {
     val playback by state.playback.collectAsState()
     val track = playback.track ?: return
 

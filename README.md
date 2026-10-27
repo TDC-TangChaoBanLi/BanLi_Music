@@ -1,407 +1,58 @@
 # BanLiMusic
 
-一个按“可长期演进的多来源音乐客户端”设计的 Android 应用骨架。当前接入 GD 音乐台（music.gdstudio.xyz）作为示例来源，未来可替换为自建音乐服务器，而不需要重写 UI 和播放器。
+一个按“多来源、可长期演进”设计的音乐客户端。当前接入 **GD 音乐台**（music.gdstudio.xyz）作为示例来源，未来可替换为自建音乐服务器或本地音乐，而不需要重写界面和播放器。
 
-## 已实现
+BanLiMusic 提供 Android 客户端与 Compose Desktop 桌面端，二者共用 Kotlin Multiplatform 核心。产品介绍与使用说明见本文；架构、构建、发布等开发文档见 [doc/](doc/README.md)。
 
-- **统一音乐模型**：`Track`、`TrackSource`、`TrackAction`，应用 ID（内容哈希生成，跨来源稳定）与来源 ID 分离。
-- **`MusicProvider` 抽象**：GD 的 netease / joox / bilibili 是同一后端下的三个来源实例；可继续新增自建来源。
-- **搜索**：手动触发、取消过期请求、分页、可配置每页数量、多来源并发搜索、跨来源合并去重、相关度排序、结果多选/全选收藏或下载。
-- **限流**：共享的 5 分钟滑动窗口限流器 + 并发调度器；请求上限可配置（最高 50），GD 音乐台请求间隔强制至少 1 秒，429 冷却与 `Retry-After` 处理。
-- **播放**：AndroidX Media3 `MediaSessionService`、后台播放、通知栏/锁屏媒体控制、队列、循环/随机；失败恢复由播放服务负责，按 2/4/8/16 秒退避重试、限流时按 `Retry-After` 等待，可配置重试次数与连续失败停止阈值，连续失败会发送系统通知并停止。
-- **已下载优先**：构建播放队列时自动查找已完成的下载文件，优先使用本地音频。
-- **懒加载播放地址**：媒体 URI 中只保存候选来源，ExoPlayer 在真正播放时解析 URL 并缓存 5 分钟；失败时按设置重试，并可自动轮转到这首歌的其他来源（可在设置中关闭）。
-- **歌词**：全屏播放器左滑进入歌词页，切歌与回到前台时自动请求，失败按设置退避重试；可设置默认显示歌词。
-- **用户协议**：首次启动必须阅读并同意用户协议及 GD 音乐台声明后才能进入主界面。
-- **个人音乐库与搜索**：Room 持久化收藏、播放历史、搜索历史；一首歌可以同时属于多个收藏夹，收藏页支持新建/删除收藏夹、分类筛选、按名称/歌手/专辑升降排序、JSON 导入导出（覆盖或追加）。音乐库右上角支持本地搜索并自动聚焦输入框，可搜索歌名、专辑名、歌手名，并按收藏/最近播放/本地与下载筛选，搜索结果支持多选收藏/下载；下载页同样支持搜索时自动聚焦与结果多选；收藏夹、最近播放、本地与下载、搜索结果均提供右侧 #A-Z 索引（逆序时同步反转），长按拖动可快速滚动到对应首字母；列表头部统一为“数量行（固定）→ 排序 → 二级分类”，滚动时只折叠排序与分类；最近播放支持按播放时间排序，收藏夹管理支持拖动排序且默认收藏夹不可删除，新建收藏夹追加到最右。
-- **本地音乐**：通过 MediaStore 手动或按设置自动导入本地音频，不复制原始文件；已下载完成的歌曲自动加入本地列表，长按可查看所在目录或 URI。
-- **下载与缓存**：WorkManager + 断点续传（Range）、暂停/继续/取消/重试、进度持久化、前台进度通知、完成校验；Android 10+ 默认通过 MediaStore 写入系统 `Music/BanLiMusic`，可设置下载目录、默认下载音质，以及是否同时下载歌词/海报。播放缓存使用稳定 key + Room 索引，可分别查看歌曲、海报、歌词和其他缓存大小，自定义上限（50 MB–2 GB），查看缓存歌曲详细列表并转换为下载；下载完成后自动清除该歌曲的播放缓存。已下载列表只显示标准/较高/高品/无损档位，并支持搜索、排序与批量选择；下载完成后会在下载目录写入 `banli-downloads.json` 清单（歌曲信息、来源、歌词文本与海报文件名），在其他设备上可通过“已下载 → 导入清单”把歌曲、歌词和来源注册回来。列表页默认只读取已缓存海报，可在“下载与缓存”设置中开启列表页主动请求海报；开启“播放时自动加载海报”后，切歌时会为系统媒体控件与桌面小组件补全当前海报。清理全部缓存、分类缓存或单首缓存歌曲前都会弹出二次确认。
-- **桌面小组件**：平台 `RemoteViews` 实现 3x1 与 4x1 两种可调单行尺寸；显示标题、歌手、封面（大号）、收藏（4x1）、播放控制，进度条固定在组件底部并留出圆角间距，支持黑色/白色/跟随系统的半透明磨砂风格。播放中按 0.5 秒采样并按经过时间插值进度，通过 `partiallyUpdateAppWidget` 局部刷新图标/文本/进度，避免整层 RemoteViews 替换造成的延迟；服务被回收后会尝试恢复上次队列。小组件按钮通过透明 Activity + MediaController 执行，兼容对 PendingIntent/Broadcast 支持不佳的启动器。
-- **系统媒体控制**：Media3 通知/任务栏播放控件通过自定义 SessionCommand 提供收藏与播放顺序按钮；收藏图标随当前歌曲状态切换，播放顺序按钮在随机播放、列表循环、单曲循环之间切换并同步图标。
-- **界面**：Jetpack Compose + Material 3，首页、搜索、音乐库、下载、设置、全屏播放器、歌词页；从非首页顶层页面按返回退出后，再次启动会恢复离开前的页面；手机使用底部导航，平板使用 NavigationRail（可设置左右侧，切换页面时上下滑动）；平板小播放器可设置位于内容上方或下方（默认下方）；平板横屏播放页左侧为海报与播放控件、右侧为歌词，竖屏与手机一致使用左右滑动分页。
-- **设置**：二级菜单分类为外观、播放、播放源、下载与缓存、音乐库与收藏、云同步、关于；桌面小组件并入外观；外观支持在关闭动态取色后自定义主题颜色（7 个预设色块或 1 个自定义颜色，支持色相与饱和度调节）；底部导航 5 个栏目全部保留、仅可排序，并可设置默认栏目；平板布局可设置侧边导航栏左右位置与小播放器上下位置；播放音质统一放在“播放”设置中，使用标准/较高/高品/无损四档，来源档位不足时映射、多于四档时舍弃；GD 音乐台作为播放源模块，预留自定义 API 来源设置（名称/代码、曲目 ID、音质、搜索/取流/歌词/海报参数映射，暂不发起请求）；每个设置项均有图标。
-- **OneDrive 云同步（可选）**：使用自己的个人 Microsoft 账号登录，把收藏夹与收藏歌曲双向同步到 OneDrive 的 `Apps/BanLiMusic/library.json`。授权码 + PKCE、系统浏览器回调、独立 Graph 限流器、eTag 并发控制、删除墓碑与双向合并；令牌使用 Android Keystore 加密保存在 `noBackupFilesDir`。支持手动同步、启动时检查与 WorkManager 定期同步。
-- **跨平台与桌面端**：`shared/`（Kotlin Multiplatform：Android + JVM）承载模型、Provider、GD 客户端、限流、解析、排序等核心；`desktopApp/`（Compose Desktop）已实现首页、手动搜索与搜索历史、收藏夹分类、最近播放、本地音乐扫描、多选批量收藏/下载、下载管理、MP3 播放、歌词/播放队列、缓存、主题和来源设置。桌面端当前使用 JLayer 解码 MP3，暂不提供无损音质；自动更新仍留待后续。
-- **测试**：去重算法、限流器、LRC 解析、来源 URI 编解码、音质档位映射、收藏 JSON v1/v2 兼容、收藏双向合并（墓碑/冲突/复活）、Room v4→v5 迁移、PKCE、Graph 客户端（MockWebServer）、GD 响应解析与 MockWebServer 集成测试、时间排序、来源轮转与下载清单合并，共 89 个 JVM 单元测试。
-- **开发约束**：`AGENTS.md` 记录多来源扩展、包体积控制、限流、数据库迁移和 UI 约定。
+## 界面预览
 
-## 开发环境
+### 导航栏各页面
 
-### 已验证环境
+<p>
+  <img src="doc/picture/五个导航栏页面.jpg" alt="五个导航栏页面" width="540" />
+</p>
 
-| 项目 | 版本 / 路径 |
-| --- | --- |
-| 操作系统 | Fedora Linux 44（Workstation Edition），x86_64 |
-| JDK | OpenJDK 25.0.4.1（Red Hat build） |
-| `JAVA_HOME` | `/usr/lib/jvm/java-25-openjdk` |
-| Android SDK | `~/Softwares/AndroidSDK` |
-| SDK Platform | `android-37.0` |
-| SDK Build Tools | `37.0.0` |
-| 构建工具 | Kotlin Toolchain CLI 0.13.0（`abc7a5f`，2026-10-01） |
-| Kotlin | 2.4.21 |
-| KSP | 2.3.12（Kotlin Toolchain 默认） |
-| Compose BOM | 2026.09.00 |
-| Room | 2.8.5 |
-| Media3 | 1.11.1 |
-| JVM target | 17 |
-| compileSdk / targetSdk / minSdk | 37 / 37 / 26 |
-| applicationId / namespace | `com.banlimusic.app` |
-| 推荐 IDE | VS Code + Kotlin 扩展（`fwcd.kotlin`） |
+### 播放与歌词页面
 
-### 安装前的系统依赖
+<p>
+  <img src="doc/picture/播放与歌词页面.jpg" alt="播放与歌词页面" width="360" />
+</p>
 
-Kotlin Toolchain wrapper 只依赖常见的命令行工具（`curl` 或 `wget`、`tar`、`sha256sum` 或 `shasum`）；Android 构建需要 JDK 17 及以上，本项目使用 JDK 25。首次安装 Toolchain、SDK 和依赖缓存建议预留至少 5 GB 磁盘空间。
+### 桌面小组件与系统媒体控制
 
-Fedora：
+<p>
+  <img src="doc/picture/桌面小组件.jpg" alt="桌面小组件" width="180" />
+  <img src="doc/picture/系统媒体状态.jpg" alt="系统媒体状态" width="180" />
+</p>
 
-```bash
-sudo dnf install -y java-25-openjdk-devel curl wget tar unzip coreutils
-```
+### 功能演示
 
-Debian / Ubuntu（仓库中没有 JDK 25 时，改用下一节的 Temurin 或 SDKMAN）：
+<p>
+  <img src="doc/picture/音乐库列表演示.gif" alt="音乐库列表演示" width="180" />
+  <img src="doc/picture/播放与歌词演示.gif" alt="播放与歌词演示" width="180" />
+  <img src="doc/picture/主题调色演示.gif" alt="主题调色演示" width="180" />
+</p>
 
-```bash
-sudo apt update
-sudo apt install -y openjdk-25-jdk curl wget tar unzip coreutils
-```
+## 功能亮点
 
-验证：
+- **多来源搜索**：同一关键字并发搜索多个来源，跨来源合并去重并按相关度排序；结果支持多选收藏或下载。
+- **稳定播放**：基于 Media3 的后台播放、通知栏/锁屏控制、播放队列、循环与随机；播放失败自动退避重试，可轮转到同一首歌的其他来源。
+- **已下载优先**：构建播放队列时优先使用本地已下载文件，断网也能播放。
+- **歌词**：全屏播放器左滑进入歌词页，切歌与回到前台时自动请求，支持默认显示歌词。
+- **个人音乐库**：收藏夹、最近播放、本地音乐与下载统一管理；一首歌可同时属于多个收藏夹，支持 JSON 导入导出、A-Z 快速索引、搜索与批量操作。
+- **本地音乐**：通过 MediaStore 导入本地音频，不复制原始文件；已下载完成的歌曲自动加入本地列表。
+- **下载与缓存**：断点续传、暂停/继续/取消/重试、前台进度通知；支持选择音质、下载歌词与海报，生成可迁移的 `banli-downloads.json` 清单；播放缓存可分类查看与清理。
+- **桌面小组件**：3x1 / 4x1 两种尺寸，显示封面、标题、歌手、收藏与播放控制，支持磨砂配色与平滑进度刷新。
+- **个性化**：动态取色或自定义主题色、底部导航排序、平板侧边导航与小播放器位置、手机/平板自适应布局。
+- **可选云同步**：使用个人 Microsoft 账号把收藏夹与收藏歌曲双向同步到 OneDrive，不经过开发者服务器。
+- **桌面端**：复用共享核心与共享 UI，提供首页、搜索、收藏夹、最近播放、本地音乐、下载管理、MP3 播放、歌词、缓存与设置。
 
-```bash
-java -version
-javac -version
-```
+## 下载与安装
 
-设置 `JAVA_HOME`（路径按实际安装位置修改）：
+- **Android**：支持 Android 8.0（API 26）及以上。发布包命名为 `BanLiMusic-<version>-release.apk`，安装前请在系统中允许来自浏览器的未知来源安装。
+- **桌面端**：Linux x64 便携版 `BanLiMusic-<version>-linux-x64.tar.gz` 内置 runtime，解压即可运行；另提供 Linux/Windows 的 no-jre 版（需 Java 17+）、deb/rpm 与 exe/msi 安装包。详见 [发布与打包](doc/development/release.md#桌面端发布包)。
 
-```bash
-export JAVA_HOME=/usr/lib/jvm/java-25-openjdk
-export PATH="$JAVA_HOME/bin:$PATH"
-```
-
-> `androidApp/module.yaml` 中声明了 `jvm.jdk.version: 25`、`selectionMode: auto`。如果本机只安装了 JDK 17/21，请安装 JDK 25，或把该值改成已安装的版本。
-
-### 其他 JDK 安装方式
-
-如果发行版仓库没有合适的 JDK，可以使用 Eclipse Temurin 或 SDKMAN：
-
-- Temurin 下载页：<https://adoptium.net/temurin/releases/?version=25>
-- SDKMAN：
-
-```bash
-curl -s "https://get.sdkman.io" | bash
-source "$HOME/.sdkman/bin/sdkman-init.sh"
-sdk list java            # 查看可用的 25.x 标识
-sdk install java <版本标识>
-```
-
-安装后确认 `java -version` 输出 25.x，并确保 `JAVA_HOME` 指向该 JDK。
-
-### 安装 Kotlin Toolchain
-
-推荐使用官方一键安装脚本。当前脚本会安装 Kotlin CLI **0.13.0** 到 `~/.local/bin`，自动加入 `PATH`，并首次执行一次 `kotlin --version` 触发 Toolchain 分发包下载。
-
-Linux / macOS：
-
-```bash
-curl -fsSL https://kotl.in/install.sh | sh
-```
-
-Windows PowerShell：
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm 'https://kotl.in/install.ps1' | iex"
-```
-
-> 如果希望在执行前审查脚本，可先下载：`curl -fsSL https://kotl.in/install.sh -o install.sh`，确认内容后再运行 `sh install.sh`。
-
-重新打开终端后验证：
-
-```bash
-kotlin --version
-```
-
-脚本行为：
-
-- 安装 wrapper 到 `~/.local/bin/kotlin`（Windows 为 `%USERPROFILE%\.local\bin\kotlin.bat`）。
-- 自动把 `~/.local/bin` 写入当前 shell 的配置文件（zsh 为 `.zshrc` / `.zprofile`；bash 在 Linux 为 `.bashrc` / `.profile`，macOS 为 `.bash_profile` / `.profile`）；设置 `KOTLIN_CLI_NO_MODIFY_PATH=1` 可跳过。
-- 通过 `KOTLIN_CLI_DOWNLOAD_ROOT` 可指定镜像下载源。
-- 分发包约 400 MB，缓存在：
-
-| 系统 | 缓存目录 |
-| --- | --- |
-| Linux | `~/.cache/JetBrains/Kotlin/cli/kotlin-cli-0.13.0` |
-| macOS | `~/Library/Caches/JetBrains/Kotlin/cli/kotlin-cli-0.13.0` |
-| Windows | `%LOCALAPPDATA%\JetBrains\Kotlin\cli\kotlin-cli-0.13.0` |
-
-> 本项目自带的 `./kotlin`（Linux/macOS）和 `kotlin.bat`（Windows）wrapper 同样固定 0.13.0，首次构建会自动完成相同的下载和校验，因此**不执行全局安装也能直接构建**。全局安装适合希望在任意目录直接使用 `kotlin` 命令的场景。
-
-相关环境变量：
-
-| 变量 | 作用 |
-| --- | --- |
-| `KOTLIN_CLI_DOWNLOAD_ROOT` | 覆盖下载源（Maven 布局），默认 `https://packages.jetbrains.team/maven/p/amper/amper` |
-| `KOTLIN_CLI_BOOTSTRAP_CACHE_DIR` | 覆盖 Toolchain 缓存目录 |
-| `KOTLIN_CLI_NO_MODIFY_PATH` | 安装脚本不修改 `PATH`（仅一键安装脚本使用） |
-| `KOTLIN_CLI_JAVA_HOME` | 运行 Toolchain CLI 自身的 JRE，不影响应用的编译目标 |
-| `KOTLIN_CLI_JAVA_OPTIONS` | 传给 Toolchain CLI JVM 的参数 |
-
-### 安装 Android SDK
-
-本项目只需要 Android SDK 命令行工具，不需要安装完整的 Android Studio。如果已经安装 Android Studio，也可以在 **SDK Manager** 中勾选 Android 37.0、Build-Tools 37.0.0 和 Platform-Tools，效果与下面的命令行安装相同。
-
-#### 1. 下载命令行工具
-
-官方页面：<https://developer.android.com/studio#command-line-tools-only>
-
-当前最新为 **Command-line Tools 23.0**（2026-10 查询）：
-
-| 平台 | 下载地址 |
-| --- | --- |
-| Linux x86_64 | <https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip> |
-| Windows x86_64 | <https://dl.google.com/android/repository/commandlinetools-win-16111833_latest.zip> |
-| macOS Intel | <https://dl.google.com/android/repository/commandlinetools-mac_x86_64-16111833_latest.zip> |
-| macOS Apple Silicon | <https://dl.google.com/android/repository/commandlinetools-mac_arm64-16111833_latest.zip> |
-
-> `16111833` 是构建号。若链接失效，请以官方页面或 <https://dl.google.com/android/repository/repository2-3.xml> 中 `cmdline-tools;latest` 的地址为准。
-
-#### 2. 解压到标准目录
-
-标准目录结构是 `<SDK>/cmdline-tools/latest/`，`sdkmanager` 通过它推断 SDK 根目录；如果使用其他目录名，调用时需要显式传入 `--sdk_root`：
-
-```bash
-export ANDROID_HOME="$HOME/Softwares/AndroidSDK"
-mkdir -p "$ANDROID_HOME/cmdline-tools"
-
-unzip commandlinetools-linux-16111833_latest.zip -d /tmp/android-cmdline-tools
-mv /tmp/android-cmdline-tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
-
-export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
-sdkmanager --version
-```
-
-如果只需要 `adb`，也可以直接下载 platform-tools：
-
-- Linux：<https://dl.google.com/android/repository/platform-tools-latest-linux.zip>
-- macOS：<https://dl.google.com/android/repository/platform-tools-latest-darwin.zip>
-- Windows：<https://dl.google.com/android/repository/platform-tools-latest-windows.zip>
-
-#### 3. 接受许可并安装组件
-
-```bash
-yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses
-
-sdkmanager --sdk_root="$ANDROID_HOME" \
-  "platform-tools" \
-  "platforms;android-37.0" \
-  "build-tools;37.0.0"
-```
-
-注意平台包名是 `platforms;android-37.0`（带 `.0`），对应 `compileSdk = 37`。`build-tools` 中提供 `aapt2`、`d8`、`zipalign`、`apksigner` 等打包/签名工具。
-
-验证：
-
-```bash
-adb version
-sdkmanager --sdk_root="$ANDROID_HOME" --list_installed
-"$ANDROID_HOME/build-tools/37.0.0/apksigner" version
-```
-
-#### 4. 可选：安装模拟器
-
-```bash
-sdkmanager --sdk_root="$ANDROID_HOME" \
-  "emulator" \
-  "system-images;android-37.0;google_apis_ps16k;x86_64"
-
-echo no | avdmanager create avd \
-  -n BanLiMusic_API37 \
-  -k "system-images;android-37.0;google_apis_ps16k;x86_64"
-
-emulator -avd BanLiMusic_API37
-```
-
-使用真机时，开启开发者选项与 USB 调试，连接后执行 `adb devices` 确认设备可见。Linux 上如果显示 `no permissions`，请按官方文档配置 udev 规则：<https://developer.android.com/studio/run/device#setting-up>。
-
-### 环境变量与本地配置
-
-建议写入 shell 配置（`~/.bashrc` 或 `~/.zshrc`）：
-
-```bash
-export JAVA_HOME=/usr/lib/jvm/java-25-openjdk
-export ANDROID_HOME="$HOME/Softwares/AndroidSDK"
-export ANDROID_SDK_ROOT="$ANDROID_HOME"   # 兼容仍读取旧变量的工具，可选
-export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
-```
-
-- `local.properties`：保存 `sdk.dir`，不提交 Git；Kotlin Toolchain 的 Android 构建会读取它。`ANDROID_HOME` 已设置时可省略。
-
-  ```properties
-  sdk.dir=/home/<user>/Softwares/AndroidSDK
-  ```
-
-  Windows 路径需要转义：
-
-  ```properties
-  sdk.dir=C\:\\Users\\<user>\\AppData\\Local\\Android\\Sdk
-  ```
-
-- `.vscode/settings.json`：把上述路径注入 VS Code 终端，避免每次手动 export。该文件被 Git 跟踪，里面的绝对路径是示例，克隆后请改成自己的实际路径。
-- VS Code 扩展：安装 Kotlin 语言支持（扩展 ID `fwcd.kotlin`，提供补全、跳转、诊断等），构建和测试仍以 `./kotlin` 命令为准。
-- 项目自带 `./kotlin`（Linux/macOS）和 `kotlin.bat`（Windows）wrapper；首次运行会下载并校验 Kotlin Toolchain 0.13.0，详见上一节。
-
-### 首次构建与网络说明
-
-- `androidApp/module.yaml` 已将默认 Google Maven 仓库覆盖为 `https://dl.google.com/dl/android/maven2`，避免本机无法访问 `maven.google.com` 时反复超时。
-- Kotlin Toolchain 的 Android 打包阶段会在内部生成临时 Gradle 工程，通过 Gradle 9.5.0 + AGP 9.3.1 完成 APK/AAB。项目仓库不维护 Gradle 文件，日常只需使用 `./kotlin` 命令。
-- 首次 Android 打包会下载 Gradle 9.5.0；如果 `services.gradle.org` 较慢，可预先从腾讯镜像 `https://mirrors.cloud.tencent.com/gradle/gradle-9.5.0-bin.zip` 下载并放入 `~/.gradle/wrapper/dists/gradle-9.5.0-bin/` 对应缓存目录。缓存完成后可离线构建。
-
-### 构建与测试
-
-```bash
-./kotlin build                 # 编译并生成 APK
-./kotlin test                  # 运行 JVM 单元测试
-./kotlin package -m androidApp # 生成发布 AAB（可选）
-./kotlin run -m androidApp     # 安装并运行到已连接的设备/模拟器
-```
-
-当前 debug APK 输出路径为 `build/tasks/_androidApp_buildAndroidDebug/gradle-project-debug.apk`（该路径可能随 Toolchain 版本调整，以命令输出为准）。
-
-首次构建需要下载依赖与工具链组件。Android SDK 路径来自 `local.properties` 或 `ANDROID_HOME`。新增 `shared/`、`desktopApp/` 等模块时，需要把目录名加入 `project.yaml` 的 `modules` 列表。
-
-### 发布 APK
-
-`./kotlin build -v release` 会生成未签名的 release APK：
-
-```text
-build/tasks/_androidApp_buildAndroidRelease/gradle-project-release-unsigned.apk
-```
-
-使用 Android SDK 的 `apksigner` 签名（示例）：
-
-```bash
-apksigner sign \
-  --ks "/home/fiveages/文档/BanLiMusic/keystore/release.keystore" \
-  --ks-pass "file:/home/fiveages/文档/BanLiMusic/keystore/keystore.pass" \
-  --ks-key-alias banlimusic \
-  --out "dist/BanLiMusic-<version>-release.apk" \
-  build/tasks/_androidApp_buildAndroidRelease/gradle-project-release-unsigned.apk
-```
-
-本次已在 `dist/BanLiMusic-<version>-release.apk` 生成签名 APK；签名密钥保存在本机 `/home/fiveages/文档/BanLiMusic/keystore/`（`release.keystore` 与 `keystore.pass`），未提交到仓库。正式发布时请使用你自己的长期 release keystore，并妥善备份。
-
-## 架构
-
-```
-project.yaml                  Kotlin Toolchain 模块清单
-libs.versions.toml            依赖版本目录
-shared/                       KMP 共享核心（android + jvm）
-  module.yaml
-  src/
-    com/banlimusic/app/
-      core/model              Track、来源、播放/下载信息模型
-      core/common             错误、文本规范化、TTL 缓存、LRC、A-Z 首字母
-      core/limiter            滑动窗口限流、请求调度
-      core/datastore          设置模型、ProviderSettings、自定义来源预留模型
-      core/network            OkHttp + kotlinx.serialization
-      data/source             MusicProvider 接口、GD 适配器
-      domain/playback         候选来源 URI 编解码、LRC 解析
-      domain/search           标题版本识别与跨来源去重
-      domain/sort             名称/歌手/专辑排序与 A-Z 分组
-desktopApp/                   Compose Desktop 桌面端
-  module.yaml
-  src/main.kt                 窗口与 NavigationRail
-  src/com/banlimusic/desktop/
-    data/                     设置、收藏夹/历史/本地音乐、下载、缓存、仓库
-    player/                   JLayer MP3 播放引擎
-    ui/                       首页、搜索、音乐库、下载、设置、播放页
-androidApp/
-  module.yaml                 android/app 构建配置
-  src/
-    AndroidManifest.xml
-    com/banlimusic/app/
-      core/
-        database/             Room 实体、DAO、v3→v4 缓存索引迁移
-        datastore/            DataStore 设置存储与旧键迁移
-        cache/                播放缓存、元数据缓存、缓存索引与分类统计
-      data/
-        repository/           搜索聚合、播放地址、收藏/历史、下载任务
-      domain/
-        download/             下载状态机与 WorkManager Worker
-        playback/             流地址解析
-      player/                 Media3 服务、队列持久化、收藏自定义命令
-      feature/                Compose 页面与 ViewModel
-      widget/                 RemoteViews 小组件、封面位图缓存
-      ui/                     主题、通用组件与 A-Z 索引条
-  res/
-  test/
-  schemas/                    Room schema 历史
-```
-
-跨平台代码位于 `shared/`（`kmp/lib`，platforms `android` + `jvm`），与平台无关的模型、Provider、GD 客户端、限流、文本/歌词解析、去重、URI 编解码、排序与首字母索引已下沉。`desktopApp/`（`jvm/app` + Compose Desktop）复用共享核心，使用 Compose Desktop + JLayer 实现桌面 UI 与 MP3 播放；设置使用系统 Preferences，收藏/历史和下载任务使用 JSON 文件。由于共享模块当前允许使用 `java.*` API，它面向 Android/JVM，不包含 iOS 目标。
-
-桌面端运行：
-
-```bash
-./kotlin build -m desktopApp
-./kotlin run -m desktopApp
-```
-
-Windows x64 便携版产物为 `dist/BanLiMusic-<version>-windows-x64.zip`，包含：
-
-- `BanLiMusic.exe`：Launch4j 生成的 Windows 启动器（未签名）
-- `app/`：应用 classpath 与依赖，包含 Windows Skiko 原生库
-- `runtime/`：BellSoft Liberica JRE 21（Windows x64）
-- `BanLiMusic.bat` / `BanLiMusic-console.bat`：启动器被安全软件拦截时的备用入口
-- `README.txt`、`THIRD_PARTY_NOTICES.txt` 和 `.zip.sha256`
-
-该包可以在 Linux/WSL 内交叉生成，不依赖 Windows 主机或 Wine；`desktopApp/module.yaml` 同时保留 Linux 与 Windows 的 Compose Desktop 原生运行时。由于 Amper 的 executable jar 会对不同 group 下同名的 `runtime-desktop` 做文件名去重，Windows 包使用普通 classpath 启动器，而不是 Spring Boot 可执行 jar。
-
-关键原则：
-
-1. UI 只依赖 `MusicRepository`，不直接访问 GD API。
-2. 播放状态以 Media3 Player/MediaSession 为唯一事实来源，播放页、通知栏、小组件共享它。
-3. 播放地址延迟解析；媒体 URI 中携带完整候选来源列表，由 `ResolvingDataSource` 在播放线程解析并缓存。
-4. 去重规则集中在 `TrackMerger`，有独立单元测试，可随需求调整。
-
-## OneDrive 云同步（可选）
-
-收藏夹与收藏歌曲可以双向同步到用户自己的 OneDrive，不经过开发者服务器。
-
-- 数据位置：Graph `special/approot` 下的 `library.json`（即 `Apps/BanLiMusic/library.json`），只申请 `Files.ReadWrite.AppFolder` 与 `User.Read`，适用于个人 Microsoft 账号。
-- 登录：OAuth 2.0 授权码 + PKCE，系统浏览器完成授权；refresh token 使用 Android Keystore 加密保存在 `noBackupFilesDir`，不进入系统备份。
-- 合并：按收藏夹/归属关系的 `updatedAt` 双向合并，删除写入墓碑（保留 180 天）；上传使用 eTag + `If-Match`，遇到 412 会自动重新拉取并合并重试。
-- 触发：设置页“立即同步”、应用启动（开启自动同步且距上次超过 30 分钟）与 WorkManager 定期任务（1–168 小时）。
-
-### OneDrive 应用 ID（公开标识，不是密钥）
-
-仓库内的 `OneDriveConfig.CLIENT_ID` 固定为官方应用注册的 Application (client) ID：
-
-`188469c5-9b63-49a9-8449-ea8fea226247`
-
-它是公开标识符，会随 APK 分发，也会出现在授权 URL 中，**不属于机密**。本项目不包含 client secret；真正需要保密的是用户令牌与签名密钥。
-
-该 ID 与下面这组注册信息绑定：
-
-- 包名：`com.banlimusic.app`
-- 官方 release 签名 SHA-1：`02BEA47D976FE59D383BA6CD6B0A3153FA621A3C`
-- 签名哈希（Base64）：`Ar6kfZdv5Z04O6bNawoxU/piGjw=`
-- 回调 URI：`msauth://com.banlimusic.app/Ar6kfZdv5Z04O6bNawoxU%2FpiGjw%3D`
-
-Entra 会在 `/authorize` 阶段校验回调 URI。**如果你用另一把签名密钥构建，应用计算出的回调 URI 与注册值不一致，登录会被拒绝（AADSTS50011），这个 client ID 对你的构建不可用。** 如果你同时修改了 `REDIRECT_HOST`（通常随包名变化），也需要重新注册。
-
-#### 自行构建 / Fork 时
-
-1. 在自己的 Entra 租户注册应用，Supported account types 选择“仅个人 Microsoft 账号”。
-2. Authentication → Add a platform → Android，填写你的包名与签名 SHA-1；设置页“云同步”会显示当前 APK 的包名、SHA-1 十六进制指纹、Base64 签名哈希与回调 URI，可直接复制。
-3. API permissions 添加 Delegated 权限 `Files.ReadWrite.AppFolder`、`User.Read`，并授予用户同意；不要创建 client secret。
-4. 把 `androidApp/src/com/banlimusic/app/core/sync/OneDriveConfig.kt` 中的 `CLIENT_ID` 替换为你自己的 Application (client) ID。留空也可以：云同步页会显示“尚未配置”并给出回调信息，但无法登录。
-5. 调试包若使用默认 debug 签名，需要单独注册 debug 的 SHA-1，或像本项目 release 流程一样用正式 keystore 重签。
-6. 用注册时的签名安装后，在 设置 → 云同步 中登录。签名变化，或修改了 `REDIRECT_HOST` 时，需要在 Entra 中更新 Android 平台配置。
-
-> 官方 ID 只用于官方签名分发的 APK；公开在仓库中是刻意为之，方便审计与自行构建，不需要按密钥处理。
-
-## API 与声明
+## 数据来源与声明
 
 音乐数据来自 **GD 音乐台（music.gdstudio.xyz）**，API 由 GD Studio 提供，采用 CC BY-NC 4.0 许可。
 
@@ -412,9 +63,20 @@ Entra 会在 `/authorize` 阶段校验回调 URI。**如果你用另一把签名
 
 ## 已知限制
 
-- 尚未实现独立歌单（收藏夹已支持一首歌属于多个夹）、账号体系与自建服务器适配器；OneDrive 同步目前仅 Android 端。
-- 列表页默认不主动请求专辑封面（播放页会加载并缓存），可在“下载与缓存”设置中开启；开启后会占用 5 分钟 50 次的 API 请求额度。
-- Android 10+ 默认通过 MediaStore 写入系统 `Music/BanLiMusic`；自定义目录不可写或旧系统会回退到应用外部音乐目录。卸载应用不会自动删除已写入系统媒体库的文件。
-- 4x1 桌面小组件会加载封面；封面由服务端/播放页缓存提供，失败时显示占位图。
+- 尚未实现独立歌单、账号体系与自建服务器适配器；OneDrive 同步目前仅 Android 端。
+- 列表页默认不主动请求专辑封面，可在“下载与缓存”设置中开启；开启后会占用 5 分钟 50 次的 API 请求额度。
 - 中文 A-Z 首字母使用轻量 GB2312 映射，多音字和生僻字可能出现近似结果。
 - 已在真机验证主要播放、下载与小组件流程；不同厂商桌面和系统版本仍需分别验证。
+
+完整功能清单与限制见 [功能现状与已知限制](doc/features.md)。
+
+## 开发文档
+
+- [开发文档索引](doc/README.md)
+- [架构说明](doc/architecture.md)
+- [功能现状](doc/features.md)
+- [开发环境](doc/development/environment.md)
+- [构建与测试](doc/development/build.md)
+- [发布与打包](doc/development/release.md)
+- [OneDrive 云同步](doc/cloud-sync.md)
+- [GD 音乐台 API 参考](GD_MUSIC_API.md)

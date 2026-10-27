@@ -1,39 +1,28 @@
 /**
- * 文件作用：全屏播放器界面，包含海报、歌词、收藏与下载操作。
+ * 文件作用：播放页的 Android 适配层，提供 Media3 状态、图标控制与平台菜单。
  */
 package com.banlimusic.app.feature.player
 
 import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -45,76 +34,44 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.Player
-import com.banlimusic.app.core.common.LrcLine
-import com.banlimusic.app.core.model.Lyrics
 import com.banlimusic.app.core.model.TrackAction
-import com.banlimusic.app.domain.playback.LrcParser
-import com.banlimusic.app.domain.playback.stripTimestamps
 import com.banlimusic.app.feature.common.AppViewModelProvider
 import com.banlimusic.app.feature.common.SourcePickerDialog
 import com.banlimusic.app.player.PlaybackUiState
-import com.banlimusic.app.ui.components.EmptyState
-import com.banlimusic.app.ui.components.TrackArtwork
-import com.banlimusic.app.ui.components.formatPlaybackTime
-import com.banlimusic.app.ui.components.qualityLabel
 import com.banlimusic.app.ui.components.NON_PROVIDER_SOURCE_IDS
+import com.banlimusic.app.ui.components.TrackArtwork
+import com.banlimusic.app.ui.components.qualityLabel
 import com.banlimusic.app.ui.components.sourceDisplayNameAnnotated
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import kotlin.math.abs
-
-@OptIn(ExperimentalMaterial3Api::class)
+import com.banlimusic.shared.ui.screens.BanLiNowPlayingScreen
+import com.banlimusic.shared.ui.screens.NowPlayingLayout
+import com.banlimusic.shared.ui.screens.NowPlayingUiState
 @Composable
 fun PlayerScreen(
     onBack: () -> Unit,
@@ -129,33 +86,31 @@ fun PlayerScreen(
     val preferredSources by viewModel.preferredSources.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val pagerState = rememberPagerState(
-        initialPage = if (appSettings.defaultShowLyrics) 1 else 0,
-        pageCount = { 2 },
-    )
+    val activeTrack = state.currentTrack
+    val configuration = LocalConfiguration.current
+    val twoPane = configuration.smallestScreenWidthDp >= 600 &&
+        configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     var showCategoryDialog by rememberSaveable { mutableStateOf(false) }
     var newCategory by rememberSaveable { mutableStateOf("") }
     var downloadQuality by rememberSaveable(appSettings.downloadQualityKbps) {
         mutableStateOf(appSettings.downloadQualityKbps)
     }
     var downloadQualities by remember { mutableStateOf<List<Int>>(emptyList()) }
-    val track = state.currentTrack
-    val configuration = LocalConfiguration.current
-    val isTablet = configuration.smallestScreenWidthDp >= 600
-    // Tablets in landscape show the poster/controls and lyrics side by side;
-    // tablets in portrait keep the phone pager.
-    val twoPanePlayer = isTablet &&
-        configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var sourcePickerTrack by remember { mutableStateOf<com.banlimusic.app.core.model.Track?>(null) }
 
     BackHandler { onBack() }
 
-    LaunchedEffect(track?.id) {
-        downloadQualities = if (track == null) emptyList() else viewModel.downloadQualities()
+    LaunchedEffect(activeTrack?.id) {
+        downloadQualities = if (activeTrack == null) {
+            emptyList()
+        } else {
+            viewModel.downloadQualities()
+        }
         if (downloadQuality !in downloadQualities) {
             downloadQuality = downloadQualities.firstOrNull() ?: 0
         }
     }
-
     LaunchedEffect(message) {
         message?.let {
             snackbarHostState.showSnackbar(it)
@@ -168,67 +123,73 @@ fun PlayerScreen(
             viewModel.clearError()
         }
     }
-    LaunchedEffect(pagerState.currentPage, twoPanePlayer) {
-        viewModel.setLyricsVisible(twoPanePlayer || pagerState.currentPage == 1)
-    }
-    LaunchedEffect(appSettings.defaultShowLyrics, twoPanePlayer) {
-        if (twoPanePlayer) {
-            // Both panes are visible, so lyrics are always requested.
-            viewModel.setLyricsVisible(true)
-        } else {
-            val target = if (appSettings.defaultShowLyrics) 1 else 0
-            if (pagerState.currentPage != target) pagerState.scrollToPage(target)
-            if (target == 1) viewModel.setLyricsVisible(true)
-        }
-    }
-    // Returning from HOME must request lyrics again for the track that started
-    // playing while the app was in the background.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        if (twoPanePlayer || pagerState.currentPage == 1) viewModel.setLyricsVisible(true)
+        if (twoPane || viewModel.lyrics.value.requested) viewModel.setLyricsVisible(true)
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.background,
-                    ),
-                ),
+    Box(modifier = Modifier.fillMaxSize()) {
+        BanLiNowPlayingScreen(
+            state = NowPlayingUiState(
+                track = activeTrack,
+                title = state.title,
+                artist = state.artist,
+                positionMs = state.positionMs,
+                durationMs = state.durationMs,
+                isPlaying = state.isPlaying,
+                isBuffering = state.isBuffering,
+                hasNext = state.hasNext,
+                hasPrevious = state.hasPrevious,
             ),
-    ) {
-        Scaffold(
-            containerColor = Color.Transparent,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-        ) { padding ->
-            if (track == null) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                ) {
-                    TopBar(onBack = onBack)
-                    EmptyState(
-                        title = "还没有播放歌曲",
-                        description = "从首页、搜索或音乐库选择一首歌开始播放。",
-                        modifier = Modifier.weight(1f),
+            lyrics = lyricsState.lyrics,
+            lyricsLoading = lyricsState.loading,
+            lyricsError = lyricsState.error,
+            layout = if (twoPane) NowPlayingLayout.TWO_PANE else NowPlayingLayout.PAGER,
+            onBack = onBack,
+            onSeek = viewModel::seekTo,
+            onReloadLyrics = viewModel::reloadLyrics,
+            backIcon = Icons.AutoMirrored.Rounded.ArrowBack,
+            artwork = { artworkModifier ->
+                if (activeTrack != null) {
+                    TrackArtwork(
+                        track = activeTrack,
+                        artworkUrl = artworkUrl ?: state.artworkUrl,
+                        requestRemoteArtwork = true,
+                        modifier = artworkModifier,
+                        cornerRadius = 22.dp,
                     )
                 }
+            },
+            controls = { controlModifier ->
+                AndroidPlaybackControls(
+                    state = state,
+                    modifier = controlModifier,
+                    onTogglePlayPause = viewModel::togglePlayPause,
+                    onPrevious = viewModel::previous,
+                    onNext = viewModel::next,
+                    onCyclePlayMode = viewModel::cyclePlayMode,
+                )
+            },
+            metadata = if (activeTrack == null) {
+                null
             } else {
-                val currentTrack = track
-                val posterPage: @Composable (Boolean, Modifier) -> Unit = { twoPane, modifier ->
-                    PosterPage(
-                        track = currentTrack,
-                        state = state,
-                        artworkUrl = artworkUrl ?: state.artworkUrl,
-                        isFavorite = currentTrack.id in favoriteIds,
+                {
+                    AndroidTrackMetadata(
+                        track = activeTrack,
+                        preferredProviderId = preferredSources[activeTrack.id],
+                        onSourceClick = { sourcePickerTrack = activeTrack },
+                    )
+                }
+            },
+            actions = if (activeTrack == null) {
+                null
+            } else {
+                {
+                    AndroidPlayerActions(
+                        isFavorite = activeTrack.id in favoriteIds,
                         favoriteCategories = (
                             favoriteCategories + appSettings.defaultFavoriteCategory
                             ).distinct(),
-                        canDownload = currentTrack.sources.any {
+                        canDownload = activeTrack.sources.any {
                             TrackAction.DOWNLOAD in it.availableActions
                         },
                         downloadQuality = downloadQuality,
@@ -242,78 +203,30 @@ fun PlayerScreen(
                             )
                         },
                         onDownloadQualityChange = { downloadQuality = it },
-                        onSeek = viewModel::seekTo,
-                        onTogglePlayPause = viewModel::togglePlayPause,
-                        onPrevious = viewModel::previous,
-                        onNext = viewModel::next,
-                        onCyclePlayMode = viewModel::cyclePlayMode,
-                        preferredProviderId = preferredSources[currentTrack.id],
-                        onSelectSource = viewModel::selectSource,
-                        twoPane = twoPane,
-                        modifier = modifier,
                     )
                 }
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                ) {
-                    TopBar(onBack = onBack)
-                    if (twoPanePlayer) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                        ) {
-                            posterPage(
-                                true,
-                                Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                            )
-                            VerticalDivider(
-                                modifier = Modifier.fillMaxHeight(),
-                                color = MaterialTheme.colorScheme.outlineVariant,
-                            )
-                            LyricsPage(
-                                lyricsState = lyricsState,
-                                playbackState = state,
-                                onSeek = viewModel::seekTo,
-                                onReload = viewModel::reloadLyrics,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight(),
-                            )
-                        }
-                    } else {
-                        HorizontalPager(
-                            state = pagerState,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            beyondViewportPageCount = 1,
-                        ) { page ->
-                            if (page == 0) {
-                                posterPage(false, Modifier.fillMaxSize())
-                            } else {
-                                LyricsPage(
-                                    lyricsState = lyricsState,
-                                    playbackState = state,
-                                    onSeek = viewModel::seekTo,
-                                    onReload = viewModel::reloadLyrics,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            }
-                        }
-                        PageIndicator(
-                            pageCount = 2,
-                            currentPage = pagerState.currentPage,
-                            modifier = Modifier.padding(bottom = 8.dp),
-                        )
-                    }
-                }
-            }
-        }
+            },
+            initialShowLyrics = appSettings.defaultShowLyrics,
+            onLyricsVisible = viewModel::setLyricsVisible,
+        )
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(16.dp),
+        )
+    }
+
+    sourcePickerTrack?.let { track ->
+        SourcePickerDialog(
+            track = track,
+            preferredProviderId = preferredSources[track.id],
+            onSelect = { providerId ->
+                viewModel.selectSource(providerId)
+                sourcePickerTrack = null
+            },
+            onDismiss = { sourcePickerTrack = null },
+        )
     }
 
     if (showCategoryDialog) {
@@ -347,82 +260,122 @@ fun PlayerScreen(
 }
 
 @Composable
-private fun PosterPage(
+private fun AndroidTrackMetadata(
     track: com.banlimusic.app.core.model.Track,
+    preferredProviderId: String?,
+    onSourceClick: () -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        track.primarySource?.let { source ->
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(
+                    text = sourceDisplayNameAnnotated(source.providerId),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (track.sources.count { it.providerId !in NON_PROVIDER_SOURCE_IDS } > 1) {
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.clickable(onClick = onSourceClick),
+            ) {
+                Text(
+                    text = "${track.sources.count { it.providerId !in NON_PROVIDER_SOURCE_IDS }} 个来源",
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+    }
+    if (preferredProviderId != null) {
+        Text(
+            text = "已选择来源：${sourceDisplayNameAnnotated(preferredProviderId)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun AndroidPlaybackControls(
     state: PlaybackUiState,
-    artworkUrl: String?,
-    isFavorite: Boolean,
-    favoriteCategories: List<String>,
-    canDownload: Boolean,
-    downloadQuality: Int,
-    downloadQualities: List<Int>,
-    onToggleFavorite: () -> Unit,
-    onAddFavorite: (String) -> Unit,
-    onNewCategory: () -> Unit,
-    onDownload: () -> Unit,
-    onDownloadQualityChange: (Int) -> Unit,
-    onSeek: (Long) -> Unit,
     onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onCyclePlayMode: () -> Unit,
-    preferredProviderId: String?,
-    onSelectSource: (String?) -> Unit,
-    twoPane: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        // The artwork shrinks on landscape tablets so the controls stay visible
-        // inside the left pane without pushing the lyrics pane.
-        val artworkSize = if (twoPane) {
-            minOf(maxWidth * 0.66f, maxHeight * 0.46f)
-        } else {
-            maxWidth * 0.78f
-        }
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+    val singleRepeat = state.repeatMode == Player.REPEAT_MODE_ONE
+    Box(modifier = modifier.fillMaxWidth()) {
+        IconButton(
+            onClick = onCyclePlayMode,
+            modifier = Modifier.align(Alignment.CenterStart),
         ) {
-            Spacer(Modifier.height(if (twoPane) 4.dp else 10.dp))
-            TrackArtwork(
-                track = track,
-                artworkUrl = artworkUrl,
-                requestRemoteArtwork = true,
-                modifier = Modifier.size(artworkSize),
-                cornerRadius = if (twoPane) 22.dp else 26.dp,
+            Icon(
+                imageVector = when {
+                    singleRepeat -> Icons.Rounded.RepeatOne
+                    state.shuffleEnabled -> Icons.Rounded.Shuffle
+                    else -> Icons.Rounded.Repeat
+                },
+                contentDescription = when {
+                    singleRepeat -> "单曲循环"
+                    state.shuffleEnabled -> "随机播放"
+                    else -> "列表循环"
+                },
+                tint = MaterialTheme.colorScheme.primary,
             )
-            Spacer(Modifier.height(if (twoPane) 14.dp else 20.dp))
-            PlayerDetails(
-                track = track,
-                state = state,
-                isFavorite = isFavorite,
-                favoriteCategories = favoriteCategories,
-                canDownload = canDownload,
-                downloadQuality = downloadQuality,
-                downloadQualities = downloadQualities,
-                onToggleFavorite = onToggleFavorite,
-                onAddFavorite = onAddFavorite,
-                onNewCategory = onNewCategory,
-                onDownload = onDownload,
-                onDownloadQualityChange = onDownloadQualityChange,
-                onSeek = onSeek,
-                onTogglePlayPause = onTogglePlayPause,
-                onPrevious = onPrevious,
-                onNext = onNext,
-                onCyclePlayMode = onCyclePlayMode,
-                preferredProviderId = preferredProviderId,
-                onSelectSource = onSelectSource,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (!twoPane) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = "左滑查看歌词",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        }
+        Row(
+            modifier = Modifier.align(Alignment.Center),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onPrevious, modifier = Modifier.size(52.dp)) {
+                Icon(
+                    Icons.Rounded.SkipPrevious,
+                    contentDescription = "上一首",
+                    modifier = Modifier.size(34.dp),
+                )
+            }
+            FilledIconButton(
+                onClick = onTogglePlayPause,
+                modifier = Modifier.size(72.dp),
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                ),
+            ) {
+                if (state.isBuffering) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 3.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (state.isPlaying) Icons.Rounded.Pause
+                        else Icons.Rounded.PlayArrow,
+                        contentDescription = if (state.isPlaying) "暂停" else "播放",
+                        modifier = Modifier.size(38.dp),
+                    )
+                }
+            }
+            IconButton(
+                onClick = onNext,
+                enabled = state.hasNext,
+                modifier = Modifier.size(52.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.SkipNext,
+                    contentDescription = "下一首",
+                    modifier = Modifier.size(34.dp),
                 )
             }
         }
@@ -430,9 +383,7 @@ private fun PosterPage(
 }
 
 @Composable
-private fun PlayerDetails(
-    track: com.banlimusic.app.core.model.Track,
-    state: PlaybackUiState,
+private fun AndroidPlayerActions(
     isFavorite: Boolean,
     favoriteCategories: List<String>,
     canDownload: Boolean,
@@ -443,89 +394,11 @@ private fun PlayerDetails(
     onNewCategory: () -> Unit,
     onDownload: () -> Unit,
     onDownloadQualityChange: (Int) -> Unit,
-    onSeek: (Long) -> Unit,
-    onTogglePlayPause: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onCyclePlayMode: () -> Unit,
-    modifier: Modifier = Modifier,
-    preferredProviderId: String? = null,
-    onSelectSource: (String?) -> Unit = {},
 ) {
     var favoriteMenu by remember { mutableStateOf(false) }
-    var showSourcePicker by remember(track.id) { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
 
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = state.title ?: track.title,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = state.artist ?: track.artistLine,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            track.primarySource?.let { source ->
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                ) {
-                    Text(
-                        text = sourceDisplayNameAnnotated(source.providerId),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (track.sources.count { it.providerId !in NON_PROVIDER_SOURCE_IDS } > 1) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.clickable { showSourcePicker = true },
-                ) {
-                    Text(
-                        text = "${track.sources.count { it.providerId !in NON_PROVIDER_SOURCE_IDS }} 个来源",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
-            }
-        }
-        if (showSourcePicker) {
-            SourcePickerDialog(
-                track = track,
-                preferredProviderId = preferredProviderId,
-                onSelect = { providerId ->
-                    showSourcePicker = false
-                    onSelectSource(providerId)
-                },
-                onDismiss = { showSourcePicker = false },
-            )
-        }
-        Spacer(Modifier.height(18.dp))
-        ProgressSection(state = state, onSeek = onSeek)
-        Spacer(Modifier.height(10.dp))
-        ControlsSection(
-            state = state,
-            onTogglePlayPause = onTogglePlayPause,
-            onPrevious = onPrevious,
-            onNext = onNext,
-            onCyclePlayMode = onCyclePlayMode,
-        )
-        Spacer(Modifier.height(14.dp))
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Row(
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
@@ -533,7 +406,8 @@ private fun PlayerDetails(
         ) {
             TextButton(onClick = onToggleFavorite) {
                 Icon(
-                    imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    imageVector = if (isFavorite) Icons.Rounded.Favorite
+                    else Icons.Rounded.FavoriteBorder,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                 )
@@ -541,17 +415,17 @@ private fun PlayerDetails(
                 Text(if (isFavorite) "已收藏" else "收藏")
             }
             Box {
-                IconButton(
-                    onClick = { favoriteMenu = true },
-                    modifier = Modifier.size(32.dp),
-                ) {
+                IconButton(onClick = { favoriteMenu = true }, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Rounded.KeyboardArrowDown,
                         contentDescription = "选择收藏夹",
                         modifier = Modifier.size(18.dp),
                     )
                 }
-                DropdownMenu(expanded = favoriteMenu, onDismissRequest = { favoriteMenu = false }) {
+                DropdownMenu(
+                    expanded = favoriteMenu,
+                    onDismissRequest = { favoriteMenu = false },
+                ) {
                     favoriteCategories.forEach { category ->
                         DropdownMenuItem(
                             text = { Text(category) },
@@ -592,7 +466,10 @@ private fun PlayerDetails(
                             modifier = Modifier.size(18.dp),
                         )
                     }
-                    DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
+                    DropdownMenu(
+                        expanded = qualityMenu,
+                        onDismissRequest = { qualityMenu = false },
+                    ) {
                         downloadQualities.forEach { quality ->
                             DropdownMenuItem(
                                 text = { Text(qualityLabel(quality)) },
@@ -615,448 +492,5 @@ private fun PlayerDetails(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(8.dp))
-    }
-}
-
-@Composable
-private fun PageIndicator(
-    pageCount: Int,
-    currentPage: Int,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        repeat(pageCount) { index ->
-            Box(
-                modifier = Modifier
-                    .padding(horizontal = 3.dp)
-                    .size(if (index == currentPage) 8.dp else 6.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (index == currentPage) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                        },
-                    ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun TopBar(onBack: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-        }
-        Text(
-            text = "正在播放",
-            modifier = Modifier.weight(1f),
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.size(48.dp))
-    }
-}
-
-@Composable
-private fun ProgressSection(
-    state: PlaybackUiState,
-    onSeek: (Long) -> Unit,
-) {
-    val duration = state.durationMs.coerceAtLeast(1L)
-    var dragging by remember { mutableStateOf(false) }
-    var sliderValue by remember { mutableFloatStateOf(0f) }
-
-    LaunchedEffect(state.positionMs, dragging, duration) {
-        if (!dragging) {
-            sliderValue = state.positionMs.toFloat().coerceIn(0f, duration.toFloat())
-        }
-    }
-
-    Slider(
-        value = sliderValue.coerceIn(0f, duration.toFloat()),
-        onValueChange = {
-            dragging = true
-            sliderValue = it
-        },
-        onValueChangeFinished = {
-            onSeek(sliderValue.toLong())
-            dragging = false
-        },
-        valueRange = 0f..duration.toFloat(),
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = formatPlaybackTime(sliderValue.toLong()),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = formatPlaybackTime(if (state.durationMs > 0) state.durationMs else 0L),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun ControlsSection(
-    state: PlaybackUiState,
-    onTogglePlayPause: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onCyclePlayMode: () -> Unit,
-) {
-    Box(modifier = Modifier.fillMaxWidth()) {
-        // 随机播放 → 列表循环 → 单曲循环，固定在左侧以避免影响居中的传输控制键
-        val singleRepeat = state.repeatMode == Player.REPEAT_MODE_ONE
-        IconButton(
-            onClick = onCyclePlayMode,
-            modifier = Modifier.align(Alignment.CenterStart),
-        ) {
-            Icon(
-                imageVector = when {
-                    singleRepeat -> Icons.Rounded.RepeatOne
-                    state.shuffleEnabled -> Icons.Rounded.Shuffle
-                    else -> Icons.Rounded.Repeat
-                },
-                contentDescription = when {
-                    singleRepeat -> "单曲循环"
-                    state.shuffleEnabled -> "随机播放"
-                    else -> "列表循环"
-                },
-                tint = MaterialTheme.colorScheme.primary,
-            )
-        }
-        Row(
-            modifier = Modifier.align(Alignment.Center),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-        IconButton(onClick = onPrevious, modifier = Modifier.size(52.dp)) {
-            Icon(
-                Icons.Rounded.SkipPrevious,
-                contentDescription = "上一首",
-                modifier = Modifier.size(34.dp),
-            )
-        }
-        FilledIconButton(
-            onClick = onTogglePlayPause,
-            modifier = Modifier.size(72.dp),
-            shape = CircleShape,
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-            ),
-        ) {
-            if (state.isBuffering) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(28.dp),
-                    strokeWidth = 3.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-            } else {
-                Icon(
-                    imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = if (state.isPlaying) "暂停" else "播放",
-                    modifier = Modifier.size(38.dp),
-                )
-            }
-        }
-        IconButton(
-            onClick = onNext,
-            enabled = state.hasNext,
-            modifier = Modifier.size(52.dp),
-        ) {
-            Icon(
-                Icons.Rounded.SkipNext,
-                contentDescription = "下一首",
-                modifier = Modifier.size(34.dp),
-            )
-        }
-        }
-    }
-}
-
-@Composable
-private fun LyricsPage(
-    lyricsState: LyricsUiState,
-    playbackState: PlaybackUiState,
-    onSeek: (Long) -> Unit,
-    onReload: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val lyrics: Lyrics? = lyricsState.lyrics
-    var showTranslation by rememberSaveable { mutableStateOf(true) }
-    val lines = remember(lyrics?.raw) { lyrics?.raw?.let(LrcParser::parse).orEmpty() }
-    val translatedLines = remember(lyrics?.translated) {
-        lyrics?.translated?.let(LrcParser::parse).orEmpty().associateBy { it.timeMs }
-    }
-    val hasTranslation = !lyrics?.translated.isNullOrBlank()
-    val listState = rememberLazyListState()
-    val duration = playbackState.durationMs.coerceAtLeast(0L)
-    var scrubIndex by remember { mutableStateOf<Int?>(null) }
-    var scrubMs by remember { mutableStateOf<Long?>(null) }
-    var boxTopInWindow by remember { mutableFloatStateOf(0f) }
-    var listTopInWindow by remember { mutableFloatStateOf(0f) }
-
-    Box(
-        modifier = modifier
-            .onGloballyPositioned { boxTopInWindow = it.positionInWindow().y }
-            .pointerInput(lines) {
-                fun updateTarget(windowY: Float) {
-                    val listY = windowY - listTopInWindow
-                    val visible = listState.layoutInfo.visibleItemsInfo
-                    if (visible.isEmpty()) return
-                    val item = visible.firstOrNull {
-                        listY.toInt() in it.offset until (it.offset + it.size)
-                    } ?: visible.minByOrNull {
-                        abs(it.offset + it.size / 2 - listY)
-                    } ?: return
-                    val index = item.index
-                    if (index in lines.indices) {
-                        scrubIndex = index
-                        scrubMs = lines[index].timeMs
-                    }
-                }
-                coroutineScope {
-                    val edgeThreshold = 72.dp.toPx()
-                    val scrollStep = 12.dp.toPx()
-                    var pointerWindowY = 0f
-                    var autoScroll: Job? = null
-
-                    fun stopAutoScroll() {
-                        autoScroll?.cancel()
-                        autoScroll = null
-                    }
-
-                    fun startAutoScroll() {
-                        if (autoScroll != null) return
-                        autoScroll = launch {
-                            while (isActive) {
-                                val info = listState.layoutInfo
-                                val viewportTop = listTopInWindow + info.viewportStartOffset
-                                val viewportBottom = listTopInWindow + info.viewportEndOffset
-                                val delta = when {
-                                    pointerWindowY < viewportTop + edgeThreshold -> -scrollStep
-                                    pointerWindowY > viewportBottom - edgeThreshold -> scrollStep
-                                    else -> 0f
-                                }
-                                if (delta == 0f) {
-                                    stopAutoScroll()
-                                    break
-                                }
-                                listState.scrollBy(delta)
-                                updateTarget(pointerWindowY)
-                                delay(16)
-                            }
-                        }
-                    }
-
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = { offset ->
-                            pointerWindowY = boxTopInWindow + offset.y
-                            updateTarget(pointerWindowY)
-                        },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            pointerWindowY = boxTopInWindow + change.position.y
-                            updateTarget(pointerWindowY)
-                            val info = listState.layoutInfo
-                            val viewportTop = listTopInWindow + info.viewportStartOffset
-                            val viewportBottom = listTopInWindow + info.viewportEndOffset
-                            val nearEdge = pointerWindowY < viewportTop + edgeThreshold ||
-                                pointerWindowY > viewportBottom - edgeThreshold
-                            if (nearEdge) startAutoScroll() else stopAutoScroll()
-                        },
-                        onDragEnd = {
-                            stopAutoScroll()
-                            scrubMs?.let(onSeek)
-                            scrubIndex = null
-                            scrubMs = null
-                        },
-                        onDragCancel = {
-                            stopAutoScroll()
-                            scrubIndex = null
-                            scrubMs = null
-                        },
-                    )
-                }
-            },
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 28.dp),
-        ) {
-            val track = playbackState.currentTrack
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = track?.title ?: playbackState.title ?: "未知歌曲",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val subtitle = listOfNotNull(
-                        track?.album?.title?.takeIf { it.isNotBlank() },
-                        track?.artistLine ?: playbackState.artist,
-                    ).joinToString("·")
-                    if (subtitle.isNotBlank()) {
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                if (hasTranslation && !lyricsState.loading) {
-                    TextButton(onClick = { showTranslation = !showTranslation }) {
-                        Text(if (showTranslation) "隐藏翻译" else "显示翻译")
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-
-            when {
-                lyricsState.loading -> {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(220.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(30.dp),
-                            strokeWidth = 3.dp,
-                        )
-                    }
-                }
-
-                lyricsState.error != null -> {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = lyricsState.error.orEmpty(),
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        TextButton(onClick = onReload) { Text("重试") }
-                    }
-                }
-
-                lyrics == null -> {
-                    EmptyState(
-                        title = "暂无歌词",
-                        description = "当前音乐源没有返回这首歌的歌词。",
-                        icon = Icons.Rounded.Lyrics,
-                    )
-                }
-
-                lines.isEmpty() -> {
-                    Text(
-                        text = lyrics.raw.stripTimestamps(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState()),
-                    )
-                }
-
-                else -> {
-                    val currentIndex = lines
-                        .indexOfLast { it.timeMs <= playbackState.positionMs }
-                        .coerceAtLeast(0)
-                    val activeIndex = scrubIndex ?: currentIndex
-                    LaunchedEffect(currentIndex, showTranslation, scrubIndex) {
-                        if (scrubIndex == null && currentIndex in lines.indices) {
-                            // Keep the active line on the third visible row.
-                            val targetIndex = (currentIndex - 2).coerceAtLeast(0)
-                            runCatching { listState.animateScrollToItem(targetIndex) }
-                        }
-                    }
-                    LazyColumn(
-                        state = listState,
-                        userScrollEnabled = scrubIndex == null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .onGloballyPositioned { listTopInWindow = it.positionInWindow().y },
-                    ) {
-                        itemsIndexed(lines) { index, line ->
-                            val translated = translatedLines[line.timeMs]?.text
-                            val text = if (showTranslation && !translated.isNullOrBlank()) {
-                                translated
-                            } else {
-                                line.text
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (index == scrubIndex) {
-                                    Box(
-                                        modifier = Modifier
-                                            .width(3.dp)
-                                            .height(18.dp)
-                                            .background(
-                                                MaterialTheme.colorScheme.primary,
-                                                RoundedCornerShape(2.dp),
-                                            ),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                }
-                                Text(
-                                    text = text,
-                                    modifier = Modifier.weight(1f),
-                                    textAlign = TextAlign.Center,
-                                    fontSize = if (index == activeIndex) 17.sp else 15.sp,
-                                    fontWeight = if (index == activeIndex) {
-                                        FontWeight.Bold
-                                    } else {
-                                        FontWeight.Normal
-                                    },
-                                    color = if (index == activeIndex) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        scrubMs?.let { target ->
-            Surface(
-                modifier = Modifier.align(Alignment.Center),
-                shape = RoundedCornerShape(12.dp),
-                tonalElevation = 6.dp,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Text(
-                    text = "${formatPlaybackTime(target)} / ${formatPlaybackTime(duration)}",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-        }
     }
 }

@@ -59,8 +59,8 @@ settings:
     compileSdk: 37
     minSdk: 26
     targetSdk: 37
-    versionCode: 12
-    versionName: "0.8.0"
+    versionCode: 13
+    versionName: "0.9.0"
     resourcePackaging:
       excludes:
         - META-INF/{AL2.0,LGPL2.1}

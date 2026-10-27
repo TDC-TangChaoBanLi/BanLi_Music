@@ -8,12 +8,12 @@ repositories:
   - id: mavenGoogle
     url: https://dl.google.com/dl/android/maven2
 
-dependencies:
-  - $libs.kotlinx.coroutines.core
-  - $libs.kotlinx.serialization.json
-  - $libs.okhttp
-
 settings:
+  compose:
+    enabled: true
+    resources:
+      packageName: com.banlimusic.shared.resources
+      exposedAccessors: true
   kotlin:
     version: 2.4.21
     serialization:
@@ -27,3 +27,12 @@ settings:
     jdk:
       version: 25
       selectionMode: auto
+
+dependencies:
+  - $libs.kotlinx.coroutines.core
+  - $libs.kotlinx.serialization.json
+  - $libs.okhttp
+  - $compose.foundation
+  - $compose.components.resources
+  - $libs.compose.material.icons.extended
+  - $libs.compose.material3

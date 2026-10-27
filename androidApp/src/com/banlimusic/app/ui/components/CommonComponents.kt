@@ -67,6 +67,7 @@ import com.banlimusic.app.MusicApplication
 import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.domain.playback.SourceOrdering
+import com.banlimusic.shared.ui.components.BanLiTrackRow
 
 fun providerLabel(providerId: String): String = when (providerId) {
     "gd-netease" -> "网易云"
@@ -109,11 +110,8 @@ fun formatBytes(bytes: Long): String {
     else String.format(java.util.Locale.ROOT, "%.1f %s", value, units[index])
 }
 
-fun formatPlaybackTime(millis: Long): String {
-    if (millis <= 0L) return "0:00"
-    val total = millis / 1000
-    return "%d:%02d".format(java.util.Locale.ROOT, total / 60, total % 60)
-}
+fun formatPlaybackTime(millis: Long): String =
+    com.banlimusic.shared.ui.components.formatPlaybackTime(millis)
 
 /** Allows track-list pages to fetch artwork from providers. Provided by the app root. */
 val LocalRequestListArtwork = staticCompositionLocalOf { false }
@@ -294,7 +292,7 @@ fun TrackSourceBadges(
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun TrackRow(
+fun LegacyTrackRow(
     track: Track,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -458,6 +456,114 @@ fun TrackRow(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TrackRow(
+    track: Track,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    isFavorite: Boolean = false,
+    showFavoriteState: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
+    categoryLabel: String? = null,
+    downloaded: Boolean = false,
+    preferredProviderId: String? = null,
+    onSourceClick: (() -> Unit)? = null,
+    infoAction: (() -> Unit)? = null,
+    selected: Boolean? = null,
+    onLongClick: (() -> Unit)? = null,
+    selectionDragModifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val subtitle = listOfNotNull(
+        track.album?.title?.takeIf { it.isNotBlank() },
+        track.artistLine,
+    ).joinToString("·")
+    BanLiTrackRow(
+        title = track.title,
+        subtitle = subtitle,
+        artwork = { artworkModifier ->
+            TrackArtwork(
+                track = track,
+                modifier = artworkModifier,
+                cornerRadius = 10.dp,
+            )
+        },
+        onClick = onClick,
+        modifier = modifier,
+        selected = selected,
+        onLongClick = onLongClick,
+        gestureModifier = selectionDragModifier,
+        badges = {
+            TrackSourceBadges(
+                track = track,
+                downloaded = downloaded,
+                preferredProviderId = preferredProviderId,
+                onSourceClick = onSourceClick,
+            )
+            if (!categoryLabel.isNullOrBlank()) {
+                Spacer(Modifier.weight(1f))
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Text(
+                        text = categoryLabel,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        },
+        trailing = {
+            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+                if (infoAction != null) {
+                    IconButton(onClick = infoAction, modifier = Modifier.size(34.dp)) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = "查看信息",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+                if (onToggleFavorite != null) {
+                    IconButton(onClick = onToggleFavorite, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            imageVector = if (isFavorite) {
+                                Icons.Rounded.Favorite
+                            } else {
+                                Icons.Rounded.FavoriteBorder
+                            },
+                            contentDescription = if (isFavorite) "取消收藏" else "收藏",
+                            tint = if (isFavorite) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                } else if (showFavoriteState && isFavorite) {
+                    Box(modifier = Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.Favorite,
+                            contentDescription = "已收藏",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+            trailing?.invoke()
+        },
+    )
+}
+
 @Composable
 fun SectionHeader(
     title: String,
@@ -465,20 +571,12 @@ fun SectionHeader(
     actionText: String? = null,
     onAction: (() -> Unit)? = null,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-        )
-        if (actionText != null && onAction != null) {
-            TextButton(onClick = onAction) { Text(actionText) }
-        }
-    }
+    com.banlimusic.shared.ui.components.BanLiSectionHeader(
+        title = title,
+        modifier = modifier,
+        actionText = actionText,
+        onAction = onAction,
+    )
 }
 
 @Composable
@@ -488,32 +586,12 @@ fun EmptyState(
     modifier: Modifier = Modifier,
     icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Rounded.MusicNote,
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 40.dp, horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
-            modifier = Modifier.size(46.dp),
-        )
-        Spacer(modifier = Modifier.height(14.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Medium,
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = description,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    com.banlimusic.shared.ui.components.BanLiEmptyState(
+        title = title,
+        description = description,
+        modifier = modifier,
+        icon = icon,
+    )
 }
 
 @Composable
@@ -522,49 +600,18 @@ fun ErrorCard(
     modifier: Modifier = Modifier,
     onRetry: (() -> Unit)? = null,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            if (onRetry != null) {
-                TextButton(onClick = onRetry) { Text("重试") }
-            }
-        }
-    }
+    com.banlimusic.shared.ui.components.BanLiErrorCard(
+        message = message,
+        modifier = modifier,
+        onRetry = onRetry,
+    )
 }
 
 @Composable
 fun SearchEntry(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = "搜索歌曲、歌手或专辑",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-    }
+    com.banlimusic.shared.ui.components.BanLiSearchEntry(
+        onClick = onClick,
+        modifier = modifier,
+        searchIcon = Icons.Rounded.Search,
+    )
 }

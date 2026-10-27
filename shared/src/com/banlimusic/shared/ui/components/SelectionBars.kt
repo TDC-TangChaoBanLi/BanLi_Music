@@ -1,7 +1,7 @@
 /**
  * 文件作用：提供紧凑可配置的批量选择底部操作栏。
  */
-package com.banlimusic.app.ui.components
+package com.banlimusic.shared.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee

@@ -160,3 +160,29 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
 - 直接参与 APK 的清单文件（如 `androidApp/src/AndroidManifest.xml`）也应在 XML 声明后使用中文注释说明作用。
 - 桌面端源码（`desktopApp/src/**/*.kt`）将来也必须遵守同样的文件头注释规则；本轮只要求 Android APK 源码，桌面端暂不批量补注释。
 - `androidApp/res/README.md` 必须说明资源子目录和主要资源文件的用途；新增、删除或重命名资源时必须同步更新该文件。
+
+## 文档结构
+
+产品介绍与开发文档分离，修改相关内容时必须同步维护对应文件。
+
+| 文件 | 职责 | 同步要求 |
+| --- | --- | --- |
+| `README.md` | 产品介绍、界面截图、下载安装与合规声明 | 只引用 `doc/picture/` 下的图片；不写本机路径、环境步骤和内部类名；功能变化时同步更新亮点与已知限制 |
+| `doc/README.md` | 开发文档索引与文档维护约定 | 新增、删除或重命名文档时更新索引 |
+| `doc/architecture.md` | 模块边界、源码目录与关键设计原则 | 目录结构或模块职责变化时更新；与本文档“核心架构约束”保持一致 |
+| `doc/features.md` | 已实现功能现状与已知限制 | 功能、设置项、测试数量或限制变化时更新 |
+| `doc/development/environment.md` | JDK、Android SDK、Kotlin Toolchain 与环境变量 | 工具链版本、SDK 版本或 JDK 要求变化时更新 |
+| `doc/development/build.md` | 构建、测试、运行与桌面端启动 | 构建命令、产物路径或模块变化时更新 |
+| `doc/development/release.md` | Android 签名发布、桌面端便携版与安装包打包 | 版本流程、签名方式或打包方式变化时更新 |
+| `doc/cloud-sync.md` | OneDrive 同步实现、应用注册与安全约束 | 同步协议、权限、回调或 `CLIENT_ID` 变化时更新 |
+| `doc/picture/` | README 插图与演示动图 | 图片必须被 README 引用；文件名使用可读中文或英文，避免空格与 `&` 等需要转义的字符 |
+| `GD_MUSIC_API.md` | 上游 GD 音乐台 API 参考 | 仅随上游 API 文档更新；不写入本机信息 |
+
+引用关系：
+
+- `README.md` → `doc/picture/*`、`doc/README.md`、`doc/features.md` 及各开发文档。
+- `doc/README.md` → 所有开发文档与 `GD_MUSIC_API.md`。
+- `doc/architecture.md`、`doc/development/*.md`、`doc/cloud-sync.md` → 本文档的架构、限流、云同步与发布约束；冲突时以本文档为准。
+- 本文档“构建与测试”“版本与发布”只保留强制规则，具体步骤以 `doc/development/build.md` 与 `doc/development/release.md` 为准。
+
+文档中禁止出现本机用户名、绝对路径、签名密码或令牌；统一使用 `<ANDROID_SDK>`、`<JDK_HOME>`、`<KEYSTORE_DIR>`、`<version>` 等占位符。
