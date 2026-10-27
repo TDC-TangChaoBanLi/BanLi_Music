@@ -38,6 +38,8 @@ class SettingsDefaultsTest {
         assertTrue(settings.favoriteCategoryOrder.isEmpty())
         assertTrue(settings.lastNavItem.isEmpty())
         assertNull(settings.customThemeColor)
+        assertEquals(TabletNavPosition.LEFT, settings.tabletNavPosition)
+        assertEquals(TabletMiniPlayerPosition.BOTTOM, settings.tabletMiniPlayerPosition)
     }
 
     @Test

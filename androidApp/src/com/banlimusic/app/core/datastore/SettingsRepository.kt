@@ -52,6 +52,8 @@ class SettingsRepository(private val context: Context) {
         val autoLoadArtwork = booleanPreferencesKey("auto_load_artwork")
         val cacheMaxBytes = longPreferencesKey("cache_max_bytes")
         val bottomNavItems = stringPreferencesKey("bottom_nav_items")
+        val tabletNavPosition = stringPreferencesKey("tablet_nav_position")
+        val tabletMiniPlayerPosition = stringPreferencesKey("tablet_mini_player_position")
         val agreementAccepted = booleanPreferencesKey("agreement_accepted")
         val defaultFavoriteCategory = stringPreferencesKey("default_favorite_category")
         val favoriteCategoryOrder = stringPreferencesKey("favorite_category_order")
@@ -134,6 +136,12 @@ class SettingsRepository(private val context: Context) {
                 cacheMaxBytes = (preferences[Keys.cacheMaxBytes] ?: DEFAULT_CACHE_MAX_BYTES)
                     .coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES),
                 bottomNavItems = navItems,
+                tabletNavPosition = preferences[Keys.tabletNavPosition]
+                    ?.let { runCatching { TabletNavPosition.valueOf(it) }.getOrNull() }
+                    ?: TabletNavPosition.LEFT,
+                tabletMiniPlayerPosition = preferences[Keys.tabletMiniPlayerPosition]
+                    ?.let { runCatching { TabletMiniPlayerPosition.valueOf(it) }.getOrNull() }
+                    ?: TabletMiniPlayerPosition.BOTTOM,
                 agreementAccepted = preferences[Keys.agreementAccepted] ?: false,
                 defaultFavoriteCategory = preferences[Keys.defaultFavoriteCategory]
                     ?.takeIf { it.isNotBlank() }
@@ -251,6 +259,15 @@ class SettingsRepository(private val context: Context) {
     suspend fun setBottomNavItems(items: List<String>) = context.settingsDataStore.edit {
         it[Keys.bottomNavItems] = sanitizeNavItems(items).joinToString(",")
     }
+
+    suspend fun setTabletNavPosition(position: TabletNavPosition) = context.settingsDataStore.edit {
+        it[Keys.tabletNavPosition] = position.name
+    }
+
+    suspend fun setTabletMiniPlayerPosition(position: TabletMiniPlayerPosition) =
+        context.settingsDataStore.edit {
+            it[Keys.tabletMiniPlayerPosition] = position.name
+        }
 
     suspend fun setLastNavItem(route: String) = context.settingsDataStore.edit {
         it[Keys.lastNavItem] = route

@@ -127,6 +127,8 @@ import com.banlimusic.app.core.datastore.BOTTOM_NAV_OPTIONS
 import com.banlimusic.app.core.datastore.MAX_CACHE_MAX_BYTES
 import com.banlimusic.app.core.datastore.MIN_CACHE_MAX_BYTES
 import com.banlimusic.app.core.datastore.SUPPORTED_SOURCES
+import com.banlimusic.app.core.datastore.TabletMiniPlayerPosition
+import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.app.core.datastore.ThemeMode
 import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.core.datastore.sanitizeNavItems
@@ -469,9 +471,9 @@ private fun AppearanceSettings(settings: AppSettings, viewModel: SettingsViewMod
             }
         }
 
-        SettingsCard(title = "底部导航栏", icon = Icons.Rounded.ViewList) {
+        SettingsCard(title = "导航栏", icon = Icons.Rounded.ViewList) {
             Text(
-                "所有栏目始终显示，可调整左右顺序；默认栏目在下次启动时生效。",
+                "手机底部导航与平板侧边导航共用这些栏目，可调整左右顺序；默认栏目在下次启动时生效。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -536,6 +538,40 @@ private fun AppearanceSettings(settings: AppSettings, viewModel: SettingsViewMod
                     )
                 }
             }
+        }
+
+        SettingsCard(title = "平板布局", icon = Icons.Rounded.SwapHoriz) {
+            Text(
+                "以下选项仅在平板（最小宽度 ≥ 600dp）上生效，手机始终使用底部导航栏。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text("侧边导航栏位置", style = MaterialTheme.typography.titleSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TabletNavPosition.entries.forEach { position ->
+                    FilterChip(
+                        selected = settings.tabletNavPosition == position,
+                        onClick = { viewModel.setTabletNavPosition(position) },
+                        label = { Text(if (position == TabletNavPosition.LEFT) "左侧" else "右侧") },
+                    )
+                }
+            }
+            HorizontalDivider()
+            Text("正在播放控件位置", style = MaterialTheme.typography.titleSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TabletMiniPlayerPosition.entries.forEach { position ->
+                    FilterChip(
+                        selected = settings.tabletMiniPlayerPosition == position,
+                        onClick = { viewModel.setTabletMiniPlayerPosition(position) },
+                        label = { Text(if (position == TabletMiniPlayerPosition.TOP) "上方" else "下方") },
+                    )
+                }
+            }
+            Text(
+                "平板横屏播放页固定为左侧海报与播放控件、右侧歌词；竖屏与手机一致。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         SettingsCard(title = "桌面小组件", icon = Icons.Rounded.Widgets) {

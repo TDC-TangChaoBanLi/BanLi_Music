@@ -3,6 +3,7 @@
  */
 package com.banlimusic.app.feature.player
 
+import android.content.res.Configuration
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,7 +15,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -57,6 +58,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -138,6 +140,12 @@ fun PlayerScreen(
     }
     var downloadQualities by remember { mutableStateOf<List<Int>>(emptyList()) }
     val track = state.currentTrack
+    val configuration = LocalConfiguration.current
+    val isTablet = configuration.smallestScreenWidthDp >= 600
+    // Tablets in landscape show the poster/controls and lyrics side by side;
+    // tablets in portrait keep the phone pager.
+    val twoPanePlayer = isTablet &&
+        configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     BackHandler { onBack() }
 
@@ -160,18 +168,23 @@ fun PlayerScreen(
             viewModel.clearError()
         }
     }
-    LaunchedEffect(pagerState.currentPage) {
-        viewModel.setLyricsVisible(pagerState.currentPage == 1)
+    LaunchedEffect(pagerState.currentPage, twoPanePlayer) {
+        viewModel.setLyricsVisible(twoPanePlayer || pagerState.currentPage == 1)
     }
-    LaunchedEffect(appSettings.defaultShowLyrics) {
-        val target = if (appSettings.defaultShowLyrics) 1 else 0
-        if (pagerState.currentPage != target) pagerState.scrollToPage(target)
-        if (target == 1) viewModel.setLyricsVisible(true)
+    LaunchedEffect(appSettings.defaultShowLyrics, twoPanePlayer) {
+        if (twoPanePlayer) {
+            // Both panes are visible, so lyrics are always requested.
+            viewModel.setLyricsVisible(true)
+        } else {
+            val target = if (appSettings.defaultShowLyrics) 1 else 0
+            if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+            if (target == 1) viewModel.setLyricsVisible(true)
+        }
     }
     // Returning from HOME must request lyrics again for the track that started
     // playing while the app was in the background.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        if (pagerState.currentPage == 1) viewModel.setLyricsVisible(true)
+        if (twoPanePlayer || pagerState.currentPage == 1) viewModel.setLyricsVisible(true)
     }
 
     Box(
@@ -205,65 +218,99 @@ fun PlayerScreen(
                     )
                 }
             } else {
+                val currentTrack = track
+                val posterPage: @Composable (Boolean, Modifier) -> Unit = { twoPane, modifier ->
+                    PosterPage(
+                        track = currentTrack,
+                        state = state,
+                        artworkUrl = artworkUrl ?: state.artworkUrl,
+                        isFavorite = currentTrack.id in favoriteIds,
+                        favoriteCategories = (
+                            favoriteCategories + appSettings.defaultFavoriteCategory
+                            ).distinct(),
+                        canDownload = currentTrack.sources.any {
+                            TrackAction.DOWNLOAD in it.availableActions
+                        },
+                        downloadQuality = downloadQuality,
+                        downloadQualities = downloadQualities,
+                        onToggleFavorite = viewModel::toggleFavorite,
+                        onAddFavorite = viewModel::addFavoriteToCategory,
+                        onNewCategory = { showCategoryDialog = true },
+                        onDownload = {
+                            viewModel.downloadCurrent(
+                                downloadQuality.takeIf { it in downloadQualities },
+                            )
+                        },
+                        onDownloadQualityChange = { downloadQuality = it },
+                        onSeek = viewModel::seekTo,
+                        onTogglePlayPause = viewModel::togglePlayPause,
+                        onPrevious = viewModel::previous,
+                        onNext = viewModel::next,
+                        onCyclePlayMode = viewModel::cyclePlayMode,
+                        preferredProviderId = preferredSources[currentTrack.id],
+                        onSelectSource = viewModel::selectSource,
+                        twoPane = twoPane,
+                        modifier = modifier,
+                    )
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding),
                 ) {
                     TopBar(onBack = onBack)
-                    HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        beyondViewportPageCount = 1,
-                    ) { page ->
-                        if (page == 0) {
-                            PosterPage(
-                                track = track,
-                                state = state,
-                                artworkUrl = artworkUrl ?: state.artworkUrl,
-                                isFavorite = track.id in favoriteIds,
-                                favoriteCategories = (
-                                    favoriteCategories + appSettings.defaultFavoriteCategory
-                                    ).distinct(),
-                                canDownload = track.sources.any {
-                                    TrackAction.DOWNLOAD in it.availableActions
-                                },
-                                downloadQuality = downloadQuality,
-                                downloadQualities = downloadQualities,
-                                onToggleFavorite = viewModel::toggleFavorite,
-                                onAddFavorite = viewModel::addFavoriteToCategory,
-                                onNewCategory = { showCategoryDialog = true },
-                                onDownload = {
-                                    viewModel.downloadCurrent(
-                                        downloadQuality.takeIf { it in downloadQualities },
-                                    )
-                                },
-                                onDownloadQualityChange = { downloadQuality = it },
-                                onSeek = viewModel::seekTo,
-                                onTogglePlayPause = viewModel::togglePlayPause,
-                                onPrevious = viewModel::previous,
-                                onNext = viewModel::next,
-                                onCyclePlayMode = viewModel::cyclePlayMode,
-                                preferredProviderId = preferredSources[track.id],
-                                onSelectSource = viewModel::selectSource,
+                    if (twoPanePlayer) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                        ) {
+                            posterPage(
+                                true,
+                                Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
                             )
-                        } else {
+                            VerticalDivider(
+                                modifier = Modifier.fillMaxHeight(),
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                            )
                             LyricsPage(
                                 lyricsState = lyricsState,
                                 playbackState = state,
                                 onSeek = viewModel::seekTo,
                                 onReload = viewModel::reloadLyrics,
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
                             )
                         }
+                    } else {
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            beyondViewportPageCount = 1,
+                        ) { page ->
+                            if (page == 0) {
+                                posterPage(false, Modifier.fillMaxSize())
+                            } else {
+                                LyricsPage(
+                                    lyricsState = lyricsState,
+                                    playbackState = state,
+                                    onSeek = viewModel::seekTo,
+                                    onReload = viewModel::reloadLyrics,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
+                        PageIndicator(
+                            pageCount = 2,
+                            currentPage = pagerState.currentPage,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
                     }
-                    PageIndicator(
-                        pageCount = 2,
-                        currentPage = pagerState.currentPage,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
                 }
             }
         }
@@ -321,93 +368,56 @@ private fun PosterPage(
     onCyclePlayMode: () -> Unit,
     preferredProviderId: String?,
     onSelectSource: (String?) -> Unit,
+    twoPane: Boolean,
+    modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val isWide = LocalConfiguration.current.smallestScreenWidthDp >= 600
-        if (isWide) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 32.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TrackArtwork(
-                    track = track,
-                    artworkUrl = artworkUrl,
-                    requestRemoteArtwork = true,
-                    modifier = Modifier
-                        .weight(0.9f)
-                        .fillMaxWidth()
-                        .aspectRatio(1f),
-                    cornerRadius = 28.dp,
-                )
-                Spacer(Modifier.size(32.dp))
-                PlayerDetails(
-                    track = track,
-                    state = state,
-                    isFavorite = isFavorite,
-                    favoriteCategories = favoriteCategories,
-                    canDownload = canDownload,
-                    downloadQuality = downloadQuality,
-                    downloadQualities = downloadQualities,
-                    onToggleFavorite = onToggleFavorite,
-                    onAddFavorite = onAddFavorite,
-                    onNewCategory = onNewCategory,
-                    onDownload = onDownload,
-                    onDownloadQualityChange = onDownloadQualityChange,
-                    onSeek = onSeek,
-                    onTogglePlayPause = onTogglePlayPause,
-                    onPrevious = onPrevious,
-                    onNext = onNext,
-                    onCyclePlayMode = onCyclePlayMode,
-                    preferredProviderId = preferredProviderId,
-                    onSelectSource = onSelectSource,
-                    modifier = Modifier
-                        .weight(1.1f)
-                        .verticalScroll(rememberScrollState()),
-                )
-            }
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // The artwork shrinks on landscape tablets so the controls stay visible
+        // inside the left pane without pushing the lyrics pane.
+        val artworkSize = if (twoPane) {
+            minOf(maxWidth * 0.66f, maxHeight * 0.46f)
         } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Spacer(Modifier.height(10.dp))
-                TrackArtwork(
-                    track = track,
-                    artworkUrl = artworkUrl,
-                    requestRemoteArtwork = true,
-                    modifier = Modifier
-                        .fillMaxWidth(0.78f)
-                        .aspectRatio(1f),
-                    cornerRadius = 26.dp,
-                )
-                Spacer(Modifier.height(20.dp))
-                PlayerDetails(
-                    track = track,
-                    state = state,
-                    isFavorite = isFavorite,
-                    favoriteCategories = favoriteCategories,
-                    canDownload = canDownload,
-                    downloadQuality = downloadQuality,
-                    downloadQualities = downloadQualities,
-                    onToggleFavorite = onToggleFavorite,
-                    onAddFavorite = onAddFavorite,
-                    onNewCategory = onNewCategory,
-                    onDownload = onDownload,
-                    onDownloadQualityChange = onDownloadQualityChange,
-                    onSeek = onSeek,
-                    onTogglePlayPause = onTogglePlayPause,
-                    onPrevious = onPrevious,
-                    onNext = onNext,
-                    onCyclePlayMode = onCyclePlayMode,
-                    preferredProviderId = preferredProviderId,
-                    onSelectSource = onSelectSource,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+            maxWidth * 0.78f
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.height(if (twoPane) 4.dp else 10.dp))
+            TrackArtwork(
+                track = track,
+                artworkUrl = artworkUrl,
+                requestRemoteArtwork = true,
+                modifier = Modifier.size(artworkSize),
+                cornerRadius = if (twoPane) 22.dp else 26.dp,
+            )
+            Spacer(Modifier.height(if (twoPane) 14.dp else 20.dp))
+            PlayerDetails(
+                track = track,
+                state = state,
+                isFavorite = isFavorite,
+                favoriteCategories = favoriteCategories,
+                canDownload = canDownload,
+                downloadQuality = downloadQuality,
+                downloadQualities = downloadQualities,
+                onToggleFavorite = onToggleFavorite,
+                onAddFavorite = onAddFavorite,
+                onNewCategory = onNewCategory,
+                onDownload = onDownload,
+                onDownloadQualityChange = onDownloadQualityChange,
+                onSeek = onSeek,
+                onTogglePlayPause = onTogglePlayPause,
+                onPrevious = onPrevious,
+                onNext = onNext,
+                onCyclePlayMode = onCyclePlayMode,
+                preferredProviderId = preferredProviderId,
+                onSelectSource = onSelectSource,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (!twoPane) {
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "左滑查看歌词",

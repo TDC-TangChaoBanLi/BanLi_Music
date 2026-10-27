@@ -6,6 +6,12 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 enum class WidgetTheme { SYSTEM, BLACK, WHITE }
 
+/** Side used by the tablet navigation rail; ignored on phones. */
+enum class TabletNavPosition { LEFT, RIGHT }
+
+/** Vertical position of the tablet mini player relative to page content. */
+enum class TabletMiniPlayerPosition { TOP, BOTTOM }
+
 const val DEFAULT_CACHE_MAX_BYTES = 200L * 1024L * 1024L
 const val MIN_CACHE_MAX_BYTES = 50L * 1024L * 1024L
 const val MAX_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L
@@ -111,6 +117,10 @@ data class AppSettings(
     val autoLoadArtwork: Boolean = true,
     val cacheMaxBytes: Long = DEFAULT_CACHE_MAX_BYTES,
     val bottomNavItems: List<String> = DEFAULT_BOTTOM_NAV_ITEMS,
+    /** Side used by the tablet navigation rail; the phone bottom bar ignores it. */
+    val tabletNavPosition: TabletNavPosition = TabletNavPosition.LEFT,
+    /** Tablet mini player position; defaults to the bottom edge. */
+    val tabletMiniPlayerPosition: TabletMiniPlayerPosition = TabletMiniPlayerPosition.BOTTOM,
     val agreementAccepted: Boolean = false,
     val defaultFavoriteCategory: String = DEFAULT_FAVORITE_CATEGORY,
     /** User defined order of favourite folders; unknown folders fall back to name order. */

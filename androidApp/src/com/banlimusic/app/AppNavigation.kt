@@ -49,6 +49,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.banlimusic.app.core.datastore.AppSettings
+import com.banlimusic.app.core.datastore.TabletMiniPlayerPosition
+import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.app.core.datastore.resolveNavStart
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.feature.downloads.DownloadsScreen
@@ -158,131 +160,143 @@ fun AppRoot(
         onWidgetRequestHandled()
     }
 
+    val miniPlayer: @Composable () -> Unit = {
+        MiniPlayer(
+            state = playbackState,
+            onClick = {
+                navController.navigate(Routes.PLAYER) { launchSingleTop = true }
+            },
+            onTogglePlayPause = playback::togglePlayPause,
+            onNext = playback::next,
+            onPrevious = playback::previous,
+            isFavorite = playbackState.currentTrack?.id in favoriteIds,
+            onToggleFavorite = {
+                val current = playbackState.currentTrack
+                if (current != null) {
+                    scope.launch {
+                        container.libraryRepository.toggleFavorite(
+                            current,
+                            settings.defaultFavoriteCategory,
+                        )
+                    }
+                }
+            },
+        )
+    }
+
     CompositionLocalProvider(
         LocalRequestListArtwork provides settings.requestListArtwork,
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val isTablet = LocalConfiguration.current.smallestScreenWidthDp >= 600
             if (isTablet) {
-            Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                ) {
-                    if (showNavigation) {
-                        NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
-                            destinations.forEach { destination ->
-                                NavigationRailItem(
-                                    selected = currentRoute == destination.route,
-                                    onClick = { navigateTo(destination.route) },
-                                    icon = {
-                                        Icon(destination.icon, contentDescription = destination.label)
-                                    },
-                                    label = { Text(destination.label) },
-                                )
+                val navOnRight = settings.tabletNavPosition == TabletNavPosition.RIGHT
+                val miniPlayerAtTop =
+                    settings.tabletMiniPlayerPosition == TabletMiniPlayerPosition.TOP
+                Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                    ) {
+                        if (showNavigation && !navOnRight) {
+                            TabletNavigationRail(
+                                destinations = destinations,
+                                currentRoute = currentRoute,
+                                onNavigate = ::navigateTo,
+                            )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .weight(1f),
+                        ) {
+                            if (showNavigation && miniPlayerAtTop) {
+                                miniPlayer()
+                            }
+                            AppNavHost(
+                                navController = navController,
+                                playQueue = ::playQueue,
+                                navigateTopLevel = ::navigateTo,
+                                onExitApp = onExitApp,
+                                navOrder = destinations.map { it.route },
+                                startDestination = startDestination,
+                                verticalTransitions = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                            )
+                            if (showNavigation && !miniPlayerAtTop) {
+                                miniPlayer()
                             }
                         }
-                    }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .weight(1f),
-                    ) {
-                        if (showNavigation) {
-                            MiniPlayer(
-                                state = playbackState,
-                                onClick = {
-                                    navController.navigate(Routes.PLAYER) { launchSingleTop = true }
-                                },
-                                onTogglePlayPause = playback::togglePlayPause,
-                                onNext = playback::next,
-                                onPrevious = playback::previous,
-                                isFavorite = playbackState.currentTrack?.id in favoriteIds,
-                                onToggleFavorite = {
-                                    val current = playbackState.currentTrack
-                                    if (current != null) {
-                                        scope.launch {
-                                            container.libraryRepository.toggleFavorite(
-                                                current,
-                                                settings.defaultFavoriteCategory,
-                                            )
-                                        }
-                                    }
-                                },
+                        if (showNavigation && navOnRight) {
+                            TabletNavigationRail(
+                                destinations = destinations,
+                                currentRoute = currentRoute,
+                                onNavigate = ::navigateTo,
                             )
                         }
-                        AppNavHost(
-                            navController = navController,
-                            playQueue = ::playQueue,
-                            navigateTopLevel = ::navigateTo,
-                            onExitApp = onExitApp,
-                            navOrder = destinations.map { it.route },
-                            startDestination = startDestination,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                        )
                     }
                 }
-            }
-        } else {
-            Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
-                bottomBar = {
-                    if (showNavigation) {
-                        Column {
-                            MiniPlayer(
-                                state = playbackState,
-                                onClick = {
-                                    navController.navigate(Routes.PLAYER) { launchSingleTop = true }
-                                },
-                                onTogglePlayPause = playback::togglePlayPause,
-                                onNext = playback::next,
-                                onPrevious = playback::previous,
-                                isFavorite = playbackState.currentTrack?.id in favoriteIds,
-                                onToggleFavorite = {
-                                    val current = playbackState.currentTrack
-                                    if (current != null) {
-                                        scope.launch {
-                                            container.libraryRepository.toggleFavorite(
-                                                current,
-                                                settings.defaultFavoriteCategory,
-                                            )
-                                        }
+            } else {
+                Scaffold(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    bottomBar = {
+                        if (showNavigation) {
+                            Column {
+                                miniPlayer()
+                                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                                    destinations.forEach { destination ->
+                                        NavigationBarItem(
+                                            selected = currentRoute == destination.route,
+                                            onClick = { navigateTo(destination.route) },
+                                            icon = {
+                                                Icon(
+                                                    destination.icon,
+                                                    contentDescription = destination.label,
+                                                )
+                                            },
+                                            label = { Text(destination.label) },
+                                        )
                                     }
-                                },
-                            )
-                            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                                destinations.forEach { destination ->
-                                    NavigationBarItem(
-                                        selected = currentRoute == destination.route,
-                                        onClick = { navigateTo(destination.route) },
-                                        icon = {
-                                            Icon(
-                                                destination.icon,
-                                                contentDescription = destination.label,
-                                            )
-                                        },
-                                        label = { Text(destination.label) },
-                                    )
                                 }
                             }
                         }
-                    }
-                },
-            ) { padding ->
-                AppNavHost(
-                    navController = navController,
-                    playQueue = ::playQueue,
-                    navigateTopLevel = ::navigateTo,
-                    onExitApp = onExitApp,
-                    navOrder = destinations.map { it.route },
-                    startDestination = startDestination,
-                    modifier = Modifier.padding(padding),
-                )
+                    },
+                ) { padding ->
+                    AppNavHost(
+                        navController = navController,
+                        playQueue = ::playQueue,
+                        navigateTopLevel = ::navigateTo,
+                        onExitApp = onExitApp,
+                        navOrder = destinations.map { it.route },
+                        startDestination = startDestination,
+                        verticalTransitions = false,
+                        modifier = Modifier.padding(padding),
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun TabletNavigationRail(
+    destinations: List<BottomDestination>,
+    currentRoute: String,
+    onNavigate: (String) -> Unit,
+) {
+    NavigationRail(containerColor = MaterialTheme.colorScheme.surface) {
+        destinations.forEach { destination ->
+            NavigationRailItem(
+                selected = currentRoute == destination.route,
+                onClick = { onNavigate(destination.route) },
+                icon = {
+                    Icon(destination.icon, contentDescription = destination.label)
+                },
+                label = { Text(destination.label) },
+            )
         }
     }
 }
@@ -295,6 +309,7 @@ private fun AppNavHost(
     onExitApp: () -> Unit,
     navOrder: List<String>,
     startDestination: String,
+    verticalTransitions: Boolean,
     modifier: Modifier = Modifier,
 ) {
     fun indexOf(route: String?): Int = navOrder.indexOf(route).takeIf { it >= 0 } ?: 0
@@ -306,9 +321,15 @@ private fun AppNavHost(
         enterTransition = {
             val forward = indexOf(targetState.destination.route) >=
                 indexOf(initialState.destination.route)
-            slideInHorizontally(
-                animationSpec = tween(260, easing = FastOutSlowInEasing),
-            ) { width -> if (forward) width else -width }
+            if (verticalTransitions) {
+                slideInVertically(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                ) { height -> if (forward) height else -height }
+            } else {
+                slideInHorizontally(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                ) { width -> if (forward) width else -width }
+            }
         },
         exitTransition = {
             if (targetState.destination.route == Routes.PLAYER) {
@@ -317,9 +338,15 @@ private fun AppNavHost(
             } else {
                 val forward = indexOf(targetState.destination.route) >=
                     indexOf(initialState.destination.route)
-                slideOutHorizontally(
-                    animationSpec = tween(260, easing = FastOutSlowInEasing),
-                ) { width -> if (forward) -width else width }
+                if (verticalTransitions) {
+                    slideOutVertically(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                    ) { height -> if (forward) -height else height }
+                } else {
+                    slideOutHorizontally(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                    ) { width -> if (forward) -width else width }
+                }
             }
         },
         popEnterTransition = {
@@ -329,17 +356,29 @@ private fun AppNavHost(
             } else {
                 val forward = indexOf(targetState.destination.route) >=
                     indexOf(initialState.destination.route)
-                slideInHorizontally(
-                    animationSpec = tween(260, easing = FastOutSlowInEasing),
-                ) { width -> if (forward) width else -width }
+                if (verticalTransitions) {
+                    slideInVertically(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                    ) { height -> if (forward) height else -height }
+                } else {
+                    slideInHorizontally(
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                    ) { width -> if (forward) width else -width }
+                }
             }
         },
         popExitTransition = {
             val forward = indexOf(targetState.destination.route) >=
                 indexOf(initialState.destination.route)
-            slideOutHorizontally(
-                animationSpec = tween(260, easing = FastOutSlowInEasing),
-            ) { width -> if (forward) -width else width }
+            if (verticalTransitions) {
+                slideOutVertically(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                ) { height -> if (forward) -height else height }
+            } else {
+                slideOutHorizontally(
+                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                ) { width -> if (forward) -width else width }
+            }
         },
     ) {
         composable(Routes.HOME) {

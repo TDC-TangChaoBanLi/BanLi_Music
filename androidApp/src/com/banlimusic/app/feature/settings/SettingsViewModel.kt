@@ -11,6 +11,8 @@ import com.banlimusic.app.core.cache.CachedTrack
 import com.banlimusic.app.core.datastore.AppSettings
 import com.banlimusic.app.core.datastore.CustomSourceSettings
 import com.banlimusic.app.core.datastore.SettingsRepository
+import com.banlimusic.app.core.datastore.TabletMiniPlayerPosition
+import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.app.core.datastore.ThemeMode
 import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.core.limiter.RateLimitStatus
@@ -137,6 +139,12 @@ class SettingsViewModel(
 
     fun setBottomNavItems(items: List<String>) =
         viewModelScope.launch { settings.setBottomNavItems(items) }
+
+    fun setTabletNavPosition(position: TabletNavPosition) =
+        viewModelScope.launch { settings.setTabletNavPosition(position) }
+
+    fun setTabletMiniPlayerPosition(position: TabletMiniPlayerPosition) =
+        viewModelScope.launch { settings.setTabletMiniPlayerPosition(position) }
 
     fun setDefaultNavItem(item: String) =
         viewModelScope.launch { settings.setDefaultNavItem(item) }
