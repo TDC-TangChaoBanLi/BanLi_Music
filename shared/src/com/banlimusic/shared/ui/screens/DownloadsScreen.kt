@@ -110,6 +110,8 @@ data class DownloadItemUi(
 data class DownloadsUiState(
     val items: List<DownloadItemUi> = emptyList(),
     val directoryHint: String = "",
+    /** Desktop uses mouse drag selection instead of long-press drag selection. */
+    val immediateDragSelection: Boolean = false,
 )
 
 interface DownloadsActions {
@@ -310,6 +312,7 @@ fun BanLiDownloadsScreen(
                     onSort = { sort = it },
                     onToggleOrder = { ascending = !ascending },
                     modifier = Modifier.weight(1f),
+                    immediateDragSelection = state.immediateDragSelection,
                     countActions = {
                         CompactTextButton(text = "导入清单", onClick = actions::importManifest)
                         if (sorted.isNotEmpty()) {

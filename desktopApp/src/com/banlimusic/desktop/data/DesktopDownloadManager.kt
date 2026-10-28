@@ -173,6 +173,37 @@ class DesktopDownloadManager(
         persist()
     }
 
+    /** Copies a completed playback-cache file into the download directory. */
+    suspend fun adoptCached(track: Track, source: File, qualityKbps: Int): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!source.isFile || source.length() <= 0L) return@withContext false
+            val directory = downloadDirectory()
+            Files.createDirectories(directory)
+            val extension = source.extension.lowercase().takeIf { it in AUDIO_EXTENSIONS }
+                ?: "mp3"
+            val finalFile = directory.resolve("${fileName(track, track.id)}.$extension").toFile()
+            runCatching { source.copyTo(finalFile, overwrite = true) }.getOrElse {
+                return@withContext false
+            }
+            writeSidecars(track, finalFile)
+            val now = System.currentTimeMillis()
+            val task = DesktopDownloadTask(
+                id = track.id,
+                track = track,
+                qualityKbps = qualityKbps.coerceIn(128, 320),
+                status = DesktopDownloadStatus.COMPLETED,
+                bytesDownloaded = finalFile.length(),
+                totalBytes = finalFile.length(),
+                filePath = finalFile.absolutePath,
+                error = null,
+                createdAt = now,
+                updatedAt = now,
+            )
+            _tasks.update { list -> listOf(task) + list.filterNot { it.id == track.id } }
+            persist()
+            true
+        }
+
     fun cancelAll() {
         jobs.keys.toList().forEach(::cancel)
     }

@@ -110,6 +110,8 @@ data class LibraryUiState(
     val preferredSources: Map<String, String> = emptyMap(),
     /** False on platforms without a source picker; hides the tappable "+N" badge. */
     val supportsSourcePicker: Boolean = true,
+    /** Desktop uses mouse drag selection instead of long-press drag selection. */
+    val immediateDragSelection: Boolean = false,
 )
 
 /**
@@ -729,6 +731,7 @@ private fun LibrarySearchContent(
                     )
                 },
                 modifier = Modifier.weight(1f),
+                immediateDragSelection = state.immediateDragSelection,
                 countActions = {
                     CompactTextButton(
                         text = "选择",
@@ -853,6 +856,7 @@ private fun FavoritesTabContent(
             CompactTextButton(text = "+ 新建", onClick = onCreateCategory)
             CompactTextButton(text = "管理", onClick = onManageCategories)
         },
+        immediateDragSelection = state.immediateDragSelection,
         emptyContent = {
             BanLiEmptyState(
                 title = if (selectedCategory == null) "还没有收藏歌曲" else "这个收藏夹是空的",
@@ -977,6 +981,7 @@ private fun HistoryTabContent(
             )
         },
         modifier = modifier,
+        immediateDragSelection = state.immediateDragSelection,
         selectionBar = {
             TrackSelectionActionBar(
                 categories = (categories + defaultCategory).mergeCategoryLabels(),
@@ -1121,6 +1126,7 @@ private fun LocalTabContent(
             )
         },
         modifier = modifier,
+        immediateDragSelection = state.immediateDragSelection,
         selectionBar = {
             TrackSelectionActionBar(
                 categories = (categories + defaultCategory).mergeCategoryLabels(),

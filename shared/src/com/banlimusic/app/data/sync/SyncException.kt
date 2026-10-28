@@ -9,7 +9,8 @@ sealed class SyncException(message: String, cause: Throwable? = null) : Exceptio
 
     class AuthRequired : SyncException("登录已失效，请重新登录 OneDrive")
 
-    class Network(cause: Throwable? = null) : SyncException("网络连接失败，请检查网络", cause)
+    class Network(cause: Throwable? = null) :
+        SyncException("网络连接失败，请检查网络或系统代理设置", cause)
 
     class Timeout(cause: Throwable? = null) : SyncException("连接 OneDrive 超时，请稍后重试", cause)
 
@@ -34,6 +35,7 @@ fun Throwable.syncUserMessage(): String = when (this) {
     }
 
     is SyncException -> message ?: "同步失败"
-    is java.io.IOException -> "网络连接失败，请检查网络"
+    is java.net.BindException -> "本地端口被占用，请关闭占用端口的程序后重试"
+    is java.io.IOException -> "网络连接失败，请检查网络或系统代理设置"
     else -> message ?: "同步失败"
 }

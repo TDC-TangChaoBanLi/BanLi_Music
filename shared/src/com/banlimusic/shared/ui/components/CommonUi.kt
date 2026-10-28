@@ -6,6 +6,8 @@ package com.banlimusic.shared.ui.components
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,10 +34,13 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +55,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -59,6 +65,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -666,6 +674,8 @@ fun BanLiPlaybackBar(
     controls: @Composable RowScope.() -> Unit,
     modifier: Modifier = Modifier,
     extraInfo: (@Composable ColumnScope.() -> Unit)? = null,
+    /** Receives a 0..1 fraction; null keeps the bar display-only. */
+    onSeek: ((Float) -> Unit)? = null,
 ) {
     Surface(
         modifier = modifier
@@ -710,17 +720,78 @@ fun BanLiPlaybackBar(
                 controls()
             }
             // A plain Box draws the fraction on every Compose target. Material3's
-            // indicator was invisible on some desktop Skiko backends.
+            // indicator was invisible on some desktop Skiko backends. The
+            // horizontal inset keeps the track away from the rounded corners.
+            SeekableProgressBar(
+                progress = progress,
+                onSeek = onSeek,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SeekableProgressBar(
+    progress: Float,
+    onSeek: ((Float) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    var width by remember { mutableIntStateOf(1) }
+    var dragFraction by remember { mutableStateOf<Float?>(null) }
+    val displayProgress = dragFraction ?: progress.coerceIn(0f, 1f)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(16.dp)
+                .padding(horizontal = 12.dp)
+                .onSizeChanged { width = it.width.coerceAtLeast(1) }
+                .then(
+                    if (onSeek == null) {
+                        Modifier
+                    } else {
+                        Modifier.pointerInput(onSeek) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                fun fractionAt(x: Float): Float =
+                                    (x / width).coerceIn(0f, 1f)
+                                dragFraction = fractionAt(down.position.x)
+                                down.consume()
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes
+                                        .firstOrNull { it.id == down.id } ?: break
+                                    dragFraction = fractionAt(change.position.x)
+                                    change.consume()
+                                    if (!change.pressed) {
+                                        onSeek(dragFraction ?: fractionAt(change.position.x))
+                                        dragFraction = null
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                    },
+                ),
+            contentAlignment = Alignment.CenterStart,
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(3.dp)
+                    .clip(RoundedCornerShape(50))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .fillMaxWidth(displayProgress)
                         .height(3.dp)
+                        .clip(RoundedCornerShape(50))
                         .background(MaterialTheme.colorScheme.primary),
                 )
             }
@@ -744,6 +815,8 @@ fun BanLiPlaybackControls(
     onNext: () -> Unit,
     onCyclePlayMode: () -> Unit,
     modifier: Modifier = Modifier,
+    volume: Float? = null,
+    onVolumeChange: ((Float) -> Unit)? = null,
 ) {
     Box(modifier = modifier.fillMaxWidth()) {
         IconButton(
@@ -813,6 +886,60 @@ fun BanLiPlaybackControls(
                     Icons.Rounded.SkipNext,
                     contentDescription = "下一首",
                     modifier = Modifier.size(34.dp),
+                )
+            }
+        }
+        if (volume != null && onVolumeChange != null) {
+            VolumeControl(
+                volume = volume,
+                onVolumeChange = onVolumeChange,
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
+    }
+}
+
+/** Desktop-only volume popup; Android uses the system media volume. */
+@Composable
+fun VolumeControl(
+    volume: Float,
+    onVolumeChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val safeVolume = volume.coerceIn(0f, 1f)
+    Box(modifier = modifier) {
+        IconButton(
+            onClick = { expanded = true },
+            modifier = Modifier.size(38.dp),
+        ) {
+            Icon(
+                imageVector = if (safeVolume <= 0.01f) {
+                    Icons.Rounded.VolumeOff
+                } else {
+                    Icons.Rounded.VolumeUp
+                },
+                contentDescription = "音量 ${(safeVolume * 100).toInt()}%",
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(190.dp)
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = "音量 ${(safeVolume * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Slider(
+                    value = safeVolume,
+                    onValueChange = onVolumeChange,
+                    valueRange = 0f..1f,
                 )
             }
         }

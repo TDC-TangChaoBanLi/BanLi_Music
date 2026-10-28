@@ -1,8 +1,28 @@
 package com.banlimusic.desktop
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.window.WindowDraggableArea
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CropSquare
+import androidx.compose.material.icons.rounded.FilterNone
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -11,12 +31,25 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.awt.ComposeWindow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowDecoration
+import androidx.compose.ui.window.WindowPlacement
+import androidx.compose.ui.window.WindowScope
+import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.banlimusic.desktop.ui.BanLiDesktopTheme
@@ -40,40 +73,201 @@ import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.shared.ui.navigation.BanLiNavigationLayout
 import com.banlimusic.shared.ui.navigation.BanLiNavigationSide
 import java.awt.Dimension
+import java.awt.SystemTray
+import javax.swing.SwingUtilities
 import org.jetbrains.compose.resources.painterResource
 
-fun main() = application {
+fun main() {
+    // Let the JVM use the OS proxy settings; Microsoft endpoints are often
+    // reachable only through the user's system proxy.
+    System.setProperty("java.net.useSystemProxies", "true")
+    launchDesktop()
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+private fun launchDesktop() = application {
     val container = remember { DesktopContainer() }
     DisposableEffect(container) {
         onDispose { container.close() }
     }
+    val windowState = rememberWindowState(width = 1280.dp, height = 840.dp)
+    val traySupported = remember { SystemTray.isSupported() }
+    var windowVisible by remember { mutableStateOf(true) }
+    var windowRef by remember { mutableStateOf<ComposeWindow?>(null) }
+
+    fun showWindow() {
+        windowVisible = true
+        SwingUtilities.invokeLater {
+            windowRef?.apply {
+                isVisible = true
+                toFront()
+                requestFocus()
+            }
+        }
+    }
+
+    fun hideWindow() {
+        if (traySupported) windowVisible = false else exitApplication()
+    }
+
+    if (traySupported) {
+        Tray(
+            icon = painterResource(Res.drawable.banli_logo),
+            tooltip = "BanLiMusic",
+            onAction = { showWindow() },
+        ) {
+            Item("Show BanLiMusic", onClick = { showWindow() })
+            Separator()
+            Item("Exit BanLiMusic", onClick = { exitApplication() })
+        }
+    }
+
     Window(
-        onCloseRequest = ::exitApplication,
+        visible = windowVisible,
+        onCloseRequest = { hideWindow() },
         title = "BanLiMusic",
         icon = painterResource(Res.drawable.banli_logo),
-        state = rememberWindowState(width = 1280.dp, height = 840.dp),
+        state = windowState,
+        decoration = WindowDecoration.Undecorated(),
     ) {
-        LaunchedEffect(Unit) {
+        LaunchedEffect(window) {
             window.minimumSize = Dimension(1_000, 680)
+            windowRef = window
         }
-        DesktopApp(container = container, onExit = ::exitApplication)
+        DesktopApp(
+            container = container,
+            windowState = windowState,
+            onExit = ::exitApplication,
+            onClose = { hideWindow() },
+        )
     }
 }
 
 @Composable
-private fun DesktopApp(container: DesktopContainer, onExit: () -> Unit) {
+private fun WindowScope.DesktopApp(
+    container: DesktopContainer,
+    windowState: WindowState,
+    onExit: () -> Unit,
+    onClose: () -> Unit,
+) {
     val settings by container.settingsRepository.settings.collectAsState()
-    BanLiDesktopTheme(settings.themeMode) {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            if (!settings.agreementAccepted) {
-                DesktopAgreementScreen(
-                    onAccept = { container.settingsRepository.setAgreementAccepted(true) },
-                    onExit = onExit,
+    var maximized by remember {
+        mutableStateOf(windowState.placement == WindowPlacement.Maximized)
+    }
+
+    fun toggleMaximize() {
+        maximized = !maximized
+        windowState.placement = if (maximized) {
+            WindowPlacement.Maximized
+        } else {
+            WindowPlacement.Floating
+        }
+    }
+
+    BanLiDesktopTheme(settings.themeMode, settings.customThemeColor) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                DesktopTitleBar(
+                    maximized = maximized,
+                    onMinimize = { windowState.isMinimized = true },
+                    onToggleMaximize = ::toggleMaximize,
+                    onClose = onClose,
                 )
-            } else {
-                DesktopMain(container)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    if (!settings.agreementAccepted) {
+                        DesktopAgreementScreen(
+                            onAccept = { container.settingsRepository.setAgreementAccepted(true) },
+                            onExit = onExit,
+                        )
+                    } else {
+                        DesktopMain(container)
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun WindowScope.DesktopTitleBar(
+    maximized: Boolean,
+    onMinimize: () -> Unit,
+    onToggleMaximize: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            WindowDraggableArea(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Image(
+                        painter = painterResource(Res.drawable.banli_logo),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(RoundedCornerShape(5.dp)),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "BanLiMusic",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            TitleBarButton(Icons.Rounded.Remove, "最小化", onMinimize)
+            TitleBarButton(
+                icon = if (maximized) Icons.Rounded.FilterNone else Icons.Rounded.CropSquare,
+                description = if (maximized) "还原" else "最大化",
+                onClick = onToggleMaximize,
+            )
+            TitleBarButton(Icons.Rounded.Close, "关闭", onClose)
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+@Composable
+private fun TitleBarButton(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.size(width = 46.dp, height = 40.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.size(16.dp),
+        )
     }
 }
 
@@ -82,6 +276,9 @@ private fun DesktopMain(container: DesktopContainer) {
     val scope = rememberCoroutineScope()
     val state = remember(container, scope) { DesktopAppState(container, scope) }
     val settings by state.settings.collectAsState()
+    LaunchedEffect(Unit) {
+        state.container.syncRepository.maybeSyncOnStart()
+    }
     val orderedTabs = remember(settings.bottomNavItems) {
         val order = settings.bottomNavItems.withIndex().associate { it.value to it.index }
         DesktopTab.entries.sortedBy { order[it.id] ?: Int.MAX_VALUE }

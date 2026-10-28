@@ -5,6 +5,7 @@ import com.banlimusic.app.core.datastore.GdProviderSettings
 import com.banlimusic.app.core.datastore.MAX_API_LIMIT_PER_WINDOW
 import com.banlimusic.app.core.datastore.ProviderSettings
 import com.banlimusic.app.core.datastore.SUPPORTED_SOURCES
+import com.banlimusic.app.core.datastore.SyncSettings
 import com.banlimusic.app.core.datastore.TabletMiniPlayerPosition
 import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.app.core.datastore.ThemeMode
@@ -159,6 +160,24 @@ class DesktopSettingsRepository {
         prefs.put(KEY_WIDGET_THEME, theme.name)
     }
 
+    fun setDesktopFloatingLyrics(enabled: Boolean) = update {
+        prefs.putBoolean(KEY_FLOATING_LYRICS, enabled)
+    }
+
+    fun setSyncAutoSync(enabled: Boolean) = update {
+        prefs.putBoolean(KEY_SYNC_AUTO, enabled)
+    }
+
+    fun setSyncIntervalHours(hours: Int) = update {
+        prefs.putInt(
+            KEY_SYNC_INTERVAL,
+            hours.coerceIn(
+                com.banlimusic.app.core.datastore.MIN_SYNC_INTERVAL_HOURS,
+                com.banlimusic.app.core.datastore.MAX_SYNC_INTERVAL_HOURS,
+            ),
+        )
+    }
+
     private fun enabledSources(): Set<String> {
         val known = SUPPORTED_SOURCES.map { it.id }.toSet()
         val stored = prefs.get(KEY_SOURCES, "netease")
@@ -187,7 +206,7 @@ class DesktopSettingsRepository {
             customThemeColor = prefs.get(KEY_CUSTOM_COLOR, null)?.toIntOrNull(),
             providers = ProviderSettings(gd = gd),
             agreementAccepted = prefs.getBoolean(KEY_AGREEMENT, false),
-            requestListArtwork = prefs.getBoolean(KEY_LIST_ARTWORK, true),
+            requestListArtwork = prefs.getBoolean(KEY_LIST_ARTWORK, false),
             downloadDirectory = prefs.get(KEY_DOWNLOAD_DIR, ""),
             downloadQualityKbps = prefs.getInt(KEY_DOWNLOAD_QUALITY, 320)
                 .coerceToDesktopQuality(),
@@ -228,6 +247,14 @@ class DesktopSettingsRepository {
             widgetTheme = runCatching {
                 WidgetTheme.valueOf(prefs.get(KEY_WIDGET_THEME, WidgetTheme.SYSTEM.name))
             }.getOrDefault(WidgetTheme.SYSTEM),
+            desktopFloatingLyrics = prefs.getBoolean(KEY_FLOATING_LYRICS, false),
+            sync = SyncSettings(
+                autoSync = prefs.getBoolean(KEY_SYNC_AUTO, false),
+                intervalHours = prefs.getInt(KEY_SYNC_INTERVAL, 6).coerceIn(
+                    com.banlimusic.app.core.datastore.MIN_SYNC_INTERVAL_HOURS,
+                    com.banlimusic.app.core.datastore.MAX_SYNC_INTERVAL_HOURS,
+                ),
+            ),
         )
     }
 
@@ -274,5 +301,8 @@ class DesktopSettingsRepository {
         private const val KEY_AUTO_IMPORT = "auto_import_local_music"
         private const val KEY_WIDGET_THEME = "widget_theme"
         private const val KEY_HIGH_REFRESH = "high_refresh_lists"
+        private const val KEY_FLOATING_LYRICS = "desktop_floating_lyrics"
+        private const val KEY_SYNC_AUTO = "sync_auto"
+        private const val KEY_SYNC_INTERVAL = "sync_interval_hours"
     }
 }

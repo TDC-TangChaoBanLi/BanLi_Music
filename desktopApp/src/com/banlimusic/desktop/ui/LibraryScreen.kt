@@ -135,6 +135,7 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
             downloadedIds = completed.mapTo(mutableSetOf()) { it.track.id },
             preferredSources = emptyMap(),
             supportsSourcePicker = false,
+            immediateDragSelection = true,
         ),
         actions = actions,
         artwork = { track, artworkModifier ->

@@ -142,6 +142,7 @@ import com.banlimusic.shared.ui.components.TrackListHeaderSpec
 import com.banlimusic.shared.ui.components.TrackListPanel
 import com.banlimusic.shared.ui.components.formatBytes
 import com.banlimusic.shared.ui.components.qualityShortLabel
+import com.banlimusic.shared.ui.theme.BANLI_DEFAULT_SEED
 import org.jetbrains.compose.resources.painterResource
 
 private const val MIB = 1024L * 1024L
@@ -155,6 +156,9 @@ private val CUSTOM_THEME_SWATCHES = listOf(
     0xFFEA580C.toInt(),
     0xFFCA8A04.toInt(),
 )
+
+/** Platform-specific switches inside the shared settings page. */
+enum class SettingsPlatform { ANDROID, DESKTOP }
 
 /** Cloud sync snapshot without importing Android-specific classes. */
 enum class SyncAuthState { NOT_CONFIGURED, SIGNED_OUT, SIGNED_IN }
@@ -191,6 +195,7 @@ data class SettingsUiState(
     val audioCacheSupported: Boolean = true,
     /** Desktop offers a native directory picker; Android edits the path directly. */
     val supportsDirectoryPicker: Boolean = false,
+    val platform: SettingsPlatform = SettingsPlatform.ANDROID,
 )
 
 interface SettingsActions {
@@ -203,6 +208,7 @@ interface SettingsActions {
     fun setTabletNavPosition(position: TabletNavPosition) {}
     fun setTabletMiniPlayerPosition(position: TabletMiniPlayerPosition) {}
     fun setWidgetTheme(theme: WidgetTheme) {}
+    fun setDesktopFloatingLyrics(enabled: Boolean) {}
 
     fun setAllowMobileNetwork(enabled: Boolean) {}
     fun setDefaultShowLyrics(enabled: Boolean) {}
@@ -437,22 +443,34 @@ private fun AppearanceSettings(state: SettingsUiState, actions: SettingsActions)
                     )
                 }
             }
-            BanLiSettingsSwitchRow(
-                icon = Icons.Rounded.ColorLens,
-                title = "动态取色",
-                description = "Android 12+ 使用系统壁纸颜色；桌面端始终使用统一配色",
-                checked = settings.dynamicColor,
-                onCheckedChange = actions::setDynamicColor,
-            )
-            BanLiSettingsSwitchRow(
-                icon = Icons.Rounded.Speed,
-                title = "列表高刷新率",
-                description = "Android 端浏览列表时尝试使用 90Hz 显示模式",
-                checked = settings.highRefreshRateLists,
-                onCheckedChange = actions::setHighRefreshRateLists,
-            )
+            if (state.platform == SettingsPlatform.DESKTOP) {
+                BanLiSettingsSwitchRow(
+                    icon = Icons.Rounded.Palette,
+                    title = "默认主题",
+                    description = "使用应用内置的暖色主题；关闭后可选择自定义主题色",
+                    checked = settings.customThemeColor == null,
+                    onCheckedChange = { enabled ->
+                        actions.setCustomThemeColor(if (enabled) null else BANLI_DEFAULT_SEED)
+                    },
+                )
+            } else {
+                BanLiSettingsSwitchRow(
+                    icon = Icons.Rounded.ColorLens,
+                    title = "动态取色",
+                    description = "Android 12+ 使用系统壁纸颜色；关闭后可自定义主题颜色",
+                    checked = settings.dynamicColor,
+                    onCheckedChange = actions::setDynamicColor,
+                )
+                BanLiSettingsSwitchRow(
+                    icon = Icons.Rounded.Speed,
+                    title = "列表高刷新率",
+                    description = "浏览列表时尝试使用 90Hz 显示模式",
+                    checked = settings.highRefreshRateLists,
+                    onCheckedChange = actions::setHighRefreshRateLists,
+                )
+            }
             HorizontalDivider()
-            if (settings.dynamicColor) {
+            if (state.platform != SettingsPlatform.DESKTOP && settings.dynamicColor) {
                 BanLiSettingsSectionLabel(Icons.Rounded.ColorLens, "自定义主题颜色")
                 Text(
                     text = "关闭“动态取色”后才能自定义主题颜色。",
@@ -564,25 +582,45 @@ private fun AppearanceSettings(state: SettingsUiState, actions: SettingsActions)
             )
         }
 
-        BanLiSettingsCard(title = "桌面小组件", leading = { SettingsIcon(Icons.Rounded.Widgets) }) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                WidgetTheme.entries.forEach { theme ->
-                    FilterChip(
-                        selected = settings.widgetTheme == theme,
-                        onClick = { actions.setWidgetTheme(theme) },
-                        label = { Text(widgetThemeLabel(theme)) },
-                    )
-                }
+        if (state.platform == SettingsPlatform.DESKTOP) {
+            BanLiSettingsCard(
+                title = "桌面悬浮歌词",
+                leading = { SettingsIcon(Icons.Rounded.Lyrics) },
+            ) {
+                BanLiSettingsSwitchRow(
+                    icon = Icons.Rounded.Lyrics,
+                    title = "启用桌面悬浮歌词",
+                    description = "功能开发中；当前仅保存开关状态，不会创建悬浮窗口",
+                    checked = settings.desktopFloatingLyrics,
+                    onCheckedChange = actions::setDesktopFloatingLyrics,
+                )
+                Text(
+                    text = "后续版本将支持在桌面显示当前歌词，并提供置顶、透明度和锁定选项。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text(
-                if (state.widgetSupported) {
-                    "3×1 显示歌名、歌手、播放控件与底部进度条；4×1 额外显示封面与收藏按钮。"
-                } else {
-                    "桌面端暂不提供系统桌面小组件；该设置会保留，便于与 Android 端保持一致。"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        } else {
+            BanLiSettingsCard(title = "桌面小组件", leading = { SettingsIcon(Icons.Rounded.Widgets) }) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    WidgetTheme.entries.forEach { theme ->
+                        FilterChip(
+                            selected = settings.widgetTheme == theme,
+                            onClick = { actions.setWidgetTheme(theme) },
+                            label = { Text(widgetThemeLabel(theme)) },
+                        )
+                    }
+                }
+                Text(
+                    if (state.widgetSupported) {
+                        "3×1 显示歌名、歌手、播放控件与底部进度条；4×1 额外显示封面与收藏按钮。"
+                    } else {
+                        "当前平台不提供系统桌面小组件。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -712,13 +750,15 @@ private fun PlaybackSettings(state: SettingsUiState, actions: SettingsActions) {
     val settings = state.settings
 
     BanLiSettingsCard(title = "播放行为", leading = { SettingsIcon(Icons.Rounded.PlayCircle) }) {
-        BanLiSettingsSwitchRow(
-            icon = Icons.Rounded.Wifi,
-            title = "允许移动网络播放",
-            description = "关闭后仅在 Wi-Fi 等非计费网络下播放和下载",
-            checked = settings.allowMobileNetwork,
-            onCheckedChange = actions::setAllowMobileNetwork,
-        )
+        if (state.platform == SettingsPlatform.ANDROID) {
+            BanLiSettingsSwitchRow(
+                icon = Icons.Rounded.Wifi,
+                title = "允许移动网络播放",
+                description = "关闭后仅在 Wi-Fi 等非计费网络下播放和下载",
+                checked = settings.allowMobileNetwork,
+                onCheckedChange = actions::setAllowMobileNetwork,
+            )
+        }
         BanLiSettingsSwitchRow(
             icon = Icons.Rounded.Lyrics,
             title = "单曲页默认显示歌词",
@@ -1264,6 +1304,7 @@ private fun CachedTracksPage(
             exitSelection()
         },
         modifier = modifier,
+        immediateDragSelection = state.platform == SettingsPlatform.DESKTOP,
         countActions = {
             CompactTextButton(text = "刷新", onClick = actions::refreshCacheUsage)
             if (sorted.isNotEmpty()) {
@@ -1459,20 +1500,15 @@ private fun SyncSettingsPage(state: SettingsUiState, actions: SettingsActions) {
             if (!sync.supported) {
                 HorizontalDivider()
                 Text(
-                    text = "桌面端云同步暂未开放",
+                    text = "当前平台暂不支持云同步",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.error,
                 )
                 Text(
-                    text = sync.unavailableReason
-                        ?: ("当前 OneDrive 应用注册只包含 Android 平台的签名回调，桌面端需要单独的回调地址。" +
-                            "请在 Android 端登录并同步；桌面端的收藏夹结构与之相同，可通过收藏备份迁移。"),
+                    text = sync.unavailableReason ?: "请使用支持 OneDrive 同步的平台。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedButton(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
-                    Text("登录 Microsoft 账号（桌面端暂未开放）")
-                }
             } else if (!sync.configured) {
                 HorizontalDivider()
                 Text(
@@ -1481,15 +1517,32 @@ private fun SyncSettingsPage(state: SettingsUiState, actions: SettingsActions) {
                     color = MaterialTheme.colorScheme.error,
                 )
                 Text(
-                    text = "请先在 Microsoft Entra 注册应用，然后把 Application (client) ID 填入 " +
-                        "OneDriveConfig.CLIENT_ID。注册时选择“个人 Microsoft 账号”，" +
-                        "添加 Android 平台并填写下面的包名和签名，再授予 " +
-                        "Files.ReadWrite.AppFolder、User.Read、offline_access 权限。",
+                    text = if (state.platform == SettingsPlatform.DESKTOP) {
+                        "请先在 Microsoft Entra 注册应用，然后把 Application (client) ID 填入 " +
+                            "桌面端配置。注册时选择“个人 Microsoft 账号”，在“移动和桌面应用程序”" +
+                            "中添加下面的回调 URI，并允许公共客户端流；再授予 " +
+                            "Files.ReadWrite.AppFolder、User.Read、offline_access 权限。"
+                    } else {
+                        "请先在 Microsoft Entra 注册应用，然后把 Application (client) ID 填入 " +
+                            "OneDriveConfig.CLIENT_ID。注册时选择“个人 Microsoft 账号”，" +
+                            "添加 Android 平台并填写下面的包名和签名，再授予 " +
+                            "Files.ReadWrite.AppFolder、User.Read、offline_access 权限。"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                CopyRow(label = "签名 SHA-1（十六进制）", value = sync.signatureSha1, actions = actions)
-                CopyRow(label = "签名哈希（SHA-1 Base64）", value = sync.signatureHash, actions = actions)
+                if (state.platform == SettingsPlatform.ANDROID) {
+                    CopyRow(
+                        label = "签名 SHA-1（十六进制）",
+                        value = sync.signatureSha1,
+                        actions = actions,
+                    )
+                    CopyRow(
+                        label = "签名哈希（SHA-1 Base64）",
+                        value = sync.signatureHash,
+                        actions = actions,
+                    )
+                }
                 CopyRow(label = "回调 URI", value = sync.redirectUri, actions = actions)
             } else {
                 HorizontalDivider()
@@ -1563,7 +1616,11 @@ private fun SyncSettingsPage(state: SettingsUiState, actions: SettingsActions) {
                         BanLiSettingsSwitchRow(
                             icon = Icons.Rounded.Refresh,
                             title = "自动同步",
-                            description = "启动应用时检查一次，并在后台定期同步",
+                            description = if (state.platform == SettingsPlatform.DESKTOP) {
+                                "启动应用时检查一次"
+                            } else {
+                                "启动应用时检查一次，并在后台定期同步"
+                            },
                             checked = sync.autoSync,
                             onCheckedChange = actions::setAutoSync,
                         )
@@ -1581,6 +1638,16 @@ private fun SyncSettingsPage(state: SettingsUiState, actions: SettingsActions) {
                         }
                     }
                 }
+            }
+
+            if (state.platform == SettingsPlatform.DESKTOP && sync.redirectUri.isNotBlank()) {
+                HorizontalDivider()
+                Text(
+                    text = "桌面端回调 URI（需添加到 Entra 的“移动和桌面应用程序”）：",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                CopyRow(label = "桌面回调 URI", value = sync.redirectUri, actions = actions)
             }
 
             HorizontalDivider()

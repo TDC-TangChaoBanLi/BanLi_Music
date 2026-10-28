@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.banlimusic.app.domain.sort.AlphabetSection
@@ -40,6 +41,7 @@ fun <T> TrackListPanel(
     onToggleOrder: () -> Unit,
     emptyContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    immediateDragSelection: Boolean = false,
     onCategory: (String?) -> Unit = {},
     countActions: @Composable RowScope.() -> Unit = {},
     categoryTrailing: (@Composable RowScope.() -> Unit)? = null,
@@ -48,21 +50,41 @@ fun <T> TrackListPanel(
     row: @Composable (Int, T) -> Unit,
 ) {
     val validKeys = remember(items) { items.map(validKey).toSet() }
+    val selectionModeState = rememberUpdatedState(selectionMode)
+    val onStartSelectionState = rememberUpdatedState(onStartSelection)
+    val onSelectState = rememberUpdatedState(onSelect)
+    val selectHandler = remember {
+        { id: String ->
+            if (!selectionModeState.value) onStartSelectionState.value()
+            onSelectState.value(id)
+        }
+    }
+    // Keep the same pointer-input node while selection mode changes; recreating
+    // it mid-gesture cancelled Android's long-press drag after the first row.
+    val dragModifier = remember(listState, validKeys, immediateDragSelection) {
+        if (immediateDragSelection) {
+            Modifier.dragSelectImmediate(
+                enabled = true,
+                listState = listState,
+                validKeys = validKeys,
+                onSelect = selectHandler,
+            )
+        } else {
+            Modifier.dragSelect(
+                enabled = true,
+                listState = listState,
+                validKeys = validKeys,
+                requireLongPress = true,
+                onSelect = selectHandler,
+            )
+        }
+    }
     Box(modifier = modifier.fillMaxSize()) {
         TrackListWithHeader(
             spec = spec,
             listState = listState,
             modifier = Modifier.fillMaxSize(),
-            listModifier = Modifier.dragSelect(
-                enabled = true,
-                listState = listState,
-                validKeys = validKeys,
-                requireLongPress = !selectionMode,
-                onSelect = { id ->
-                    if (!selectionMode) onStartSelection()
-                    onSelect(id)
-                },
-            ),
+            listModifier = dragModifier,
             bottomPadding = if (selectionMode) 64.dp else 20.dp,
             onSelectAll = onSelectAll,
             onCancelSelection = onCancelSelection,

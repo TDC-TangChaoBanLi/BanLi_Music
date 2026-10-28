@@ -18,15 +18,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.FavoriteBorder
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
@@ -137,9 +135,8 @@ fun TrackSelectionActionBar(
     downloadEnabled: Boolean = true,
     extraAction: SelectionExtraAction? = null,
 ) {
-    var categoryDialog by remember { mutableStateOf(false) }
+    var categoryMenu by remember { mutableStateOf(false) }
     var qualityMenu by remember { mutableStateOf(false) }
-    var draftCategories by remember(chosenCategories) { mutableStateOf(chosenCategories) }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -153,24 +150,60 @@ fun TrackSelectionActionBar(
                     .padding(horizontal = 2.dp, vertical = 1.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(
-                    onClick = {
-                        draftCategories = chosenCategories
-                        categoryDialog = true
-                    },
-                    modifier = Modifier.heightIn(min = 28.dp),
-                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
-                ) {
-                    Text(
-                        text = folderSelectionLabel(chosenCategories),
-                        maxLines = 1,
-                        softWrap = false,
-                        // Wide enough for a four-character folder name; longer
-                        // names scroll instead of being cut off.
-                        modifier = Modifier
-                            .widthIn(max = 96.dp)
-                            .basicMarquee(),
-                    )
+                Box {
+                    TextButton(
+                        onClick = { categoryMenu = true },
+                        modifier = Modifier.heightIn(min = 28.dp),
+                        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            text = folderSelectionLabel(chosenCategories),
+                            maxLines = 1,
+                            softWrap = false,
+                            // Wide enough for a four-character folder name; longer
+                            // names scroll instead of being cut off.
+                            modifier = Modifier
+                                .widthIn(max = 96.dp)
+                                .basicMarquee(),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = categoryMenu,
+                        onDismissRequest = { categoryMenu = false },
+                    ) {
+                        categories.forEach { category ->
+                            DropdownMenuItem(
+                                text = { Text(category) },
+                                leadingIcon = {
+                                    Checkbox(
+                                        checked = category in chosenCategories,
+                                        onCheckedChange = null,
+                                    )
+                                },
+                                onClick = {
+                                    onCategoriesChange(
+                                        if (category in chosenCategories) {
+                                            chosenCategories - category
+                                        } else {
+                                            chosenCategories + category
+                                        },
+                                    )
+                                },
+                            )
+                        }
+                        if (categories.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("暂无收藏夹") },
+                                onClick = { categoryMenu = false },
+                                enabled = false,
+                            )
+                        }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("完成") },
+                            onClick = { categoryMenu = false },
+                        )
+                    }
                 }
                 SelectionIconTextButton(
                     icon = Icons.Rounded.FavoriteBorder,
@@ -227,45 +260,6 @@ fun TrackSelectionActionBar(
         }
     }
 
-    if (categoryDialog) {
-        AlertDialog(
-            onDismissRequest = { categoryDialog = false },
-            title = { Text("收藏到") },
-            text = {
-                LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
-                    items(categories, key = { it }) { category ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(
-                                checked = category in draftCategories,
-                                onCheckedChange = { checked ->
-                                    draftCategories = if (checked) {
-                                        draftCategories + category
-                                    } else {
-                                        draftCategories - category
-                                    }
-                                },
-                            )
-                            Text(category)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        categoryDialog = false
-                        onCategoriesChange(draftCategories)
-                    },
-                ) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { categoryDialog = false }) { Text("取消") }
-            },
-        )
-    }
 }
 
 /** Compact icon + label button used by the selection bar. */

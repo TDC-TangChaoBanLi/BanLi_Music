@@ -5,6 +5,14 @@ import com.banlimusic.app.core.datastore.ThemeMode
 import com.banlimusic.shared.ui.theme.BanLiMusicTheme
 
 @Composable
-fun BanLiDesktopTheme(mode: ThemeMode, content: @Composable () -> Unit) {
-    BanLiMusicTheme(themeMode = mode, content = content)
+fun BanLiDesktopTheme(
+    mode: ThemeMode,
+    customThemeColor: Int?,
+    content: @Composable () -> Unit,
+) {
+    BanLiMusicTheme(
+        themeMode = mode,
+        customThemeColor = customThemeColor,
+        content = content,
+    )
 }

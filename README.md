@@ -45,12 +45,12 @@ BanLiMusic 提供 Android 客户端与 Compose Desktop 桌面端，二者共用 
 - **桌面小组件**：3x1 / 4x1 两种尺寸，显示封面、标题、歌手、收藏与播放控制，支持磨砂配色与平滑进度刷新。
 - **个性化**：动态取色或自定义主题色、底部导航排序、平板侧边导航与小播放器位置、手机/平板自适应布局。
 - **可选云同步**：使用个人 Microsoft 账号把收藏夹与收藏歌曲双向同步到 OneDrive，不经过开发者服务器。
-- **桌面端**：复用共享核心与共享 UI，提供首页、搜索、收藏夹、最近播放、本地音乐、下载管理、MP3 播放、歌词、缓存与设置。
+- **桌面端**：复用共享核心与共享 UI，提供首页、搜索、收藏夹、最近播放、本地音乐、下载管理、MP3 播放、歌词、播放缓存、OneDrive 云同步与设置；支持自定义主题色、音量调节、鼠标拖拽多选、批量收藏夹下拉选择、自绘窗口标题栏、关闭窗口后驻留系统托盘，以及点击/拖动迷你播放条调整进度。桌面悬浮歌词设置已预留，功能尚未实现。
 
 ## 下载与安装
 
 - **Android**：支持 Android 8.0（API 26）及以上。发布包命名为 `BanLiMusic-<version>-release.apk`，安装前请在系统中允许来自浏览器的未知来源安装。
-- **桌面端**：Linux x64 便携版 `BanLiMusic-<version>-linux-x64.tar.gz` 内置 runtime，解压即可运行；另提供 Linux/Windows 的 no-jre 便携版、no-jre deb/rpm/MSI（需 Java 17+），以及带 runtime 的 deb/rpm 与 exe/msi 安装包。详见 [发布与打包](doc/development/release.md#桌面端发布包)。
+- **桌面端**：Linux x64 便携版 `BanLiMusic-<version>-linux-x64.tar.gz` 内置 runtime，解压即可运行；另提供 Linux/Windows 的 no-jre 便携版、no-jre deb/rpm/MSI（需 Java 17+），以及带 runtime 的 deb/rpm 与 exe/msi 安装包。Windows MSI/EXE 使用 per-machine 安装，需要管理员权限，并支持选择 D: 等非系统盘目录。详见 [发布与打包](doc/development/release.md#桌面端发布包)。
 
 ## 数据来源与声明
 
@@ -63,13 +63,18 @@ BanLiMusic 提供 Android 客户端与 Compose Desktop 桌面端，二者共用 
 
 ## 已知限制
 
-- 尚未实现独立歌单、账号体系与自建服务器适配器；OneDrive 同步目前仅 Android 端。
+- 尚未实现独立歌单、账号体系与自建服务器适配器；桌面端 OneDrive 同步需要在 Entra 应用中额外注册本机回调 URI `http://localhost/callback`（localhost 端口会被忽略）。
 - 列表页默认不主动请求专辑封面，可在“下载与缓存”设置中开启；开启后会占用 5 分钟 50 次的 API 请求额度。
 - 中文 A-Z 首字母使用轻量 GB2312 映射，多音字和生僻字可能出现近似结果。
 - 桌面端产物默认不带代码签名；Windows 未签名包可能触发 SmartScreen“未知发布者”提示，Linux 下载包建议校验 `SHA256SUMS-<version>.txt` 与 GPG 签名。签名方式见 [发布与打包](doc/development/release.md#桌面端产物签名)。
+- Linux 托盘依赖桌面环境；GNOME 可能需要 AppIndicator 扩展，KDE/XFCE 通常可直接显示。
 - 已在真机验证主要播放、下载与小组件流程；不同厂商桌面和系统版本仍需分别验证。
 
 完整功能清单与限制见 [功能现状与已知限制](doc/features.md)。
+
+## 许可证
+
+本项目使用 [MIT License](LICENSE) 开源。音乐数据仍受 GD 音乐台的使用条款约束，MIT 许可证不改变上游服务的使用限制。
 
 ## 开发文档
 

@@ -72,6 +72,7 @@ fun DesktopSearchScreen(state: DesktopAppState) {
             categories = folderCategories,
             defaultCategory = settings.defaultFavoriteCategory,
             supportsSourcePicker = false,
+            immediateDragSelection = true,
         ),
         onQueryChange = state::updateQuery,
         onSubmit = state::submitSearch,

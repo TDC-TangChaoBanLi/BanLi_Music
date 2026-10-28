@@ -3,6 +3,10 @@ package com.banlimusic.desktop.data
 import com.banlimusic.app.core.datastore.DEFAULT_FAVORITE_CATEGORY
 import com.banlimusic.app.core.model.Album
 import com.banlimusic.app.core.model.Artist
+import com.banlimusic.app.core.model.FavoriteSyncDocument
+import com.banlimusic.app.core.model.SyncFolder
+import com.banlimusic.app.core.model.SyncMembership
+import com.banlimusic.app.core.model.SyncTrack
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.model.TrackAction
 import com.banlimusic.app.core.model.TrackSource
@@ -46,6 +50,12 @@ class DesktopLibraryRepository(
     /** Wall-clock add times used by the portable backup and cloud sync. */
     private val _favoriteAddedAt = MutableStateFlow<Map<String, Long>>(emptyMap())
 
+    /** Sync metadata: timestamps and tombstones for folders and memberships. */
+    private val categoryUpdatedAt = mutableMapOf<String, Long>()
+    private val deletedCategories = mutableMapOf<String, Long>()
+    private val membershipUpdatedAt = mutableMapOf<String, Long>()
+    private val deletedMemberships = mutableMapOf<String, Long>()
+
     @Volatile
     private var loadedAtLeastOnce = false
 
@@ -62,12 +72,17 @@ class DesktopLibraryRepository(
     ): Boolean = withContext(Dispatchers.IO) {
         val current = _favorites.value
         val existing = current.any { it.id == track.id }
+        val now = System.currentTimeMillis()
         if (existing) {
+            _favoriteFolders.value[track.id].orEmpty().forEach { folder ->
+                tombstoneMembership(track.id, folder, now)
+            }
             _favorites.value = current.filterNot { it.id == track.id }
             _favoriteFolders.value = _favoriteFolders.value - track.id
         } else {
             val normalized = normalizeCategory(category)
             ensureCategoryLocked(normalized)
+            touchMembership(track.id, normalized, now)
             _favorites.value = listOf(track) + current
             _favoriteFolders.value = _favoriteFolders.value + (track.id to setOf(normalized))
         }
@@ -76,6 +91,10 @@ class DesktopLibraryRepository(
     }
 
     suspend fun removeFavorite(trackId: String) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        _favoriteFolders.value[trackId].orEmpty().forEach { folder ->
+            tombstoneMembership(trackId, folder, now)
+        }
         _favorites.value = _favorites.value.filterNot { it.id == trackId }
         _favoriteFolders.value = _favoriteFolders.value - trackId
         persist()
@@ -87,6 +106,7 @@ class DesktopLibraryRepository(
     ) = withContext(Dispatchers.IO) {
         val normalized = normalizeCategory(category)
         ensureCategoryLocked(normalized)
+        touchMembership(track.id, normalized)
         if (_favorites.value.none { it.id == track.id }) {
             _favorites.value = listOf(track) + _favorites.value
         }
@@ -110,10 +130,12 @@ class DesktopLibraryRepository(
         normalized.forEach(::ensureCategoryLocked)
         val incoming = tracks.distinctBy { it.id }
         if (incoming.isEmpty()) return@withContext
+        val now = System.currentTimeMillis()
         _favorites.value = (incoming + _favorites.value).distinctBy { it.id }
         val folders = _favoriteFolders.value.toMutableMap()
         incoming.forEach { track ->
             folders[track.id] = folders[track.id].orEmpty() + normalized
+            normalized.forEach { folder -> touchMembership(track.id, folder, now) }
         }
         _favoriteFolders.value = folders
         persist()
@@ -122,13 +144,22 @@ class DesktopLibraryRepository(
     suspend fun removeFavorites(tracks: Collection<Track>, category: String?) =
         withContext(Dispatchers.IO) {
             val ids = tracks.map { it.id }.toSet()
+            val now = System.currentTimeMillis()
             if (category == null) {
+                ids.forEach { id ->
+                    _favoriteFolders.value[id].orEmpty().forEach { folder ->
+                        tombstoneMembership(id, folder, now)
+                    }
+                }
                 _favorites.value = _favorites.value.filterNot { it.id in ids }
                 _favoriteFolders.value = _favoriteFolders.value - ids
             } else {
                 val normalized = normalizeCategory(category)
                 val folders = _favoriteFolders.value.toMutableMap()
                 ids.forEach { id ->
+                    if (normalized in folders[id].orEmpty()) {
+                        tombstoneMembership(id, normalized, now)
+                    }
                     val remaining = folders[id].orEmpty() - normalized
                     if (remaining.isEmpty()) folders.remove(id) else folders[id] = remaining
                 }
@@ -140,6 +171,11 @@ class DesktopLibraryRepository(
 
     suspend fun deleteCategory(name: String) = withContext(Dispatchers.IO) {
         val normalized = normalizeCategory(name)
+        val now = System.currentTimeMillis()
+        _favoriteFolders.value.forEach { (trackId, folders) ->
+            if (normalized in folders) tombstoneMembership(trackId, normalized, now)
+        }
+        tombstoneCategory(normalized, now)
         _favoriteCategories.value = _favoriteCategories.value - normalized
         val folders = _favoriteFolders.value.mapValues { (_, categories) ->
             categories - normalized
@@ -218,6 +254,11 @@ class DesktopLibraryRepository(
     }
 
     suspend fun clearFavorites() = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        _favoriteFolders.value.forEach { (trackId, folders) ->
+            folders.forEach { folder -> tombstoneMembership(trackId, folder, now) }
+        }
+        _favoriteCategories.value.forEach { category -> tombstoneCategory(category, now) }
         _favorites.value = emptyList()
         _favoriteFolders.value = emptyMap()
         persist()
@@ -295,6 +336,7 @@ class DesktopLibraryRepository(
                     .ifEmpty { setOf(DEFAULT_FAVORITE_CATEGORY) }
                 trackFolders.forEach(::ensureCategoryLocked)
                 folders[item.track.id] = folders[item.track.id].orEmpty() + trackFolders
+                trackFolders.forEach { folder -> touchMembership(item.track.id, folder, now) }
                 addedAt[item.track.id] = item.addedAt.takeIf { it > 0L }
                     ?: (now - index)
                 if (ids.add(item.track.id)) {
@@ -316,6 +358,117 @@ class DesktopLibraryRepository(
             persist()
             export.favorites.size
         }
+
+    /** Full snapshot including folder/membership tombstones for OneDrive sync. */
+    suspend fun exportSyncDocument(deviceId: String): FavoriteSyncDocument =
+        withContext(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val activeFolders = _favoriteCategories.value
+                .filterNot { it in deletedCategories }
+                .map { folder ->
+                    SyncFolder(
+                        name = folder,
+                        createdAt = categoryUpdatedAt[folder] ?: 0L,
+                        updatedAt = categoryUpdatedAt[folder] ?: 0L,
+                    )
+                }
+            val deletedFolderRecords = deletedCategories.map { (folder, deletedAt) ->
+                SyncFolder(
+                    name = folder,
+                    createdAt = deletedAt,
+                    updatedAt = deletedAt,
+                    deletedAt = deletedAt,
+                )
+            }
+            val tracks = _favorites.value.map { track ->
+                val addedAt = _favoriteAddedAt.value[track.id] ?: 0L
+                SyncTrack(
+                    trackId = track.id,
+                    track = track,
+                    addedAt = addedAt,
+                    updatedAt = addedAt,
+                )
+            }
+            val memberships = mutableListOf<SyncMembership>()
+            _favoriteFolders.value.forEach { (trackId, folders) ->
+                folders.forEach { folder ->
+                    val key = membershipKey(trackId, folder)
+                    val updatedAt = membershipUpdatedAt[key]
+                        ?: _favoriteAddedAt.value[trackId]
+                        ?: 0L
+                    memberships += SyncMembership(
+                        trackId = trackId,
+                        folder = folder,
+                        addedAt = updatedAt,
+                        updatedAt = updatedAt,
+                    )
+                }
+            }
+            deletedMemberships.forEach { (key, deletedAt) ->
+                val separator = key.indexOf('\u0000')
+                if (separator <= 0) return@forEach
+                memberships += SyncMembership(
+                    trackId = key.substring(0, separator),
+                    folder = key.substring(separator + 1),
+                    addedAt = deletedAt,
+                    updatedAt = deletedAt,
+                    deletedAt = deletedAt,
+                )
+            }
+            FavoriteSyncDocument(
+                generatedAt = now,
+                deviceId = deviceId,
+                folders = (activeFolders + deletedFolderRecords).distinctBy { it.name },
+                tracks = tracks.distinctBy { it.trackId },
+                memberships = memberships.distinctBy { it.trackId to it.folder },
+            )
+        }
+
+    /** Applies a merged cloud document and rebuilds the local favourite lists. */
+    suspend fun applySyncDocument(document: FavoriteSyncDocument) = withContext(Dispatchers.IO) {
+        val categories = mutableListOf(DEFAULT_FAVORITE_CATEGORY)
+        document.folders.forEach { folder ->
+            val folderDeletedAt = folder.deletedAt
+            if (folderDeletedAt != null) {
+                deletedCategories[folder.name] = folderDeletedAt
+                categoryUpdatedAt[folder.name] = folder.updatedAt
+            } else {
+                deletedCategories.remove(folder.name)
+                categoryUpdatedAt[folder.name] = folder.updatedAt
+                if (folder.name !in categories) categories += folder.name
+            }
+        }
+        _favoriteCategories.value = categories.distinct()
+
+        val foldersByTrack = mutableMapOf<String, MutableSet<String>>()
+        document.memberships.forEach { membership ->
+            val key = membershipKey(membership.trackId, membership.folder)
+            membershipUpdatedAt[key] = membership.updatedAt
+            val membershipDeletedAt = membership.deletedAt
+            if (membershipDeletedAt != null) {
+                deletedMemberships[key] = membershipDeletedAt
+                foldersByTrack[membership.trackId]?.remove(membership.folder)
+            } else {
+                deletedMemberships.remove(key)
+                foldersByTrack.getOrPut(membership.trackId) { mutableSetOf() }
+                    .add(membership.folder)
+            }
+        }
+        _favoriteFolders.value = foldersByTrack.filterValues { it.isNotEmpty() }
+
+        val documentTracks = document.tracks.associateBy { it.trackId }
+        val localTracks = _favorites.value.associateBy { it.id }
+        val addedAt = _favoriteAddedAt.value.toMutableMap()
+        document.tracks.forEach { record -> addedAt[record.trackId] = record.addedAt }
+        val activeTracks = _favoriteFolders.value.keys.mapNotNull { id ->
+            documentTracks[id]?.track ?: localTracks[id]
+        }.distinctBy { it.id }
+        _favorites.value = activeTracks
+        _favoriteAddedAt.value = activeTracks.associate { track ->
+            track.id to (addedAt[track.id] ?: 0L)
+        }
+        persist()
+    }
 
     private fun load() {
         if (!Files.exists(file)) {
@@ -352,6 +505,10 @@ class DesktopLibraryRepository(
                 .take(MAX_HISTORY)
             _searchHistory.value = document.searches.take(MAX_SEARCH_HISTORY)
             _localTracks.value = document.local.distinctBy { it.id }
+            categoryUpdatedAt.putAll(document.categoryUpdatedAt)
+            deletedCategories.putAll(document.deletedCategories)
+            membershipUpdatedAt.putAll(document.membershipUpdatedAt)
+            deletedMemberships.putAll(document.deletedMemberships)
         }
         loadedAtLeastOnce = true
     }
@@ -366,6 +523,10 @@ class DesktopLibraryRepository(
                 searches = _searchHistory.value.take(MAX_SEARCH_HISTORY),
                 categories = _favoriteCategories.value,
                 local = _localTracks.value,
+                categoryUpdatedAt = categoryUpdatedAt.toMap(),
+                deletedCategories = deletedCategories.toMap(),
+                membershipUpdatedAt = membershipUpdatedAt.toMap(),
+                deletedMemberships = deletedMemberships.toMap(),
             )
             val temp = file.resolveSibling("${file.fileName}.tmp")
             Files.writeString(
@@ -407,7 +568,29 @@ class DesktopLibraryRepository(
         if (_favoriteCategories.value.none { it == category }) {
             _favoriteCategories.value = _favoriteCategories.value + category
         }
+        categoryUpdatedAt[category] = System.currentTimeMillis()
+        deletedCategories.remove(category)
     }
+
+    private fun touchMembership(trackId: String, folder: String, now: Long = System.currentTimeMillis()) {
+        val key = membershipKey(trackId, folder)
+        membershipUpdatedAt[key] = now
+        deletedMemberships.remove(key)
+    }
+
+    private fun tombstoneMembership(trackId: String, folder: String, now: Long) {
+        val key = membershipKey(trackId, folder)
+        membershipUpdatedAt[key] = now
+        deletedMemberships[key] = now
+    }
+
+    private fun tombstoneCategory(folder: String, now: Long) {
+        categoryUpdatedAt[folder] = now
+        deletedCategories[folder] = now
+    }
+
+    private fun membershipKey(trackId: String, folder: String): String =
+        "$trackId\u0000$folder"
 
     private fun isAudioFile(path: Path): Boolean {
         val extension = path.fileName?.toString()
@@ -476,6 +659,10 @@ private data class DesktopLibraryFile(
     val searches: List<String> = emptyList(),
     val categories: List<String> = listOf(DEFAULT_FAVORITE_CATEGORY),
     val local: List<Track> = emptyList(),
+    val categoryUpdatedAt: Map<String, Long> = emptyMap(),
+    val deletedCategories: Map<String, Long> = emptyMap(),
+    val membershipUpdatedAt: Map<String, Long> = emptyMap(),
+    val deletedMemberships: Map<String, Long> = emptyMap(),
 )
 
 @Serializable

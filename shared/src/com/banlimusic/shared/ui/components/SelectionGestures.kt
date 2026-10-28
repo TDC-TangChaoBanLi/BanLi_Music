@@ -168,3 +168,127 @@ fun Modifier.dragSelect(
         }
     }
 }
+
+/**
+ * Mouse-friendly drag selection: a click stays a click, but moving beyond the
+ * touch slop starts selecting rows under the pointer. Desktop uses this instead
+ * of the long-press gesture required on touch screens.
+ */
+fun Modifier.dragSelectImmediate(
+    enabled: Boolean,
+    listState: LazyListState,
+    validKeys: Set<String>,
+    onSelect: (String) -> Unit,
+): Modifier {
+    if (!enabled) return this
+    return pointerInput(listState, validKeys) {
+        coroutineScope {
+            val edgeThreshold = 72.dp.toPx()
+            val scrollStep = 14.dp.toPx()
+            val reversalSlop = viewConfiguration.touchSlop
+            var lastKey: String? = null
+            var pointerY = 0f
+            var lastPointerY = 0f
+            var lastDirection = 0
+            var autoScroll: Job? = null
+
+            fun keyAt(y: Float): String? {
+                val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { info ->
+                    y.toInt() in info.offset until (info.offset + info.size)
+                } ?: return null
+                return (item.key as? String)?.takeIf { it in validKeys }
+            }
+
+            fun handle(y: Float) {
+                val key = keyAt(y) ?: return
+                if (key != lastKey) {
+                    lastKey = key
+                    onSelect(key)
+                }
+            }
+
+            fun stopAutoScroll() {
+                autoScroll?.cancel()
+                autoScroll = null
+            }
+
+            fun startAutoScroll() {
+                if (autoScroll != null) return
+                autoScroll = launch {
+                    while (isActive) {
+                        val info = listState.layoutInfo
+                        val top = info.viewportStartOffset + edgeThreshold
+                        val bottom = info.viewportEndOffset - edgeThreshold
+                        val delta = when {
+                            pointerY < top -> -scrollStep
+                            pointerY > bottom -> scrollStep
+                            else -> 0f
+                        }
+                        if (delta == 0f) break
+                        listState.scroll(MutatePriority.UserInput) { scrollBy(delta) }
+                        handle(pointerY)
+                        delay(16)
+                    }
+                    autoScroll = null
+                }
+            }
+
+            fun nearEdge(): Boolean {
+                val info = listState.layoutInfo
+                return pointerY < info.viewportStartOffset + edgeThreshold ||
+                    pointerY > info.viewportEndOffset - edgeThreshold
+            }
+
+            awaitEachGesture {
+                val down = awaitFirstDown(
+                    requireUnconsumed = false,
+                    pass = PointerEventPass.Initial,
+                )
+                var started = false
+                lastKey = null
+                pointerY = down.position.y
+                lastPointerY = pointerY
+                lastDirection = 0
+                try {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!started) {
+                            if ((change.position - down.position).getDistance() <=
+                                viewConfiguration.touchSlop
+                            ) {
+                                if (!change.pressed) break
+                                continue
+                            }
+                            started = true
+                            pointerY = down.position.y
+                            lastPointerY = pointerY
+                            handle(pointerY)
+                        }
+                        change.consume()
+                        val newY = change.position.y
+                        val deltaY = newY - lastPointerY
+                        if (abs(deltaY) > reversalSlop) {
+                            val direction = if (deltaY > 0) 1 else -1
+                            if (lastDirection != 0 &&
+                                direction != lastDirection &&
+                                lastKey != null
+                            ) {
+                                onSelect(lastKey!!)
+                            }
+                            lastDirection = direction
+                            lastPointerY = newY
+                        }
+                        pointerY = newY
+                        handle(pointerY)
+                        if (nearEdge()) startAutoScroll() else stopAutoScroll()
+                        if (!change.pressed) break
+                    }
+                } finally {
+                    stopAutoScroll()
+                    lastKey = null
+                }
+            }
+        }
+    }
+}

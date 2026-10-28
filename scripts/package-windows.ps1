@@ -29,7 +29,7 @@ param(
     [string]$ClasspathFile = "",
     [string]$WorkDir = "",
     [string]$Icon = "",
-    [string]$JlinkModules = "java.base,java.desktop,java.instrument,java.logging,java.prefs,jdk.unsupported,jdk.crypto.ec,jdk.zipfs",
+    [string]$JlinkModules = "java.base,java.desktop,java.instrument,java.logging,java.prefs,jdk.unsupported,jdk.crypto.ec,jdk.charsets,jdk.httpserver,jdk.zipfs",
     [switch]$Jlink,
     [switch]$SkipBuild,
     [switch]$KeepTemp,
@@ -145,6 +145,7 @@ if (-not $JdkHome) {
 if (-not $JdkHome) { Fail "jpackage.exe not found; pass -JdkHome" }
 $jpackage = Join-Path $JdkHome "bin\jpackage.exe"
 $jlinkExe = Join-Path $JdkHome "bin\jlink.exe"
+$jarExe = Join-Path $JdkHome "bin\jar.exe"
 if (-not (Test-Path $jpackage)) { Fail "jpackage.exe not found in $JdkHome" }
 
 $needsWix = ($targetList -contains "exe") -or ($targetList -contains "msi") -or ($targetList -contains "nojre-msi")
@@ -323,7 +324,8 @@ $commonArgs = @(
     "--app-version", $Version,
     "--input", $InputDir,
     "--main-jar", "desktopApp-jvm.jar",
-    "--main-class", "com.banlimusic.desktop.MainKt"
+    "--main-class", "com.banlimusic.desktop.MainKt",
+    "--java-options", "-Dbanlimusic.version=$Version"
 )
 if ($runtimeImage) { $commonArgs += @("--runtime-image", $runtimeImage) }
 if ($Icon) { $commonArgs += @("--icon", $Icon) }
@@ -341,6 +343,87 @@ function Get-PackageArgs([string]$AppImage) {
 function Invoke-JPackage([string[]]$Arguments) {
     & $jpackage @Arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { Fail "jpackage failed with exit code $LASTEXITCODE" }
+}
+
+function Trim-IconJar([string]$JarPath) {
+    if (-not (Test-Path $jarExe)) {
+        Note "jar.exe not found; keeping the full material-icons-extended jar"
+        return
+    }
+    $sources = @(
+        (Join-Path $Root "shared\src"),
+        (Join-Path $Root "androidApp\src"),
+        (Join-Path $Root "desktopApp\src")
+    )
+    $usedIcons = @(
+        $sources | ForEach-Object {
+            if (Test-Path $_) {
+                Get-ChildItem $_ -Recurse -File -Filter "*.kt" |
+                    Select-String -Pattern 'Icons(?:\.AutoMirrored)?\.Rounded\.([A-Za-z0-9_]+)' -AllMatches |
+                    ForEach-Object { $_.Matches } |
+                    ForEach-Object { $_.Groups[1].Value }
+            }
+        } | Sort-Object -Unique
+    )
+    if ($usedIcons.Count -eq 0) {
+        Note "No icon references found; keeping the full icon jar"
+        return
+    }
+
+    $work = Join-Path $WorkDir "icon-trim"
+    if (Test-Path $work) { Remove-Item -Recurse -Force $work }
+    $extract = Join-Path $work "extract"
+    New-Item -ItemType Directory -Force $extract | Out-Null
+    & $jarExe --extract --file $JarPath --dir $extract | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Note "Unable to extract icon jar; keeping the full jar"
+        Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+        return
+    }
+
+    $iconsRoot = Join-Path $extract "androidx\compose\material\icons"
+    if (-not (Test-Path $iconsRoot)) {
+        Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+        return
+    }
+    Get-ChildItem $iconsRoot -Directory |
+        Where-Object { $_.Name -notin @("rounded", "automirrored") } |
+        Remove-Item -Recurse -Force
+    $autoRoot = Join-Path $iconsRoot "automirrored"
+    if (Test-Path $autoRoot) {
+        Get-ChildItem $autoRoot -Directory |
+            Where-Object { $_.Name -ne "rounded" } |
+            Remove-Item -Recurse -Force
+    }
+    foreach ($styleDir in @(
+        (Join-Path $iconsRoot "rounded"),
+        (Join-Path $autoRoot "rounded")
+    )) {
+        if (-not (Test-Path $styleDir)) { continue }
+        Get-ChildItem $styleDir -File -Filter "*Kt.class" |
+            Where-Object { ($_.BaseName -replace 'Kt$', '') -notin $usedIcons } |
+            Remove-Item -Force
+    }
+
+    $trimmed = Join-Path $work "trimmed.jar"
+    & $jarExe --create --file $trimmed --no-manifest -C $extract . | Out-Host
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $trimmed)) {
+        Note "Unable to rebuild icon jar; keeping the full jar"
+        Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+        return
+    }
+    $before = (Get-Item $JarPath).Length
+    Move-Item -Force $trimmed $JarPath
+    $after = (Get-Item $JarPath).Length
+    Note "material-icons-extended: $before -> $after bytes"
+    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+}
+
+$iconJar = Get-ChildItem $InputDir -Filter "material-icons-extended*.jar" -File |
+    Select-Object -First 1
+if ($iconJar) {
+    Note "Trimming material-icons-extended icon jar"
+    Trim-IconJar $iconJar.FullName
 }
 
 $script:AppImagePath = $null
@@ -381,8 +464,9 @@ if errorlevel 1 (
   echo Java 17 or newer is required.
   exit /b 1
 )
-"%JAVA_BIN%" -cp "%APP_HOME%libs\*" com.banlimusic.desktop.MainKt %*
+"%JAVA_BIN%" -Dbanlimusic.version="__BANLI_VERSION__" -cp "%APP_HOME%libs\*" com.banlimusic.desktop.MainKt %*
 '@
+    $bat = $bat.Replace("__BANLI_VERSION__", $Version)
     $bat = ($bat -replace "`r`n", "`n") -replace "`n", "`r`n"
     [IO.File]::WriteAllText((Join-Path $Dest "BanLiMusic.bat"), $bat, (New-Object Text.UTF8Encoding($false)))
 
@@ -514,7 +598,7 @@ foreach ($target in $targetList) {
             Invoke-JPackage ($packageArgs + @(
                 "--type", "exe", "--dest", $Dist,
                 "--win-shortcut", "--win-menu", "--win-dir-chooser",
-                "--win-per-user-install", "--win-upgrade-uuid", $UpgradeUuid
+                "--win-upgrade-uuid", $UpgradeUuid
             ))
             $installer = Join-Path $Dist "BanLiMusic-$Version.exe"
             Invoke-SignFile $installer
@@ -530,7 +614,7 @@ foreach ($target in $targetList) {
             Invoke-JPackage ($packageArgs + @(
                 "--type", "msi", "--dest", $Dist,
                 "--win-shortcut", "--win-menu", "--win-dir-chooser",
-                "--win-per-user-install", "--win-upgrade-uuid", $UpgradeUuid
+                "--win-upgrade-uuid", $UpgradeUuid
             ))
             $installer = Join-Path $Dist "BanLiMusic-$Version.msi"
             Invoke-SignFile $installer

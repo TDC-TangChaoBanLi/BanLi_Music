@@ -11,7 +11,7 @@
 | [development/environment.md](development/environment.md) | JDK、Android SDK、Kotlin Toolchain、环境变量与本地配置 |
 | [development/build.md](development/build.md) | 构建、测试、运行与桌面端启动 |
 | [development/release.md](development/release.md) | Android/桌面端签名发布、桌面端便携版与安装包打包 |
-| [cloud-sync.md](cloud-sync.md) | OneDrive 云同步实现、应用注册与安全约束 |
+| [cloud-sync.md](cloud-sync.md) | Android/桌面端 OneDrive 同步实现、应用注册与安全约束 |
 | [../GD_MUSIC_API.md](../GD_MUSIC_API.md) | 上游 GD 音乐台 API 参考（外部资料） |
 | [picture/](picture/) | README 使用的产品截图与演示动图 |
 

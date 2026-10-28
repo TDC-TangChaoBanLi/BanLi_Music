@@ -1,5 +1,6 @@
 package com.banlimusic.desktop.data
 
+import com.banlimusic.app.core.cache.CacheUsage
 import com.banlimusic.app.core.model.Lyrics
 import com.banlimusic.app.core.network.JsonHttpClient
 import kotlinx.coroutines.Dispatchers
@@ -68,17 +69,35 @@ class DesktopMetadataCache(
         }.getOrNull()
     }
 
-    suspend fun sizeBytes(): Long = withContext(Dispatchers.IO) {
-        sequenceOf(lyricsDir, artworkDir)
-            .flatMap { dir -> dir.walkTopDown().filter { it.isFile } }
-            .sumOf { it.length() }
+    suspend fun usage(): CacheUsage = withContext(Dispatchers.IO) {
+        val artwork = directorySize(artworkDir)
+        val lyrics = directorySize(lyricsDir)
+        CacheUsage(
+            totalBytes = artwork + lyrics,
+            artworkBytes = artwork,
+            lyricsBytes = lyrics,
+        )
     }
+
+    suspend fun sizeBytes(): Long = usage().totalBytes
 
     suspend fun clear() = withContext(Dispatchers.IO) {
         sequenceOf(lyricsDir, artworkDir).forEach { dir ->
             dir.listFiles()?.forEach { it.deleteRecursively() }
         }
     }
+
+    suspend fun clearArtwork() = withContext(Dispatchers.IO) {
+        artworkDir.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
+    suspend fun clearLyrics() = withContext(Dispatchers.IO) {
+        lyricsDir.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
+    private fun directorySize(directory: File): Long = directory.walkTopDown()
+        .filter { it.isFile }
+        .sumOf { it.length() }
 
     private fun key(value: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())

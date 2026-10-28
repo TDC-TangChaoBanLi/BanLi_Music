@@ -76,6 +76,7 @@ fun DesktopDownloadsScreen(state: DesktopAppState) {
                     },
                 )
             },
+            immediateDragSelection = true,
         ),
         actions = actions,
         artwork = { track, artworkModifier ->

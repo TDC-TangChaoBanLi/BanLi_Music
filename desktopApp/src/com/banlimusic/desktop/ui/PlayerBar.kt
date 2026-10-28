@@ -47,11 +47,14 @@ fun DesktopPlayerBar(state: DesktopAppState) {
         onTogglePlayPause = { state.container.player.togglePause() },
         onPrevious = { state.container.player.previous() },
         onNext = { state.container.player.next() },
+        onSeek = state.container.player::seekTo,
         isFavorite = track != null && favorites.any { it.id == track.id },
         onToggleFavorite = if (track == null) null else {
             { state.toggleFavorite(track) }
         },
         showPlaceholder = true,
+        volume = playback.volume,
+        onVolumeChange = state.container.player::setVolume,
         extraInfo = {
             when {
                 playback.loading -> Text(

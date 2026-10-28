@@ -73,13 +73,17 @@ class JsonHttpClient(
     companion object {
         const val USER_AGENT = "BanLiMusic (Android)"
 
-        fun createClient(cacheDir: java.io.File? = null): OkHttpClient {
+        fun createClient(
+            cacheDir: java.io.File? = null,
+            proxy: java.net.Proxy? = null,
+        ): OkHttpClient {
             val builder = OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(25, TimeUnit.SECONDS)
                 .writeTimeout(25, TimeUnit.SECONDS)
                 .callTimeout(35, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
+            if (proxy != null) builder.proxy(proxy)
             if (cacheDir != null) {
                 builder.cache(okhttp3.Cache(java.io.File(cacheDir, "http"), 16L * 1024 * 1024))
             }

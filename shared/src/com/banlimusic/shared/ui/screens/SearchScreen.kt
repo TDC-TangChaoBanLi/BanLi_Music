@@ -35,7 +35,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +57,7 @@ import com.banlimusic.shared.ui.components.TRACK_LIST_HEADER_ITEM_COUNT
 import com.banlimusic.shared.ui.components.TrackListHeaderSpec
 import com.banlimusic.shared.ui.components.TrackSelectionActionBar
 import com.banlimusic.shared.ui.components.dragSelect
+import com.banlimusic.shared.ui.components.dragSelectImmediate
 import com.banlimusic.shared.ui.components.rememberSelectionActionsState
 import com.banlimusic.shared.ui.components.trackListHeader
 import com.banlimusic.shared.ui.components.BanLiEmptyState
@@ -78,6 +84,8 @@ data class SearchUiState(
     val defaultCategory: String = "默认收藏",
     /** False on platforms without a source picker. */
     val supportsSourcePicker: Boolean = true,
+    /** Desktop uses mouse drag selection instead of long-press drag selection. */
+    val immediateDragSelection: Boolean = false,
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -113,6 +121,7 @@ fun BanLiSearchScreen(
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val listState = rememberLazyListState()
+    var handledFocusRequest by rememberSaveable { mutableIntStateOf(0) }
     val validIds = remember(state.results) { state.results.map { it.id }.toSet() }
     val selectionActions = rememberSelectionActionsState(
         selectionMode = state.selectionMode,
@@ -124,7 +133,9 @@ fun BanLiSearchScreen(
     val selectedTracks = state.results.filter { it.id in state.selectedIds }
 
     LaunchedEffect(autoFocus, focusRequestKey) {
-        if (!autoFocus) return@LaunchedEffect
+        val requested = focusRequestKey > handledFocusRequest
+        if (!autoFocus && !requested) return@LaunchedEffect
+        if (requested) handledFocusRequest = focusRequestKey
         focusRequester.requestFocus()
         withFrameNanos { }
         keyboard?.show()
@@ -273,19 +284,37 @@ private fun ResultList(
     onSelectAll: () -> Unit,
     onCancelSelection: () -> Unit,
 ) {
+    val selectionModeState = rememberUpdatedState(state.selectionMode)
+    val onStartSelectionState = rememberUpdatedState(onStartSelection)
+    val onToggleSelectionState = rememberUpdatedState(onToggleSelection)
+    val selectHandler = remember {
+        { id: String ->
+            if (!selectionModeState.value) onStartSelectionState.value()
+            onToggleSelectionState.value(id)
+        }
+    }
+    val dragModifier = remember(listState, validIds, state.immediateDragSelection) {
+        if (state.immediateDragSelection) {
+            Modifier.dragSelectImmediate(
+                enabled = true,
+                listState = listState,
+                validKeys = validIds,
+                onSelect = selectHandler,
+            )
+        } else {
+            Modifier.dragSelect(
+                enabled = true,
+                listState = listState,
+                validKeys = validIds,
+                onSelect = selectHandler,
+            )
+        }
+    }
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .dragSelect(
-                enabled = true,
-                listState = listState,
-                validKeys = validIds,
-                onSelect = { id ->
-                    if (!state.selectionMode) onStartSelection()
-                    onToggleSelection(id)
-                },
-            ),
+            .then(dragModifier),
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {

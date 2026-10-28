@@ -14,7 +14,7 @@ CP_FILE=""
 LINUX_JDK=""
 EXTRA_PATH=""
 GPG_KEY=""
-JLINK_MODULES="java.base,java.desktop,java.instrument,java.logging,java.prefs,jdk.unsupported,jdk.crypto.ec,jdk.zipfs"
+JLINK_MODULES="java.base,java.desktop,java.instrument,java.logging,java.prefs,jdk.unsupported,jdk.crypto.ec,jdk.charsets,jdk.httpserver,jdk.zipfs"
 RAW_TARGETS=()
 TARGETS=()
 LINUX_TARGETS=()
@@ -254,6 +254,17 @@ note "准备 Linux 打包输入 jar"
 rm -rf "$INPUT_LINUX"
 copy_jars "$CLASSPATH_STR" "$INPUT_LINUX"
 rm -f "$INPUT_LINUX"/*windows-x64*.jar
+ICON_JAR=$(find "$INPUT_LINUX" -maxdepth 1 -type f -name 'material-icons-extended*.jar' -print -quit)
+if [[ -n "$ICON_JAR" && -x "$ROOT/scripts/trim-icons.sh" ]]; then
+    note "裁剪 material-icons-extended 图标 jar"
+    if PATH="$LINUX_JDK/bin:$PATH" "$ROOT/scripts/trim-icons.sh" \
+        "$ICON_JAR" "$ICON_JAR.trimmed"; then
+        mv -f "$ICON_JAR.trimmed" "$ICON_JAR"
+    else
+        rm -f "$ICON_JAR.trimmed"
+        note "图标裁剪失败，保留原 jar"
+    fi
+fi
 [[ -f "$INPUT_LINUX/desktopApp-jvm.jar" ]] || die "缺少 desktopApp-jvm.jar"
 compgen -G "$INPUT_LINUX/*skiko-awt-runtime-linux-x64*.jar" >/dev/null || \
     die "Linux 输入缺少 skiko-awt-runtime-linux-x64；请在 Linux 上构建 desktopApp"
@@ -289,6 +300,7 @@ jpackage_linux() {
         --input "$input"
         --main-jar desktopApp-jvm.jar
         --main-class com.banlimusic.desktop.MainKt
+        --java-options "-Dbanlimusic.version=$VERSION"
         --icon "$ROOT/shared/composeResources/drawable/banli_logo.png"
         --dest "$dest"
     )
@@ -328,8 +340,9 @@ if [ "${JAVA_MAJOR:-0}" -lt 17 ]; then
   exit 1
 fi
 
-exec "$JAVA_BIN" -cp "$APP_HOME/libs/*" com.banlimusic.desktop.MainKt "$@"
+exec "$JAVA_BIN" -Dbanlimusic.version="__BANLI_VERSION__" -cp "$APP_HOME/libs/*" com.banlimusic.desktop.MainKt "$@"
 EOF
+    sed -i "s/__BANLI_VERSION__/$VERSION/g" "$path"
     chmod 755 "$path"
 }
 

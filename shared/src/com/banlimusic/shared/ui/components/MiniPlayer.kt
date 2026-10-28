@@ -65,6 +65,9 @@ fun BanLiMiniPlayer(
     placeholderTitle: String = "还没有播放歌曲",
     placeholderSubtitle: String = "从首页、搜索或音乐库选择一首歌开始播放。",
     extraInfo: (@Composable () -> Unit)? = null,
+    volume: Float? = null,
+    onVolumeChange: ((Float) -> Unit)? = null,
+    onSeek: ((Long) -> Unit)? = null,
 ) {
     val track = state.track
     if (track == null) {
@@ -179,8 +182,20 @@ fun BanLiMiniPlayer(
                     modifier = Modifier.size(22.dp),
                 )
             }
+            if (volume != null && onVolumeChange != null) {
+                VolumeControl(
+                    volume = volume,
+                    onVolumeChange = onVolumeChange,
+                    modifier = Modifier.size(38.dp),
+                )
+            }
         },
         modifier = modifier,
         extraInfo = extraInfo?.let { { it() } },
+        onSeek = if (onSeek != null && state.durationMs > 0L) {
+            { fraction -> onSeek((fraction * state.durationMs).toLong()) }
+        } else {
+            null
+        },
     )
 }

@@ -173,11 +173,14 @@ jpackage `
   --win-shortcut `
   --win-menu `
   --win-dir-chooser `
-  --win-per-user-install `
   --win-upgrade-uuid "<UPGRADE_UUID>"
 ```
 
-把 `--type exe` 换成 `--type msi` 即可生成 MSI；其余参数相同。去掉 `--win-per-user-install` 可改为全局安装。
+把 `--type exe` 换成 `--type msi` 即可生成 MSI；其余参数相同。
+
+> Windows 的 MSI/EXE 使用 **per-machine** 安装（不传 `--win-per-user-install`），因此安装和卸载会请求管理员权限，并支持通过 `--win-dir-chooser` 安装到 D: 等非系统盘。
+>
+> 不要用 per-user 安装配合非系统盘：Windows Installer 会在目标盘根目录创建 `Config.Msi`，标准用户卸载时可能无法修改回滚脚本权限，从而反复提示 `Could not set file security ... Error 5`。已经以 per-user 方式安装在非系统盘的旧版本，如无法卸载，可先以管理员身份运行卸载，或使用 Microsoft 的“程序安装和卸载疑难解答”清理残留。
 
 > 如需 Authenticode 签名，先单独生成 app-image，用 `signtool` 签其中的 `BanLiMusic.exe`，再用 `--app-image "<APP_IMAGE>"` 生成 exe/msi 并签安装包。直接由 jpackage 生成安装包时，内部的 app-image 无法插入签名步骤；打包脚本的 `-Sign` 已按此顺序处理。
 
@@ -216,7 +219,7 @@ if [ "${JAVA_MAJOR:-0}" -lt 17 ]; then
   exit 1
 fi
 
-exec "$JAVA_BIN" -cp "$APP_HOME/libs/*" com.banlimusic.desktop.MainKt "$@"
+exec "$JAVA_BIN" -Dbanlimusic.version="<version>" -cp "$APP_HOME/libs/*" com.banlimusic.desktop.MainKt "$@"
 ```
 
 打包：
@@ -256,7 +259,7 @@ if errorlevel 1 (
   echo 未找到 Java，请安装 Java 17 或更高版本。
   exit /b 1
 )
-"%JAVA_BIN%" -cp "%APP_HOME%libs\*" com.banlimusic.desktop.MainKt %*
+"%JAVA_BIN%" -Dbanlimusic.version="<version>" -cp "%APP_HOME%libs\*" com.banlimusic.desktop.MainKt %*
 ```
 
 打包：
@@ -323,11 +326,11 @@ powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 `
     -CertificatePath "<KEYSTORE_DIR>\banli.pfx"
 ```
 
-脚本会自动构建 `desktopApp`、读取或生成运行时 classpath、按平台过滤 Skiko jar，并把产物写入 `dist/`，同时生成 `SHA256SUMS-<version>.txt`。Linux 依赖 `jpackage`、`dpkg-deb`、`fakeroot`、`rpmbuild`；Windows 依赖 JDK 25 与 WiX 3.14。`--jlink`/`-Jlink` 使用以下模块集：
+脚本会自动构建 `desktopApp`、读取或生成运行时 classpath、按平台过滤 Skiko jar，并把产物写入 `dist/`，同时生成 `SHA256SUMS-<version>.txt`。打包时还会按源码实际引用裁剪 `material-icons-extended`（Linux 使用 `scripts/trim-icons.sh`，Windows 脚本内置同等逻辑），通常可把该 jar 从约 37 MB 降到约 200 KB。Linux 依赖 `jpackage`、`dpkg-deb`、`fakeroot`、`rpmbuild`；Windows 依赖 JDK 25 与 WiX 3.14。`--jlink`/`-Jlink` 使用以下模块集；桌面端 OneDrive 登录依赖 `jdk.httpserver`，中文 A-Z 首字母依赖 `jdk.charsets`，不要从列表中移除：
 
 ```text
 java.base,java.desktop,java.instrument,java.logging,java.prefs,
-jdk.unsupported,jdk.crypto.ec,jdk.zipfs
+jdk.unsupported,jdk.crypto.ec,jdk.charsets,jdk.httpserver,jdk.zipfs
 ```
 
 ### 桌面端产物签名

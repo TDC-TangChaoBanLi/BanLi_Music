@@ -1,5 +1,5 @@
 /**
- * 文件作用：两端共用的歌词视图，包含翻译切换、自动滚动与长按拖动定位。
+ * 文件作用：两端共用的歌词视图，包含自动滚动与长按拖动定位。
  */
 package com.banlimusic.shared.ui.player
 
@@ -33,7 +33,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,12 +72,7 @@ fun BanLiLyricsView(
     emptyTitle: String = "暂无歌词",
     emptyDescription: String = "当前音乐源没有返回这首歌的歌词。",
 ) {
-    var showTranslation by rememberSaveable { mutableStateOf(true) }
     val lines = remember(lyrics?.raw) { lyrics?.raw?.let(LrcParser::parse).orEmpty() }
-    val translatedLines = remember(lyrics?.translated) {
-        lyrics?.translated?.let(LrcParser::parse).orEmpty().associateBy { it.timeMs }
-    }
-    val hasTranslation = !lyrics?.translated.isNullOrBlank()
     val listState = rememberLazyListState()
     val duration = durationMs.coerceAtLeast(0L)
     var scrubIndex by remember { mutableStateOf<Int?>(null) }
@@ -195,21 +189,8 @@ fun BanLiLyricsView(
                             )
                         }
                     }
-                    if (hasTranslation && !loading) {
-                        TextButton(onClick = { showTranslation = !showTranslation }) {
-                            Text(if (showTranslation) "隐藏翻译" else "显示翻译")
-                        }
-                    }
                 }
                 Spacer(Modifier.height(8.dp))
-            } else if (hasTranslation && !loading) {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { showTranslation = !showTranslation }) {
-                        Text(if (showTranslation) "隐藏翻译" else "显示翻译")
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
             }
 
             when {
@@ -261,7 +242,7 @@ fun BanLiLyricsView(
                         .indexOfLast { it.timeMs <= positionMs }
                         .coerceAtLeast(0)
                     val activeIndex = scrubIndex ?: currentIndex
-                    LaunchedEffect(currentIndex, showTranslation, scrubIndex) {
+                    LaunchedEffect(currentIndex, scrubIndex) {
                         if (scrubIndex == null && currentIndex in lines.indices) {
                             // Keep the active line on the third visible row.
                             val targetIndex = (currentIndex - 2).coerceAtLeast(0)
@@ -277,12 +258,6 @@ fun BanLiLyricsView(
                             .onGloballyPositioned { listTopInWindow = it.positionInWindow().y },
                     ) {
                         itemsIndexed(lines) { index, line ->
-                            val translated = translatedLines[line.timeMs]?.text
-                            val text = if (showTranslation && !translated.isNullOrBlank()) {
-                                translated
-                            } else {
-                                line.text
-                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -302,7 +277,7 @@ fun BanLiLyricsView(
                                     Spacer(Modifier.width(6.dp))
                                 }
                                 Text(
-                                    text = text,
+                                    text = line.text,
                                     modifier = Modifier.weight(1f),
                                     textAlign = TextAlign.Center,
                                     fontSize = if (index == activeIndex) 17.sp else 15.sp,

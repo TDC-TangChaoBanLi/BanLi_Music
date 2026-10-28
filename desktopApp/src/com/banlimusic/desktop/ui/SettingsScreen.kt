@@ -11,16 +11,22 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.banlimusic.app.core.cache.CacheUsage
+import com.banlimusic.app.core.cache.CachedTrack
 import com.banlimusic.app.core.datastore.TabletMiniPlayerPosition
 import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.app.core.datastore.ThemeMode
 import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.core.limiter.RateLimitStatus
+import com.banlimusic.app.data.sync.syncUserMessage
 import com.banlimusic.desktop.DesktopPaths
 import com.banlimusic.desktop.data.DesktopSettingsRepository
+import com.banlimusic.desktop.data.sync.DesktopAuthState
+import com.banlimusic.desktop.data.sync.DesktopSyncStatus
 import com.banlimusic.shared.ui.screens.BanLiSettingsScreen
 import com.banlimusic.shared.ui.screens.SettingsActions
+import com.banlimusic.shared.ui.screens.SettingsPlatform
 import com.banlimusic.shared.ui.screens.SettingsUiState
+import com.banlimusic.shared.ui.screens.SyncAuthState
 import com.banlimusic.shared.ui.screens.SyncUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -31,20 +37,31 @@ import java.awt.datatransfer.StringSelection
 import java.io.File
 import javax.swing.JFileChooser
 import javax.swing.JOptionPane
+import javax.swing.SwingUtilities
 
 /** Desktop adapter for the shared settings screen. */
 @Composable
 fun DesktopSettingsScreen(state: DesktopAppState) {
     val settings by state.settings.collectAsState()
+    val cachedTracks by state.container.playbackCache.entries.collectAsState()
+    val syncAuth by state.container.syncRepository.authState.collectAsState()
+    val syncStatus by state.container.syncRepository.status.collectAsState()
+    val syncPersistent by state.container.syncRepository.persistentState.collectAsState()
     val scope = rememberCoroutineScope()
     var rateStatus by remember { mutableStateOf<RateLimitStatus?>(null) }
-    var cacheBytes by remember { mutableStateOf(0L) }
+    var cacheUsage by remember { mutableStateOf(CacheUsage()) }
 
     fun refreshCacheUsage() {
         scope.launch {
-            cacheBytes = withContext(Dispatchers.IO) {
-                state.container.metadataCache.sizeBytes()
-            }
+            val metadata = state.container.metadataCache.usage()
+            val audio = state.container.playbackCache.usage()
+            cacheUsage = CacheUsage(
+                totalBytes = metadata.totalBytes + audio.audioBytes,
+                audioBytes = audio.audioBytes,
+                artworkBytes = metadata.artworkBytes,
+                lyricsBytes = metadata.lyricsBytes,
+                otherBytes = metadata.otherBytes,
+            )
         }
     }
 
@@ -88,6 +105,9 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
 
             override fun setWidgetTheme(theme: WidgetTheme) =
                 state.container.settingsRepository.setWidgetTheme(theme)
+
+            override fun setDesktopFloatingLyrics(enabled: Boolean) =
+                state.container.settingsRepository.setDesktopFloatingLyrics(enabled)
 
             override fun setAllowMobileNetwork(enabled: Boolean) =
                 state.container.settingsRepository.setAllowMobileNetwork(enabled)
@@ -146,18 +166,35 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
             override fun setAutoLoadArtwork(enabled: Boolean) =
                 state.container.settingsRepository.setAutoLoadArtwork(enabled)
 
-            override fun setCacheMaxBytes(bytes: Long) =
+            override fun setCacheMaxBytes(bytes: Long) {
                 state.container.settingsRepository.setCacheMaxBytes(bytes)
+                scope.launch {
+                    state.container.playbackCache.trim()
+                    refreshCacheUsage()
+                }
+            }
+
+            override fun clearAudioCache() {
+                scope.launch {
+                    state.container.playbackCache.clear()
+                    refreshCacheUsage()
+                }
+            }
 
             override fun clearArtworkCache() {
                 scope.launch {
-                    state.container.metadataCache.clear()
+                    state.container.metadataCache.clearArtwork()
                     state.container.artworkLoader.clearMemory()
                     refreshCacheUsage()
                 }
             }
 
-            override fun clearLyricsCache() = clearArtworkCache()
+            override fun clearLyricsCache() {
+                scope.launch {
+                    state.container.metadataCache.clearLyrics()
+                    refreshCacheUsage()
+                }
+            }
 
             override fun clearOtherCache() {
                 scope.launch {
@@ -168,9 +205,32 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
 
             override fun clearAllCaches() {
                 scope.launch {
+                    state.container.playbackCache.clear()
                     state.container.metadataCache.clear()
                     state.container.artworkLoader.clearMemory()
                     state.container.musicRepository.clearCaches()
+                    refreshCacheUsage()
+                }
+            }
+
+            override fun removeCachedTrack(cacheKey: String) {
+                scope.launch {
+                    state.container.playbackCache.remove(cacheKey)
+                    refreshCacheUsage()
+                }
+            }
+
+            override fun convertCachedToDownloads(entries: List<CachedTrack>) {
+                scope.launch {
+                    entries.forEach { entry ->
+                        state.container.playbackCache.fileFor(entry.cacheKey)?.let { file ->
+                            state.container.downloads.adoptCached(
+                                entry.track,
+                                file,
+                                entry.qualityKbps,
+                            )
+                        }
+                    }
                     refreshCacheUsage()
                 }
             }
@@ -222,6 +282,29 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
                 scope.launch { state.container.libraryRepository.clearSearchHistory() }
             }
 
+            override fun signInSync() {
+                state.container.syncRepository.signIn { result ->
+                    result.exceptionOrNull()?.let { error ->
+                        SwingUtilities.invokeLater {
+                            JOptionPane.showMessageDialog(null, error.syncUserMessage())
+                        }
+                    }
+                }
+            }
+
+            override fun signOutSync(deleteCloudFile: Boolean) =
+                state.container.syncRepository.signOut(deleteCloudFile)
+
+            override fun syncNow() {
+                scope.launch { state.container.syncRepository.syncNow() }
+            }
+
+            override fun setAutoSync(enabled: Boolean) =
+                state.container.settingsRepository.setSyncAutoSync(enabled)
+
+            override fun setSyncIntervalHours(hours: Int) =
+                state.container.settingsRepository.setSyncIntervalHours(hours)
+
             override fun copyText(label: String, value: String) {
                 Toolkit.getDefaultToolkit().systemClipboard
                     .setContents(StringSelection(value), null)
@@ -229,27 +312,48 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
         }
     }
 
+    val success = syncStatus as? DesktopSyncStatus.Success
+    val syncUi = SyncUiState(
+        supported = true,
+        configured = state.container.syncRepository.isConfigured(),
+        auth = when (syncAuth) {
+            DesktopAuthState.NOT_CONFIGURED -> SyncAuthState.NOT_CONFIGURED
+            DesktopAuthState.SIGNED_OUT -> SyncAuthState.SIGNED_OUT
+            DesktopAuthState.SIGNED_IN -> SyncAuthState.SIGNED_IN
+        },
+        accountName = syncPersistent.accountName,
+        redirectUri = state.container.syncRepository.redirectUri(),
+        autoSync = settings.sync.autoSync,
+        intervalHours = settings.sync.intervalHours,
+        syncing = syncStatus is DesktopSyncStatus.Syncing,
+        lastSyncAt = syncPersistent.lastSyncAt,
+        lastError = (syncStatus as? DesktopSyncStatus.Error)?.message
+            ?: syncPersistent.lastError,
+        successAdded = success?.addedMemberships ?: 0,
+        successRemoved = success?.removedMemberships ?: 0,
+        successText = success?.let {
+            buildString {
+                append("同步完成")
+                if (it.addedMemberships > 0) append("，新增 ${it.addedMemberships} 项")
+                if (it.removedMemberships > 0) append("，移除 ${it.removedMemberships} 项")
+            }
+        },
+    )
+
     BanLiSettingsScreen(
         state = SettingsUiState(
             settings = settings,
             versionName = desktopVersionName(),
             rateStatus = rateStatus,
-            cacheUsage = CacheUsage(
-                totalBytes = cacheBytes,
-                artworkBytes = cacheBytes,
-            ),
-            cachedTracks = emptyList(),
-            sync = SyncUiState(
-                supported = false,
-                unavailableReason = "当前 OneDrive 应用注册只包含 Android 平台的签名回调，" +
-                    "桌面端需要单独的回调地址。请在 Android 端登录并同步；桌面端的收藏夹结构" +
-                    "与之相同，可通过收藏备份迁移。",
-            ),
+            cacheUsage = cacheUsage,
+            cachedTracks = cachedTracks,
+            sync = syncUi,
             playbackQualities = DesktopSettingsRepository.DESKTOP_QUALITIES,
             downloadQualities = DesktopSettingsRepository.DESKTOP_QUALITIES,
             widgetSupported = false,
-            audioCacheSupported = false,
+            audioCacheSupported = true,
             supportsDirectoryPicker = true,
+            platform = SettingsPlatform.DESKTOP,
         ),
         actions = actions,
         modifier = Modifier.fillMaxSize(),

@@ -30,11 +30,12 @@ shared/                       KMP 共享核心（android + jvm）
       ui/agreement            两端共用的用户协议界面
 desktopApp/                   Compose Desktop 桌面端
   module.yaml
-  src/main.kt                 窗口与共享应用外壳
+  src/main.kt                 无边框窗口、自绘标题栏、系统托盘与共享应用外壳
   src/com/banlimusic/desktop/
-    data/                     设置、收藏夹/历史/本地音乐、下载、缓存、仓库
+    data/                     设置、收藏夹/历史/本地音乐、下载、播放缓存、元数据缓存、仓库
+    data/sync/                OneDrive 登录、令牌存储与云同步协调
     player/                   JLayer MP3 播放引擎
-    ui/                       平台适配层：只负责数据映射、文件选择与图片加载
+    ui/                       平台适配层：只负责数据映射、文件选择、主题与图片加载
 androidApp/
   module.yaml                 android/app 构建配置
   src/
@@ -58,7 +59,7 @@ androidApp/
   schemas/                    Room schema 历史
 ```
 
-跨平台代码位于 `shared/`（`kmp/lib`，platforms `android` + `jvm`），与平台无关的模型、Provider、GD 客户端、限流、文本/歌词解析、去重、URI 编解码、排序与首字母索引已下沉；Compose Multiplatform 主题、自适应应用外壳、首页/搜索/播放页布局、协议页、歌词、播放条、曲目行、列表表头、多选栏与 A-Z 索引也位于共享模块。`desktopApp/`（`jvm/app` + Compose Desktop）复用共享核心与共享 UI，使用 Compose Desktop + JLayer 实现桌面 UI 与 MP3 播放；设置使用系统 Preferences，收藏/历史和下载任务使用 JSON 文件。由于共享模块当前允许使用 `java.*` API，它面向 Android/JVM，不包含 iOS 目标。
+跨平台代码位于 `shared/`（`kmp/lib`，platforms `android` + `jvm`），与平台无关的模型、Provider、GD 客户端、限流、文本/歌词解析、去重、URI 编解码、排序与首字母索引已下沉；Compose Multiplatform 主题、自适应应用外壳、首页/搜索/播放页布局、协议页、歌词、播放条、曲目行、列表表头、多选栏与 A-Z 索引也位于共享模块。`desktopApp/`（`jvm/app` + Compose Desktop）复用共享核心与共享 UI，使用 Compose Desktop + JLayer 实现桌面 UI 与 MP3 播放；设置使用系统 Preferences，收藏/历史和下载任务使用 JSON 文件，播放缓存使用独立目录与 JSON 索引，OneDrive 同步复用共享的 Graph 客户端与合并算法。发布打包时会按源码实际引用裁剪 `material-icons-extended`，避免把整套图标打进桌面产物。由于共享模块当前允许使用 `java.*` API，它面向 Android/JVM，不包含 iOS 目标。
 
 ### UI 单一来源
 

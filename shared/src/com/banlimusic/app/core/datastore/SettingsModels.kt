@@ -127,6 +127,8 @@ data class AppSettings(
     val favoriteCategoryOrder: List<String> = emptyList(),
     val autoImportLocalMusic: Boolean = false,
     val widgetTheme: WidgetTheme = WidgetTheme.SYSTEM,
+    /** Desktop-only placeholder for the floating lyrics window. */
+    val desktopFloatingLyrics: Boolean = false,
     /** Requests a ~90Hz display mode while browsing track lists. */
     val highRefreshRateLists: Boolean = true,
     /** Opens the full player when a track row is tapped; disable to stay on the list. */

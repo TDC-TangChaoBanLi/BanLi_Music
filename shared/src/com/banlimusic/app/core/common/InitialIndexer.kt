@@ -12,7 +12,11 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object InitialIndexer {
     private val cache = ConcurrentHashMap<Char, String>()
-    private val gb2312 = runCatching { Charset.forName("GB2312") }.getOrNull()
+    // jdk.charsets provides these on the JVM; Android has them in the platform.
+    // GBK/GB18030 are supersets of GB2312 and keep the same GB2312 byte ranges.
+    private val gbCharsets = listOf("GB2312", "GBK", "GB18030").mapNotNull { name ->
+        runCatching { Charset.forName(name) }.getOrNull()
+    }
 
     // Start code of each pinyin initial in GB2312 order. I, U and V do not exist
     // as pinyin initials.
@@ -57,8 +61,10 @@ object InitialIndexer {
     }
 
     private fun chineseInitial(char: Char): String {
-        val bytes = gb2312?.let { charset ->
-            runCatching { char.toString().toByteArray(charset) }.getOrNull()
+        val bytes = gbCharsets.firstNotNullOfOrNull { charset ->
+            runCatching { char.toString().toByteArray(charset) }
+                .getOrNull()
+                ?.takeIf { it.size == 2 }
         } ?: return "#"
         if (bytes.size != 2) return "#"
         val code = ((bytes[0].toInt() and 0xFF) shl 8) or (bytes[1].toInt() and 0xFF)

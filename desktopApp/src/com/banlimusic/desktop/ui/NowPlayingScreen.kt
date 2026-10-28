@@ -105,6 +105,8 @@ fun DesktopNowPlayingScreen(state: DesktopAppState) {
                 onNext = { state.container.player.next() },
                 onCyclePlayMode = { state.container.player.cyclePlayMode() },
                 modifier = controlsModifier,
+                volume = playback.volume,
+                onVolumeChange = state.container.player::setVolume,
             )
         },
         metadata = if (track == null) {

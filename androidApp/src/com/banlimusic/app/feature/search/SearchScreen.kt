@@ -103,7 +103,7 @@ fun SearchScreen(
         modifier = Modifier.fillMaxSize(),
         searchIcon = Icons.Rounded.Search,
         clearIcon = Icons.Rounded.Close,
-        autoFocus = true,
+        autoFocus = false,
         focusRequestKey = focusRequestKey,
     )
 
