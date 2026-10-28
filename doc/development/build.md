@@ -43,4 +43,4 @@
 
 桌面端设置使用系统 Preferences，收藏/历史和下载任务使用 JSON 文件。当前仅支持 MP3 播放，暂不提供无损音质与自动更新。
 
-桌面端便携版与安装包打包见 [release.md](release.md#桌面端发布包)。
+桌面端发布包由 `scripts/package-linux.sh` 与 `scripts/package-windows.ps1` 生成，见 [release.md](release.md#桌面端发布包)。

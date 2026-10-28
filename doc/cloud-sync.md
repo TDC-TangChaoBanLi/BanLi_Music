@@ -8,7 +8,7 @@
 - 登录：OAuth 2.0 授权码 + PKCE，系统浏览器完成授权。Android 的 refresh token 使用 Android Keystore 加密保存在 `noBackupFilesDir`；桌面端保存在用户配置目录的 `onedrive-auth.json`，并尽量设置为仅当前用户可读写（POSIX `0600`）。
 - 合并：按收藏夹/归属关系的 `updatedAt` 双向合并，删除写入墓碑（保留 180 天）；上传使用 eTag + `If-Match`，遇到 412 会自动重新拉取并合并重试。
 - 触发：设置页“立即同步”、应用启动（开启自动同步且距上次超过 30 分钟）。Android 另有 WorkManager 定期任务（1–168 小时）；桌面端目前只在启动时检查一次。
-- 网络：桌面端启动时启用 JVM 系统代理，并读取 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量；登录回调使用系统分配的本机随机端口，不再固定 `53682`。如果登录提示网络失败，请先确认系统代理可用。
+- 网络：桌面端启动时启用 JVM 系统代理，并读取 `HTTPS_PROXY`/`HTTP_PROXY` 环境变量；登录回调使用系统分配的本机随机端口。如果登录提示网络失败，请先确认系统代理可用。
 - 限流：同步请求使用独立 OkHttp 与独立 `RequestScheduler`，不占用 GD 音乐台的 5 分钟请求额度。
 
 Android 实现位于 `androidApp/src/com/banlimusic/app/core/sync/` 与 `androidApp/src/com/banlimusic/app/data/sync/`；桌面端实现位于 `desktopApp/src/com/banlimusic/desktop/data/sync/`。平台无关的同步文档、合并算法与 Graph 客户端在 `shared/`。令牌存储、OAuth 回调与设置 UI 按平台分别实现。

@@ -19,25 +19,25 @@
 - **桌面小组件**：平台 `RemoteViews` 实现 3x1 与 4x1 两种可调单行尺寸；显示标题、歌手、封面（大号）、收藏（4x1）、播放控制，进度条固定在组件底部并留出圆角间距，支持黑色/白色/跟随系统的半透明磨砂风格。播放中按 0.5 秒采样并按经过时间插值进度，通过 `partiallyUpdateAppWidget` 局部刷新图标/文本/进度，避免整层 RemoteViews 替换造成的延迟；服务被回收后会尝试恢复上次队列。小组件按钮通过透明 Activity + MediaController 执行，兼容对 PendingIntent/Broadcast 支持不佳的启动器。
 - **系统媒体控制**：Media3 通知/任务栏播放控件通过自定义 SessionCommand 提供收藏与播放顺序按钮；收藏图标随当前歌曲状态切换，播放顺序按钮在随机播放、列表循环、单曲循环之间切换并同步图标。
 - **界面**：Jetpack Compose + Material 3，首页、搜索、音乐库、下载、设置、全屏播放器、歌词页；从非首页顶层页面按返回退出后，再次启动会恢复离开前的页面；手机使用底部导航，平板使用 NavigationRail（可设置左右侧，切换页面时上下滑动）；平板小播放器可设置位于内容上方或下方（默认下方）；平板横屏播放页左侧为海报与播放控件、右侧为歌词，竖屏与手机一致使用左右滑动分页。
-- **共享 UI 基础（Compose Multiplatform）**：`shared/` 已启用 Compose Multiplatform，提供统一的 Material 3 主题与自适应应用外壳（侧边/底部导航、播放条槽位、导航栏左右位置）；`shared/composeResources/drawable` 统一管理应用图标等共享图片资源；Android 与桌面端已共用该外壳，后续页面将逐步迁入 `shared/` 的共享 UI 包。
+- **共享 UI（Compose Multiplatform）**：`shared/` 提供统一的 Material 3 主题、自适应应用外壳（侧边/底部导航、播放条槽位、导航栏左右位置）、首页/搜索/音乐库/下载/设置/播放页布局、歌词与用户协议页面；`shared/composeResources/drawable` 统一管理应用图标等共享图片资源。Android 与桌面端共用同一套页面，平台层只负责数据映射与系统能力。
 - **设置**：二级菜单分类为外观、播放、播放源、下载与缓存、音乐库与收藏、云同步、关于；桌面小组件并入外观；外观支持在关闭动态取色后自定义主题颜色（7 个预设色块或 1 个自定义颜色，支持色相与饱和度调节）；底部导航 5 个栏目全部保留、仅可排序，并可设置默认栏目；平板布局可设置侧边导航栏左右位置与小播放器上下位置；播放音质统一放在“播放”设置中，使用标准/较高/高品/无损四档，来源档位不足时映射、多于四档时舍弃；GD 音乐台作为播放源模块，预留自定义 API 来源设置（名称/代码、曲目 ID、音质、搜索/取流/歌词/海报参数映射，暂不发起请求）；每个设置项均有图标。
-- **OneDrive 云同步（可选）**：使用自己的个人 Microsoft 账号登录，把收藏夹与收藏歌曲双向同步到 OneDrive 的 `Apps/BanLiMusic/library.json`。授权码 + PKCE、系统浏览器回调、独立 Graph 限流器、eTag 并发控制、删除墓碑与双向合并；令牌使用 Android Keystore 加密保存在 `noBackupFilesDir`。支持手动同步、启动时检查与 WorkManager 定期同步。实现细节见 [cloud-sync.md](cloud-sync.md)。
-- **跨平台与桌面端**：`shared/`（Kotlin Multiplatform：Android + JVM）承载模型、Provider、GD 客户端、限流、解析、排序等核心；`desktopApp/`（Compose Desktop）已实现首页、手动搜索与搜索历史、收藏夹分类、最近播放、本地音乐扫描、多选批量收藏/下载、下载管理、MP3 播放、歌词/播放队列、播放缓存、OneDrive 云同步、主题和来源设置。桌面端支持自定义主题色、播放页与底部播放条音量调节、鼠标拖拽多选、批量收藏时的收藏夹下拉选择、自绘窗口标题栏、关闭窗口后驻留系统托盘，以及点击/拖动迷你播放条调整进度；桌面悬浮歌词设置已预留但暂不生效。桌面端当前使用 JLayer 解码 MP3，暂不提供无损音质；自动更新仍留待后续。
+- **OneDrive 云同步（可选）**：使用自己的个人 Microsoft 账号登录，把收藏夹与收藏歌曲双向同步到 OneDrive 的 `Apps/BanLiMusic/library.json`。授权码 + PKCE、系统浏览器回调、独立 Graph 限流器、eTag 并发控制、删除墓碑与双向合并；Android 端令牌使用 Android Keystore 加密保存在 `noBackupFilesDir`，桌面端令牌保存在用户配置目录。支持手动同步、启动时检查与 Android 端的 WorkManager 定期同步。实现细节见 [cloud-sync.md](cloud-sync.md)。
+- **跨平台与桌面端**：`shared/`（Kotlin Multiplatform：Android + JVM）承载模型、Provider、GD 客户端、限流、解析、排序等核心；`desktopApp/`（Compose Desktop）已实现首页、手动搜索与搜索历史、收藏夹分类、最近播放、本地音乐扫描、多选批量收藏/下载、下载管理、MP3 播放、歌词/播放队列、播放缓存、OneDrive 云同步、主题和来源设置。桌面端支持自定义主题色、播放页与底部播放条音量调节、鼠标拖拽多选、批量收藏时的收藏夹下拉选择、自绘窗口标题栏、关闭窗口后驻留系统托盘，以及点击/拖动迷你播放条调整进度；桌面悬浮歌词设置已预留但暂不生效。桌面端布局与 Android 平板横屏一致：统一首页、搜索、音乐库、下载、播放页与设置二级页面，常驻底部播放条，播放页隐藏。桌面端当前使用 JLayer 解码 MP3，暂不提供无损音质；自动更新仍留待后续。
 - **测试**：去重算法、限流器、LRC 解析、来源 URI 编解码、音质档位映射、收藏 JSON v1/v2 兼容、收藏双向合并（墓碑/冲突/复活）、Room v4→v5 迁移、PKCE、Graph 客户端（MockWebServer）、GD 响应解析与 MockWebServer 集成测试、时间排序、来源轮转与下载清单合并，共 89 个 JVM 单元测试。
-- **开发约束**：`AGENTS.md` 记录多来源扩展、包体积控制、限流、数据库迁移和 UI 约定。
+- **开发约束**：`AGENTS.md` 记录强制约束，[开发经验](development/experience.md) 记录多来源扩展、包体积控制、限流、数据库迁移与 UI 等实现经验。
 
 ## 已知限制
 
-- 尚未实现独立歌单（收藏夹已支持一首歌属于多个夹）、账号体系与自建服务器适配器；OneDrive 同步目前仅 Android 端。
+- 尚未实现独立歌单（收藏夹已支持一首歌属于多个夹）、账号体系与自建服务器适配器。
 - 列表页默认不主动请求专辑封面（播放页会加载并缓存），可在“下载与缓存”设置中开启；开启后会占用 5 分钟 50 次的 API 请求额度。
 - Android 10+ 默认通过 MediaStore 写入系统 `Music/BanLiMusic`；自定义目录不可写或旧系统会回退到应用外部音乐目录。卸载应用不会自动删除已写入系统媒体库的文件。
 - 4x1 桌面小组件会加载封面；封面由服务端/播放页缓存提供，失败时显示占位图。
 - 中文 A-Z 首字母使用轻量 GB2312 映射，多音字和生僻字可能出现近似结果。
-- 桌面端发布产物默认不签名；Windows 可能显示“未知发布者”，Linux 产物需额外校验 SHA256/GPG 签名。签名流程见 [release.md](development/release.md#桌面端产物签名)。
+- 桌面端只发布 Linux x64 的 no-jre deb/rpm 与 Windows x64 的 MSI/ZIP；不提供 macOS 与 Linux 带 runtime 的包，Linux 用户需要 Java 17+。
+- 桌面端发布产物默认不签名；Windows 可能显示“未知发布者”。签名流程见 [release.md](development/release.md#签名)。
 - 桌面端关闭窗口后进程继续驻留系统托盘；Linux 托盘显示依赖桌面环境，GNOME 可能需要 AppIndicator 扩展。
 - 桌面端 OneDrive 登录使用本机回环回调 `http://localhost/callback`（端口由系统分配，Entra 对 localhost 忽略端口），需在 Entra 应用注册中手动添加；自动同步只在启动时检查一次，没有后台定时任务。
-- Windows MSI/EXE 使用 per-machine 安装并请求管理员权限，支持安装到 D: 等非系统盘；per-user 方式安装到非系统盘时可能受 Windows `Config.Msi` 权限问题影响。
+- Windows MSI 使用 per-machine 安装并请求管理员权限，支持安装到 D: 等非系统盘。
 - 桌面悬浮歌词目前只有设置开关，尚未创建悬浮窗口。
 - 已在真机验证主要播放、下载与小组件流程；不同厂商桌面和系统版本仍需分别验证。
-- 桌面端已与 Android 平板横屏布局对齐：统一首页、搜索、音乐库、下载、播放页与设置二级页面；桌面端常驻底部播放条，播放页隐藏。
-- Android 设置中的缓存歌曲页改为曲目列表：支持完整/部分缓存分类、排序、长按拖拽多选与批量删除。
+- Android 设置中的缓存歌曲页以曲目列表展示：支持完整/部分缓存分类、排序、长按拖拽多选与批量删除。

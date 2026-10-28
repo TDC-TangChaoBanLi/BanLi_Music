@@ -59,7 +59,7 @@ androidApp/
   schemas/                    Room schema 历史
 ```
 
-跨平台代码位于 `shared/`（`kmp/lib`，platforms `android` + `jvm`），与平台无关的模型、Provider、GD 客户端、限流、文本/歌词解析、去重、URI 编解码、排序与首字母索引已下沉；Compose Multiplatform 主题、自适应应用外壳、首页/搜索/播放页布局、协议页、歌词、播放条、曲目行、列表表头、多选栏与 A-Z 索引也位于共享模块。`desktopApp/`（`jvm/app` + Compose Desktop）复用共享核心与共享 UI，使用 Compose Desktop + JLayer 实现桌面 UI 与 MP3 播放；设置使用系统 Preferences，收藏/历史和下载任务使用 JSON 文件，播放缓存使用独立目录与 JSON 索引，OneDrive 同步复用共享的 Graph 客户端与合并算法。发布打包时会按源码实际引用裁剪 `material-icons-extended`，避免把整套图标打进桌面产物。由于共享模块当前允许使用 `java.*` API，它面向 Android/JVM，不包含 iOS 目标。
+跨平台代码位于 `shared/`（`kmp/lib`，platforms `android` + `jvm`）：与平台无关的模型、Provider、GD 客户端、限流、文本/歌词解析、去重、URI 编解码、排序与首字母索引均在此实现；Compose Multiplatform 主题、自适应应用外壳、首页/搜索/播放页布局、协议页、歌词、播放条、曲目行、列表表头、多选栏与 A-Z 索引也位于共享模块。`desktopApp/`（`jvm/app` + Compose Desktop）复用共享核心与共享 UI，使用 Compose Desktop + JLayer 实现桌面 UI 与 MP3 播放；设置使用系统 Preferences，收藏/历史和下载任务使用 JSON 文件，播放缓存使用独立目录与 JSON 索引，OneDrive 同步复用共享的 Graph 客户端与合并算法。共享模块允许使用 `java.*` API，面向 Android/JVM，不包含 iOS 目标。
 
 ### UI 单一来源
 
@@ -83,4 +83,4 @@ androidApp/
 5. 平台无关逻辑优先下沉到 `shared/`；Android SDK、Media3、Room、WorkManager、Glance、RemoteViews 只留在 `androidApp/`。
 6. 来源能力通过 `ProviderCapabilities` 声明，UI 根据能力隐藏或禁用操作，不硬编码来源标识。
 
-更细的架构约束、包体积限制、数据库迁移与云同步规则见仓库根目录的 [AGENTS.md](../AGENTS.md)。
+强制约束见仓库根目录的 [AGENTS.md](../AGENTS.md)，实现经验与常见坑见 [开发经验](development/experience.md)。

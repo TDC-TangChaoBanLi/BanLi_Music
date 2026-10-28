@@ -1,154 +1,45 @@
 # AGENTS.md
 
-本文件面向参与本项目的开发者与自动化代理，描述修改代码时必须遵守的约束。未经用户明确指令，**严禁修改本文档**。
+本文件是参与 BanLiMusic 开发的强制约束，面向开发者与自动化代理。实现经验、取舍与常见坑见 [开发经验](doc/development/experience.md)，文档职责见 [开发文档索引](doc/README.md)。未经用户明确指令，**严禁修改本文档**。
 
-## 项目定位
+## 架构边界
 
-BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为示例来源。项目按“多来源、可长期演进”设计，未来会接入自建音乐服务器、本地音乐，并可能拆分共享核心以支持 Windows/Linux。
+- UI 与 ViewModel 只依赖 `MusicRepository`、`LibraryRepository`、`DownloadRepository` 等领域接口，不直接调用来源 API，也不在 UI 中硬编码 `netease`、`joox`、`bilibili`、`gd-*` 等来源标识。
+- 具体来源实现放在 `data/source/<source>/`，通过 `MusicProvider` 暴露能力；能力由 `ProviderCapabilities` 声明，UI 对不支持的能力隐藏或禁用。
+- 新增来源必须提供独立的 provider 设置与独立限流额度；provider 专属字段放入 `AppSettings` 时必须使用清晰前缀，并在 `core/datastore` 集中迁移。
+- 应用级 `Track.id` 与来源级 `providerTrackId` 分离；收藏、下载、播放历史不得使用来源 ID 作为唯一键。下载任务 ID 必须包含应用级 track ID、来源和音质。
+- 播放地址懒解析：`MediaItem` 只保存候选来源，临时播放 URL 不写入数据库或长期缓存；已下载的本地文件优先。
+- 所有来源请求必须经过 `RequestScheduler` / `SlidingWindowRateLimiter`，批量请求也不能绕过；每个后端使用独立额度。
+- Room 实体变更必须提升 `version` 并提供 `Migration`，禁止使用 `fallbackToDestructiveMigration`；序列化模型与 DataStore 新字段必须提供默认值。
+- 云同步只访问 OneDrive `special/approot` 下的 `library.json`，使用独立 OkHttp 与独立限流器；删除写墓碑并双向合并，禁止整库覆盖；令牌按平台安全存储；禁止 client secret。
+- `shared/` 保持平台无关，不得引入 Android SDK、Media3、Room Android、WorkManager、Glance、RemoteViews；`desktopApp/` 只通过 `//shared` 复用核心。
 
-## 核心架构约束
+## 依赖与 UI
 
-0. **共享核心与桌面端边界**
-   - 与平台无关的模型、Provider 接口、GD 客户端、限流、解析、去重、排序放在 `shared/`（KMP，platforms `android` + `jvm`）。
-   - `shared/` 当前允许使用 `java.*` API，但不得引入 Android SDK、Media3、Room Android、WorkManager、Glance、RemoteViews；这些实现留在 `androidApp/`。
-   - `desktopApp/` 只通过 `//shared` 复用核心；桌面端已接入首页、搜索、收藏夹/历史、本地音乐扫描、多选批量操作、下载、MP3 播放、歌词和设置。桌面端播放使用 JLayer（仅 MP3），不要把它下沉到 `shared/`。自动更新尚未接入。
-
-1. **UI 不直接访问具体音乐 API**
-   - Compose 页面和 ViewModel 只依赖 `MusicRepository`、`LibraryRepository`、`DownloadRepository` 等领域接口。
-   - 具体来源实现放在 `data/source/<source>/`，并通过 `MusicProvider` 暴露能力。
-   - 不要在 UI 中硬编码 `netease`、`joox`、`bilibili`、`gd-*` 等来源标识。
-
-2. **来源能力通过 `ProviderCapabilities` 表达**
-   - 搜索、播放、歌词、下载、封面、歌单等能力必须由 provider 声明。
-   - 新来源不支持某项能力时，UI 应隐藏或禁用对应操作，而不是假设它一定存在。
-
-3. **来源设置必须模块化**
-   - 通用设置（主题、缓存、导航栏等）与来源专属设置分离。
-   - GD 音乐台的音源选择、频率限制、音质等配置集中在“GD 音乐台”设置模块。
-   - 新增来源时，新增独立的 provider 设置模型与设置区块，不要把来源字段继续堆进通用 `AppSettings` 的 UI 逻辑里。
-   - provider 专属字段可以暂时放在 `AppSettings` 中，但必须使用清晰前缀，并在 `core/datastore` 中集中迁移；更推荐引入 `ProviderSettings` 抽象。
-
-4. **ID 分层**
-   - 应用级 `Track.id` 与来源级 `providerTrackId` 必须分离。
-   - 不要用来源 ID 作为收藏、下载、播放历史的唯一键。
-   - 下载任务 ID 必须包含应用级 track ID、来源和音质，避免不同来源/音质互相覆盖。
-
-5. **播放地址懒解析**
-   - `MediaItem` 中只保存候选来源（`StreamUriCodec`），由 `ResolvingDataSource` 在播放时解析。
-   - 不要把临时播放 URL 写入数据库或长期缓存。
-   - 已下载的本地文件优先于远程流；播放队列构建时应检查下载记录。
-
-6. **限流是全局约束**
-   - GD 音乐台限制为 5 分钟 50 次请求；客户端默认更保守，并强制请求间隔至少 1 秒。
-   - 所有 provider 请求必须经过 `RequestScheduler` / `SlidingWindowRateLimiter`。
-   - 批量下载、批量收藏、搜索、歌词、封面请求都不能绕过限流。
-   - 新增来源时，为每个后端创建独立 limiter，不要与 GD 共享额度。
-
-7. **数据库与兼容性**
-   - Room 实体变更必须提升 `version` 并提供 `Migration`；不要依赖 `fallbackToDestructiveMigration` 丢弃用户数据。
-   - 序列化的 `Track` / `TrackSource` 新增字段必须提供默认值，保证旧下载记录和收藏记录可反序列化。
-   - DataStore 新增键必须提供默认值，并处理旧版本缺失键的情况。
-
-8. **云同步（Android）**
-   - 与平台无关的同步文档、合并算法与 Graph 客户端放 `shared/`；令牌存储、OAuth 回调、Worker 与设置 UI 留在 `androidApp/`。
-   - 同步请求必须使用独立 OkHttp 与独立 `RequestScheduler`，不得占用 GD 的 5 分钟请求额度。
-   - 只允许访问 Graph `special/approot` 下的 `library.json`；权限使用 `Files.ReadWrite.AppFolder`（仅个人 Microsoft 账号），不得申请整个 OneDrive 的读写权限。
-   - `OneDriveConfig.CLIENT_ID` 是公开的应用标识符，允许提交到仓库；它不是密钥，禁止添加 client secret，也不得把令牌写入仓库。
-   - refresh token 必须使用 Android Keystore 加密并存入 `noBackupFilesDir`，不得写入 DataStore、普通文件或日志。
-   - 收藏/收藏夹删除必须写墓碑（`deletedAt`）并参与双向合并；禁止整库覆盖式同步。
-   - 同步文档与同步相关实体新增字段必须提供默认值；`ProviderCapabilities` 不用于表达云同步能力。
-   - OAuth 回调仅监听 `msauth://com.banlimusic.app`，且必须校验 `state` 与 PKCE verifier。
-
-## 包体积与依赖
-
-- **尽量不引入大的外部包**。优先使用 AndroidX、平台 API、现有依赖。
-- 新增依赖前必须说明用途、替代方案和预计体积影响。
-- 不要为了一个小功能引入整套 UI 框架、图片库、数据库或网络库。
-- 图标优先使用 `material-icons-extended` 中已有图标；避免引入图标资源包。
-- 本地音乐扫描使用 `MediaStore`，不要引入文件选择/媒体扫描第三方库。
-- 桌面小组件使用平台 `AppWidgetProvider` + `RemoteViews`，状态持久化在 `PlayerWidgetUpdater`，播放中通过 `partiallyUpdateAppWidget` 局部刷新进度/图标/文本；不要引入第三方远程视图框架。
-
-## UI 约束
-
-- 使用 Jetpack Compose + Material 3，保持现有主题和组件风格。
-- 手机与平板共用业务逻辑；平板使用宽度判断（建议 `>= 720dp`）切换 NavigationRail / 双栏布局。
-- 手机不需要专门的横屏布局，但不要阻止系统旋转。
-- 设置页必须分类；来源专属配置独立成块。
-- 首次启动必须展示用户协议与 GD 音乐台声明，用户同意后才能进入主界面。
+- 优先复用现有依赖、AndroidX 与平台 API。新增依赖前说明用途、替代方案和体积影响；不要为一个小功能引入整套 UI、图片、数据库或网络框架。
+- 图标优先使用 `material-icons-extended` 已有图标；本地音乐使用 `MediaStore`；桌面小组件使用 `AppWidgetProvider` + `RemoteViews`，不引入第三方远程视图框架。
+- 使用 Jetpack Compose + Material 3，保持现有主题和组件风格；手机与平板共用业务逻辑，平板以 `>= 720dp` 切换 NavigationRail / 双栏布局。
+- 不阻止系统旋转；设置页必须分类，来源专属配置独立成块；首次启动必须展示用户协议与 GD 音乐台声明，同意后才能进入主界面。
 
 ## 网络与合规
 
 - GD 音乐台资源仅用于学习参考，不得用于商业用途，不得传播受版权保护的内容。
-- 不要实现绕过服务端限流、鉴权或版权保护的功能。
-- 下载默认目录、歌词/封面附带下载等行为必须尊重用户设置与平台存储权限。
-- 临时播放 URL 只做短时缓存。
+- 不得实现绕过服务端限流、鉴权或版权保护的功能。
+- 下载目录、歌词/封面附带下载等行为必须尊重用户设置与平台存储权限；临时播放 URL 只做短时缓存。
 
-## 构建与测试
+## 构建、测试与发布
 
-项目使用 Kotlin Toolchain，不维护 Gradle 文件。
+- 使用 Kotlin Toolchain，不维护 Gradle 文件。构建与环境要求见 [build.md](doc/development/build.md) 与 [environment.md](doc/development/environment.md)。
+- 提交前至少运行 `./kotlin test` 与 `./kotlin build`；新增去重、限流、解析、迁移、下载状态机等核心算法必须补充 JVM 单元测试。
+- 版本号只以 `androidApp/module.yaml` 的 `versionCode` / `versionName` 为准：MAJOR 仅在用户明确要求时提升，MINOR 用于功能或较大重构，PATCH 用于修复。不要把版本号硬编码到源码。
+- 发版流程、签名和桌面端打包见 [release.md](doc/development/release.md)；新增依赖、数据库迁移和云同步变更必须同步更新对应文档。
 
-```bash
-./kotlin build
-./kotlin test
-./kotlin build -v release
-```
+## 代码与提交
 
-环境要求：
-
-- JDK 17+（当前使用 JDK 25）
-- Android SDK：Platform 37.0、Build-Tools 37.0.0、Platform-Tools
-- `local.properties` 中的 `sdk.dir` 或 `ANDROID_HOME`
-
-提交前至少运行：
-
-```bash
-./kotlin test
-./kotlin build
-```
-
-新增核心算法（去重、限流、解析、迁移、下载状态机）必须补充 JVM 单元测试。
-
-## 版本与发布
-
-版本号采用 `MAJOR.MINOR.PATCH`：
-
-- **MAJOR（第一位）**：只在用户明确要求时变更，代理不得自行提升。
-- **MINOR（第二位）**：功能新增、架构/数据模型/UI 大改、跨模块行为调整等较大改动时 +1。
-- **PATCH（第三位）**：Bug 修复、文案修正、小范围兼容性处理等小改动时 +1。
-
-每次版本变更必须同时：
-
-1. 更新 `androidApp/module.yaml` 中的 `versionCode`（单调递增，不复用）和 `versionName`；这是唯一的版本号来源。
-2. 不要在 Kotlin 源码中硬编码版本号。运行时版本通过 `PackageManager` 读取；HTTP `User-Agent` 不携带版本号。README 中的产物名使用 `BanLiMusic-<version>-release.apk` 占位符。
-3. 运行 `./kotlin test` 与 `./kotlin build`；发布时执行 `./kotlin build -v release` 并重新签名。
-4. 在提交信息或发布说明中记录版本号变化及原因。
-
-判断示例：
-
-- 只修复缺陷：`0.3.0` → `0.3.1`（PATCH）。
-- 新增功能或较大范围重构：`0.3.1` → `0.4.0`（MINOR）。
-- 第一位版本号变化必须先获得用户明确指令，不得自动修改。
-
-
-## 不要提交的文件
-
-- `.vscode/`（已从 Git 历史移除，本地可保留）
-- `local.properties`
-- `build/`、`dist/`
-- `*.keystore`、`keystore.pass`、签名密码
-- 任何包含本机绝对路径的配置
-
-## 代码风格
-
-- Kotlin 官方风格，4 空格缩进。
-- 公共 API 使用清晰命名；避免在 UI 层写业务分支。
-- 协程使用结构化并发；不要在主线程执行阻塞 IO。
-- 捕获异常时区分 `CancellationException`，不要吞掉取消。
+- Kotlin 官方风格，4 空格缩进；公共 API 命名清晰，不把业务分支写进 UI。
+- 使用结构化并发，不要在主线程执行阻塞 IO；捕获异常时区分 `CancellationException`，不要吞掉取消。
 - 对用户可见错误使用 `MusicException.userMessage()`。
-
-## 源码文件头注释
-
-- Android APK 主源码（`androidApp/src/**/*.kt`）的每个 Kotlin 文件必须在 `package` 声明之前包含统一格式的中文文件头注释：
+- 每个 Kotlin 文件必须在 `package` 声明前包含统一中文文件头：
 
   ```kotlin
   /**
@@ -156,33 +47,6 @@ BanLiMusic 是一个 Android 音乐客户端，当前接入 GD 音乐台作为�
    */
   ```
 
-- 注释只说明“该文件负责什么”，不要重复类名或堆砌实现细节；新增文件必须同时添加，移动或重命名文件后要检查注释是否仍然准确。
-- 直接参与 APK 的清单文件（如 `androidApp/src/AndroidManifest.xml`）也应在 XML 声明后使用中文注释说明作用。
-- 桌面端源码（`desktopApp/src/**/*.kt`）将来也必须遵守同样的文件头注释规则；本轮只要求 Android APK 源码，桌面端暂不批量补注释。
-- `androidApp/res/README.md` 必须说明资源子目录和主要资源文件的用途；新增、删除或重命名资源时必须同步更新该文件。
-
-## 文档结构
-
-产品介绍与开发文档分离，修改相关内容时必须同步维护对应文件。
-
-| 文件 | 职责 | 同步要求 |
-| --- | --- | --- |
-| `README.md` | 产品介绍、界面截图、下载安装与合规声明 | 只引用 `doc/picture/` 下的图片；不写本机路径、环境步骤和内部类名；功能变化时同步更新亮点与已知限制 |
-| `doc/README.md` | 开发文档索引与文档维护约定 | 新增、删除或重命名文档时更新索引 |
-| `doc/architecture.md` | 模块边界、源码目录与关键设计原则 | 目录结构或模块职责变化时更新；与本文档“核心架构约束”保持一致 |
-| `doc/features.md` | 已实现功能现状与已知限制 | 功能、设置项、测试数量或限制变化时更新 |
-| `doc/development/environment.md` | JDK、Android SDK、Kotlin Toolchain 与环境变量 | 工具链版本、SDK 版本或 JDK 要求变化时更新 |
-| `doc/development/build.md` | 构建、测试、运行与桌面端启动 | 构建命令、产物路径或模块变化时更新 |
-| `doc/development/release.md` | Android 签名发布、桌面端便携版与安装包打包 | 版本流程、签名方式或打包方式变化时更新 |
-| `doc/cloud-sync.md` | OneDrive 同步实现、应用注册与安全约束 | 同步协议、权限、回调或 `CLIENT_ID` 变化时更新 |
-| `doc/picture/` | README 插图与演示动图 | 图片必须被 README 引用；文件名使用可读中文或英文，避免空格与 `&` 等需要转义的字符 |
-| `GD_MUSIC_API.md` | 上游 GD 音乐台 API 参考 | 仅随上游 API 文档更新；不写入本机信息 |
-
-引用关系：
-
-- `README.md` → `doc/picture/*`、`doc/README.md`、`doc/features.md` 及各开发文档。
-- `doc/README.md` → 所有开发文档与 `GD_MUSIC_API.md`。
-- `doc/architecture.md`、`doc/development/*.md`、`doc/cloud-sync.md` → 本文档的架构、限流、云同步与发布约束；冲突时以本文档为准。
-- 本文档“构建与测试”“版本与发布”只保留强制规则，具体步骤以 `doc/development/build.md` 与 `doc/development/release.md` 为准。
-
-文档中禁止出现本机用户名、绝对路径、签名密码或令牌；统一使用 `<ANDROID_SDK>`、`<JDK_HOME>`、`<KEYSTORE_DIR>`、`<version>` 等占位符。
+  注释只说明职责，不重复类名；移动或重命名文件后检查注释。直接参与 APP 的清单 XML 也要用中文注释说明作用。
+- 不要提交 `.vscode/`、`local.properties`、`build/`、`dist/`、`*.keystore`、`keystore.pass`、签名密码或包含本机绝对路径的配置。
+- 文档只写当前项目状态，不写修改历史或过时实现；路径、用户名、签名材料使用 `<ANDROID_SDK>`、`<JDK_HOME>`、`<KEYSTORE_DIR>`、`<version>` 等占位符。文档职责与同步要求见 [doc/README.md](doc/README.md)。
