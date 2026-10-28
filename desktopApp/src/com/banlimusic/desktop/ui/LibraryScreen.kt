@@ -77,9 +77,6 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
             override fun deleteLocal(tracks: List<Track>) =
                 state.removeLocalTracks(tracks)
 
-            override fun deleteDownloaded(tracks: List<Track>) =
-                state.removeDownloaded(tracks)
-
             override fun importScan() {
                 chooseDirectory(
                     state.settings.value.localMusicDirectory.ifBlank {

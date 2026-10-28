@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -132,7 +134,6 @@ interface LibraryActions {
     fun clearHistory() {}
     fun deleteHistory(tracks: List<Track>) {}
     fun deleteLocal(tracks: List<Track>) {}
-    fun deleteDownloaded(tracks: List<Track>) {}
 
     fun importScan() {}
     fun importFiles() {}
@@ -197,7 +198,7 @@ fun BanLiLibraryScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var searchFilter by rememberSaveable { mutableStateOf(LibrarySearchFilter.ALL) }
     var searchCategory by rememberSaveable { mutableStateOf<String?>(null) }
-    var tab by rememberSaveable { mutableStateOf(0) }
+    val pagerState = rememberPagerState(pageCount = { LibraryTab.entries.size })
     var favoriteSort by rememberSaveable { mutableStateOf(TrackSort.TITLE) }
     var favoriteAscending by rememberSaveable { mutableStateOf(true) }
     var historySort by rememberSaveable { mutableStateOf(TrackSort.RECENT) }
@@ -307,8 +308,8 @@ fun BanLiLibraryScreen(
                     keyboard?.hide()
                     true
                 }
-                tab != 0 -> {
-                    tab = 0
+                pagerState.currentPage != 0 -> {
+                    scope.launch { pagerState.animateScrollToPage(0) }
                     true
                 }
                 else -> false
@@ -317,7 +318,7 @@ fun BanLiLibraryScreen(
         onDispose { controller.backHandler = null }
     }
 
-    LaunchedEffect(tab) { exitSelection() }
+    LaunchedEffect(pagerState.currentPage) { exitSelection() }
     LaunchedEffect(localFilter) { exitSelection() }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -366,90 +367,98 @@ fun BanLiLibraryScreen(
                 modifier = Modifier.weight(1f),
             )
         } else {
+            val tab = pagerState.currentPage
             PrimaryTabRow(selectedTabIndex = tab) {
                 LibraryTab.entries.forEachIndexed { index, entry ->
                     Tab(
                         selected = tab == index,
-                        onClick = { tab = index },
+                        onClick = {
+                            scope.launch { pagerState.animateScrollToPage(index) }
+                        },
                         text = { ListTabLabel(entry.label) },
                     )
                 }
             }
-            when (LibraryTab.entries[tab]) {
-                LibraryTab.FAVORITES -> FavoritesTabContent(
-                    tracks = sortedFavorites,
-                    categories = folderCategories,
-                    selectedCategory = selectedCategory,
-                    defaultCategory = state.defaultCategory,
-                    state = state,
-                    actions = actions,
-                    artwork = artwork,
-                    selection = selection,
-                    sort = favoriteSort,
-                    ascending = favoriteAscending,
-                    onSort = { favoriteSort = it },
-                    onToggleOrder = { favoriteAscending = !favoriteAscending },
-                    onSelectCategory = {
-                        exitSelection()
-                        selectedCategory = it
-                    },
-                    onCreateCategory = { showNewCategory = true },
-                    onManageCategories = { manageCategories = true },
-                    modifier = Modifier.weight(1f),
-                )
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.weight(1f),
+            ) { page ->
+                when (LibraryTab.entries[page]) {
+                    LibraryTab.FAVORITES -> FavoritesTabContent(
+                        tracks = sortedFavorites,
+                        categories = folderCategories,
+                        selectedCategory = selectedCategory,
+                        defaultCategory = state.defaultCategory,
+                        state = state,
+                        actions = actions,
+                        artwork = artwork,
+                        selection = selection,
+                        sort = favoriteSort,
+                        ascending = favoriteAscending,
+                        onSort = { favoriteSort = it },
+                        onToggleOrder = { favoriteAscending = !favoriteAscending },
+                        onSelectCategory = {
+                            exitSelection()
+                            selectedCategory = it
+                        },
+                        onCreateCategory = { showNewCategory = true },
+                        onManageCategories = { manageCategories = true },
+                        modifier = Modifier.fillMaxSize(),
+                    )
 
-                LibraryTab.HISTORY -> HistoryTabContent(
-                    tracks = sortedHistory,
-                    categories = folderCategories,
-                    defaultCategory = state.defaultCategory,
-                    state = state,
-                    actions = actions,
-                    artwork = artwork,
-                    selection = selection,
-                    sort = historySort,
-                    ascending = historyAscending,
-                    onSort = { historySort = it },
-                    onToggleOrder = { historyAscending = !historyAscending },
-                    modifier = Modifier.weight(1f),
-                )
+                    LibraryTab.HISTORY -> HistoryTabContent(
+                        tracks = sortedHistory,
+                        categories = folderCategories,
+                        defaultCategory = state.defaultCategory,
+                        state = state,
+                        actions = actions,
+                        artwork = artwork,
+                        selection = selection,
+                        sort = historySort,
+                        ascending = historyAscending,
+                        onSort = { historySort = it },
+                        onToggleOrder = { historyAscending = !historyAscending },
+                        modifier = Modifier.fillMaxSize(),
+                    )
 
-                LibraryTab.LOCAL -> LocalTabContent(
-                    tracks = sortedLocal,
-                    importedCount = state.importedTracks.size,
-                    downloadedCount = state.downloadedTracks.size,
-                    downloadedBytes = state.downloadedBytes,
-                    filter = localFilter,
-                    sort = effectiveLocalSort,
-                    sortOptions = localSortOptions,
-                    ascending = localAscending,
-                    categories = folderCategories,
-                    defaultCategory = state.defaultCategory,
-                    state = state,
-                    actions = actions,
-                    artwork = artwork,
-                    selection = selection,
-                    onFilterChange = { localFilter = it },
-                    onSort = { localSort = it },
-                    onToggleOrder = { localAscending = !localAscending },
-                    onRequestImport = { showImportOptions = true },
-                    onShowLocation = { track ->
-                        localInfoTrack = track
-                        localInfoLocation = null
-                        localInfoLoading = true
-                        scope.launch {
-                            localInfoLocation = try {
-                                actions.localLocation(track)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Throwable) {
-                                "位置未知"
-                            } finally {
-                                localInfoLoading = false
+                    LibraryTab.LOCAL -> LocalTabContent(
+                        tracks = sortedLocal,
+                        importedCount = state.importedTracks.size,
+                        downloadedCount = state.downloadedTracks.size,
+                        downloadedBytes = state.downloadedBytes,
+                        filter = localFilter,
+                        sort = effectiveLocalSort,
+                        sortOptions = localSortOptions,
+                        ascending = localAscending,
+                        categories = folderCategories,
+                        defaultCategory = state.defaultCategory,
+                        state = state,
+                        actions = actions,
+                        artwork = artwork,
+                        selection = selection,
+                        onFilterChange = { localFilter = it },
+                        onSort = { localSort = it },
+                        onToggleOrder = { localAscending = !localAscending },
+                        onRequestImport = { showImportOptions = true },
+                        onShowLocation = { track ->
+                            localInfoTrack = track
+                            localInfoLocation = null
+                            localInfoLoading = true
+                            scope.launch {
+                                localInfoLocation = try {
+                                    actions.localLocation(track)
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Throwable) {
+                                    "位置未知"
+                                } finally {
+                                    localInfoLoading = false
+                                }
                             }
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                )
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
         }
     }
@@ -1060,6 +1069,7 @@ private fun LocalTabContent(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    var pendingLocalDelete by remember { mutableStateOf<List<Track>?>(null) }
     val selectionActions = rememberSelectionActionsState(
         selectionMode = selection.mode,
         selectedIds = selection.selectedIds,
@@ -1148,12 +1158,15 @@ private fun LocalTabContent(
                     label = "删除",
                     enabled = selectedTracks.isNotEmpty(),
                     onClick = {
-                        if (filter == LocalFilter.DOWNLOADED) {
-                            actions.deleteDownloaded(selectedTracks)
+                        val hasDownloaded = selectedTracks.any { track ->
+                            track.sources.any { it.providerId == "download" }
+                        }
+                        if (hasDownloaded) {
+                            pendingLocalDelete = selectedTracks
                         } else {
                             actions.deleteLocal(selectedTracks)
+                            selection.exit()
                         }
-                        selection.exit()
                     },
                 ),
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -1180,6 +1193,53 @@ private fun LocalTabContent(
             },
             infoAction = if (selection.mode) null else ({ onShowLocation(track) }),
             selected = if (selection.mode) track.id in selection.selectedIds else null,
+        )
+    }
+
+    pendingLocalDelete?.let { pending ->
+        val imported = pending.filter { track ->
+            track.sources.any { it.providerId == "local" }
+        }
+        val downloaded = pending.filter { track ->
+            track.sources.any { it.providerId == "download" }
+        }
+        AlertDialog(
+            onDismissRequest = { pendingLocalDelete = null },
+            title = {
+                Text(if (imported.isEmpty()) "已下载歌曲不能在这里删除" else "删除所选歌曲")
+            },
+            text = {
+                Text(
+                    buildString {
+                        if (imported.isNotEmpty()) {
+                            append("将移除 ${imported.size} 首本地导入记录（不会删除原始文件）。")
+                        }
+                        if (downloaded.isNotEmpty()) {
+                            if (isNotEmpty()) append("\n\n")
+                            append("${downloaded.size} 首已下载歌曲不会在这里删除，")
+                            append("请到“下载 → 已下载”页面删除。")
+                        }
+                    },
+                )
+            },
+            confirmButton = {
+                if (imported.isEmpty()) {
+                    TextButton(onClick = { pendingLocalDelete = null }) { Text("知道了") }
+                } else {
+                    TextButton(
+                        onClick = {
+                            actions.deleteLocal(imported)
+                            pendingLocalDelete = null
+                            selection.exit()
+                        },
+                    ) { Text("删除导入记录") }
+                }
+            },
+            dismissButton = {
+                if (imported.isNotEmpty()) {
+                    TextButton(onClick = { pendingLocalDelete = null }) { Text("取消") }
+                }
+            },
         )
     }
 }

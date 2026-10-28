@@ -44,6 +44,7 @@ import javax.swing.SwingUtilities
 fun DesktopSettingsScreen(state: DesktopAppState) {
     val settings by state.settings.collectAsState()
     val cachedTracks by state.container.playbackCache.entries.collectAsState()
+    val favoriteFolders by state.favoriteFolders.collectAsState()
     val syncAuth by state.container.syncRepository.authState.collectAsState()
     val syncStatus by state.container.syncRepository.status.collectAsState()
     val syncPersistent by state.container.syncRepository.persistentState.collectAsState()
@@ -347,6 +348,7 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
             rateStatus = rateStatus,
             cacheUsage = cacheUsage,
             cachedTracks = cachedTracks,
+            favoriteFolders = favoriteFolders,
             sync = syncUi,
             playbackQualities = DesktopSettingsRepository.DESKTOP_QUALITIES,
             downloadQualities = DesktopSettingsRepository.DESKTOP_QUALITIES,

@@ -152,9 +152,6 @@ fun LibraryScreen(
             override fun deleteLocal(tracks: List<Track>) =
                 viewModel.deleteLocalSelection(tracks)
 
-            override fun deleteDownloaded(tracks: List<Track>) =
-                viewModel.removeDownloadedSelection(tracks)
-
             override fun importScan() = requestQuickImport()
 
             override fun importFiles() =

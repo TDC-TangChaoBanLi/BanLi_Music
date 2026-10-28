@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.banlimusic.app.data.repository.DownloadManifestRepository
 import com.banlimusic.app.data.repository.DownloadRepository
+import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.ManifestImportResult
 import com.banlimusic.app.domain.download.DownloadTask
 import com.banlimusic.app.player.PlaybackController
@@ -22,6 +23,7 @@ class DownloadsViewModel(
     private val downloads: DownloadRepository,
     private val playback: PlaybackController,
     private val manifest: DownloadManifestRepository,
+    private val library: LibraryRepository,
 ) : ViewModel() {
 
     private val _message = MutableStateFlow<String?>(null)
@@ -29,6 +31,9 @@ class DownloadsViewModel(
 
     val tasks: StateFlow<List<DownloadTask>> = downloads.observeTasks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val favoriteFolders: StateFlow<Map<String, Set<String>>> = library.observeFavoriteFolders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     fun pause(id: String) = viewModelScope.launch { downloads.pause(id) }
 

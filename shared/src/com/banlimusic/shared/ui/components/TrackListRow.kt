@@ -4,6 +4,7 @@
 package com.banlimusic.shared.ui.components
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -139,4 +140,27 @@ fun BanLiTrackListRow(
             }
         },
     )
+}
+
+/** Two-line trailing block used by downloaded and cached track lists. */
+@Composable
+fun TrackQualitySizeLabel(
+    qualityKbps: Int,
+    sizeBytes: Long,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.End) {
+        Text(
+            text = if (qualityKbps > 0) qualityTierLabel(qualityKbps) else "音质未知",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+        Text(
+            text = formatMegabytes(sizeBytes),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+    }
 }

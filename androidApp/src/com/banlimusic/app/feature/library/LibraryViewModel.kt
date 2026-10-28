@@ -213,8 +213,8 @@ class LibraryViewModel(
     }
 
     /**
-     * Removes selected imported records and download rows. Imported originals
-     * are never deleted; download files follow the download page's policy.
+     * Removes imported records only. Download files are deleted from the
+     * download page, so selecting them here must never touch them.
      */
     fun deleteLocalSelection(tracks: List<Track>) {
         if (tracks.isEmpty()) return
@@ -226,20 +226,14 @@ class LibraryViewModel(
         }
         viewModelScope.launch {
             if (imported.isNotEmpty()) localMusic.delete(imported.map { it.id })
-            if (downloaded.isNotEmpty()) {
-                val wanted = downloaded.map { it.id }.toSet()
-                downloads.observeTasks().first()
-                    .filter { it.track.id in wanted }
-                    .forEach { downloads.remove(it.id) }
-            }
-            _message.value = buildString {
-                if (imported.isNotEmpty()) {
-                    append("已移除 ${imported.size} 首导入记录（未删除原始文件）")
-                }
-                if (downloaded.isNotEmpty()) {
-                    if (isNotEmpty()) append("；")
-                    append("已删除 ${downloaded.size} 首下载歌曲及其文件")
-                }
+            _message.value = when {
+                imported.isNotEmpty() && downloaded.isNotEmpty() ->
+                    "已移除 ${imported.size} 首导入记录（未删除文件）；" +
+                        "${downloaded.size} 首已下载歌曲请到“下载”页面删除"
+                imported.isNotEmpty() ->
+                    "已移除 ${imported.size} 首导入记录（未删除原始文件）"
+                downloaded.isNotEmpty() -> "已下载歌曲请到“下载 → 已下载”页面删除"
+                else -> null
             }
             clearSelection()
         }
@@ -325,18 +319,6 @@ class LibraryViewModel(
     /** Persists the folder order after a drag operation. */
     fun saveCategoryOrder(order: List<String>) {
         viewModelScope.launch { settings.setFavoriteCategoryOrder(order) }
-    }
-
-    /** Removes the download records (and their files) for the selected tracks. */
-    fun removeDownloadedSelection(tracks: List<Track>) {
-        if (tracks.isEmpty()) return
-        viewModelScope.launch {
-            val wanted = tracks.map { it.id }.toSet()
-            downloads.observeTasks().first()
-                .filter { it.track.id in wanted }
-                .forEach { downloads.remove(it.id) }
-            _message.value = "已删除 ${tracks.size} 首已下载歌曲及其文件"
-        }
     }
 
     fun downloadSelected(tracks: List<Track>, qualityKbps: Int? = null) {

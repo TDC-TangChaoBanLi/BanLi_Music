@@ -323,10 +323,6 @@ class DesktopAppState(
         }
     }
 
-    fun removeDownloaded(tracks: Collection<Track>) {
-        tracks.forEach { container.downloads.remove(it.id) }
-    }
-
     fun clearLocalMusic() {
         scope.launch {
             try {

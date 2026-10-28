@@ -118,6 +118,18 @@ fun formatBytes(bytes: Long): String {
     }
 }
 
+/** Download and cache rows show sizes in MB with two significant digits. */
+fun formatMegabytes(bytes: Long): String {
+    if (bytes <= 0L) return "0MB"
+    val megabytes = bytes.toDouble() / (1024.0 * 1024.0)
+    val pattern = when {
+        megabytes >= 10.0 -> "%.0f"
+        megabytes >= 1.0 -> "%.1f"
+        else -> "%.2f"
+    }
+    return String.format(java.util.Locale.ROOT, "${pattern}MB", megabytes)
+}
+
 @Composable
 fun BanLiSectionHeader(
     title: String,

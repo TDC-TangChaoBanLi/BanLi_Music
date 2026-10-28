@@ -50,6 +50,7 @@ fun SettingsScreen(
     val rateStatus by viewModel.rateStatus.collectAsStateWithLifecycle()
     val cacheUsage by viewModel.cacheUsage.collectAsStateWithLifecycle()
     val cachedTracks by viewModel.cachedTracks.collectAsStateWithLifecycle()
+    val favoriteFolders by viewModel.favoriteFolders.collectAsStateWithLifecycle()
     val settingsMessage by viewModel.message.collectAsStateWithLifecycle()
     val syncState by syncViewModel.state.collectAsStateWithLifecycle()
     val syncMessage by syncViewModel.message.collectAsStateWithLifecycle()
@@ -270,6 +271,7 @@ fun SettingsScreen(
             rateStatus = rateStatus,
             cacheUsage = cacheUsage,
             cachedTracks = cachedTracks,
+            favoriteFolders = favoriteFolders,
             sync = syncUi,
             playbackQualities = QualityTiers.PRESET_KBPS,
             downloadQualities = QualityTiers.PRESET_KBPS,

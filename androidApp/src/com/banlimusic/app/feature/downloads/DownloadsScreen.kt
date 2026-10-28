@@ -38,6 +38,7 @@ fun DownloadsScreen(
     viewModel: DownloadsViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
+    val favoriteFolders by viewModel.favoriteFolders.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val controller = remember { DownloadsScreenController() }
@@ -130,6 +131,7 @@ fun DownloadsScreen(
                 append(formatBytes(completedTasks.sumOf { it.totalBytes }))
                 append("。下载目录可在设置中修改。")
             },
+            favoriteFolders = favoriteFolders,
         ),
         actions = actions,
         artwork = { track, artworkModifier ->

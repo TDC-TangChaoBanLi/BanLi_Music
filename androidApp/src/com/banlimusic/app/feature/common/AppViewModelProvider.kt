@@ -49,6 +49,7 @@ object AppViewModelProvider {
                 downloads = app().container.downloadRepository,
                 playback = app().container.playbackController,
                 manifest = app().container.downloadManifestRepository,
+                library = app().container.libraryRepository,
             )
         }
         initializer {

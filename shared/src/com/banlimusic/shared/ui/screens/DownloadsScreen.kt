@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.Close
@@ -70,9 +72,12 @@ import com.banlimusic.shared.ui.components.TRACK_LIST_HEADER_ITEM_COUNT
 import com.banlimusic.shared.ui.components.TrackListHeaderSpec
 import com.banlimusic.shared.ui.components.TrackListPanel
 import com.banlimusic.shared.ui.components.TrackScreenHeader
+import com.banlimusic.shared.ui.components.SelectionIconTextButton
+import com.banlimusic.shared.ui.components.TrackQualitySizeLabel
 import com.banlimusic.shared.ui.components.formatBytes
 import com.banlimusic.shared.ui.components.qualityTierLabel
 import com.banlimusic.shared.ui.components.rememberTrackSelectionState
+import kotlinx.coroutines.launch
 
 enum class DownloadItemStatus {
     QUEUED,
@@ -110,6 +115,7 @@ data class DownloadItemUi(
 data class DownloadsUiState(
     val items: List<DownloadItemUi> = emptyList(),
     val directoryHint: String = "",
+    val favoriteFolders: Map<String, Set<String>> = emptyMap(),
     /** Desktop uses mouse drag selection instead of long-press drag selection. */
     val immediateDragSelection: Boolean = false,
 )
@@ -156,7 +162,7 @@ fun BanLiDownloadsScreen(
     modifier: Modifier = Modifier,
     controller: DownloadsScreenController = remember { DownloadsScreenController() },
 ) {
-    var tab by rememberSaveable { mutableStateOf(0) }
+    val pagerState = rememberPagerState(pageCount = { 2 })
     var searchMode by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf(TrackSort.CREATED) }
@@ -165,6 +171,7 @@ fun BanLiDownloadsScreen(
     val selection = rememberTrackSelectionState()
     val keyboard = LocalSoftwareKeyboardController.current
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     val completed = remember(state.items) { state.items.filter { it.isCompleted } }
     val active = remember(state.items) { state.items.filterNot { it.isCompleted } }
@@ -212,8 +219,8 @@ fun BanLiDownloadsScreen(
                     keyboard?.hide()
                     true
                 }
-                tab != 0 -> {
-                    tab = 0
+                pagerState.currentPage != 0 -> {
+                    scope.launch { pagerState.animateScrollToPage(0) }
                     true
                 }
                 else -> false
@@ -221,7 +228,7 @@ fun BanLiDownloadsScreen(
         }
         onDispose { controller.backHandler = null }
     }
-    LaunchedEffect(tab) { exitSelection() }
+    LaunchedEffect(pagerState.currentPage) { exitSelection() }
     LaunchedEffect(sorted) {
         selection.retain(sorted.mapTo(mutableSetOf()) { it.id })
     }
@@ -229,7 +236,7 @@ fun BanLiDownloadsScreen(
     Column(modifier = modifier.fillMaxSize()) {
         TrackScreenHeader(title = "下载") {
             Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                if (tab == 0) {
+                if (pagerState.currentPage == 0) {
                     IconButton(
                         onClick = {
                             if (searchMode) {
@@ -254,21 +261,26 @@ fun BanLiDownloadsScreen(
                 }
             }
         }
+        val tab = pagerState.currentPage
         PrimaryTabRow(selectedTabIndex = tab) {
             Tab(
                 selected = tab == 0,
-                onClick = { tab = 0 },
+                onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
                 text = { ListTabLabel("已下载") },
             )
             Tab(
                 selected = tab == 1,
-                onClick = { tab = 1 },
+                onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                 text = { ListTabLabel("下载列表") },
             )
         }
 
-        if (tab == 0) {
-            Column(modifier = Modifier.weight(1f)) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f),
+        ) { page ->
+        if (page == 0) {
+            Column(modifier = Modifier.fillMaxSize()) {
                 if (searchMode) {
                     val focusRequester = remember { FocusRequester() }
                     LaunchedEffect(Unit) {
@@ -367,17 +379,12 @@ fun BanLiDownloadsScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Spacer(Modifier.weight(1f))
-                                    IconButton(
+                                    SelectionIconTextButton(
+                                        icon = Icons.Rounded.Delete,
+                                        label = "删除",
                                         onClick = { showDeleteConfirm = true },
                                         enabled = selection.selectedIds.isNotEmpty(),
-                                        modifier = Modifier.size(30.dp),
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Delete,
-                                            contentDescription = "删除",
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
+                                    )
                                 }
                             }
                         }
@@ -390,13 +397,12 @@ fun BanLiDownloadsScreen(
                             if (selection.mode) selection.toggle(item.id)
                             else actions.play(item)
                         },
-                        onLongClick = { selection.enter(); selection.toggle(item.id) },
                         selected = if (selection.mode) item.id in selection.selectedIds else null,
-                        extraBadges = {
-                            Text(
-                                text = qualityTierLabel(item.qualityKbps),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        categoryLabel = state.favoriteFolders[item.track.id]?.joinToString(" · "),
+                        trailing = {
+                            TrackQualitySizeLabel(
+                                qualityKbps = item.qualityKbps,
+                                sizeBytes = item.totalBytes,
                             )
                         },
                     )
@@ -406,8 +412,9 @@ fun BanLiDownloadsScreen(
             DownloadQueueList(
                 items = active,
                 actions = actions,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxSize(),
             )
+        }
         }
     }
 

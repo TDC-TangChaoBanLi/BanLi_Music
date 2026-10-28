@@ -262,9 +262,9 @@ fun TrackSelectionActionBar(
 
 }
 
-/** Compact icon + label button used by the selection bar. */
+/** Compact icon + label button used by selection bars and compact list actions. */
 @Composable
-private fun SelectionIconTextButton(
+fun SelectionIconTextButton(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,

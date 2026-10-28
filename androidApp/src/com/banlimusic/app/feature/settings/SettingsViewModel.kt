@@ -50,6 +50,9 @@ class SettingsViewModel(
     val cachedTracks: StateFlow<List<CachedTrack>> = cacheRepository.observeCachedTracks()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val favoriteFolders: StateFlow<Map<String, Set<String>>> = library.observeFavoriteFolders()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 

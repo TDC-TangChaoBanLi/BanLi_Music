@@ -75,7 +75,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -137,9 +136,11 @@ import com.banlimusic.shared.ui.components.BanLiSettingsSwitchRow
 import com.banlimusic.shared.ui.components.BanLiSettingsValueRow
 import com.banlimusic.shared.ui.components.BanLiTrackListRow
 import com.banlimusic.shared.ui.components.CompactTextButton
+import com.banlimusic.shared.ui.components.SelectionIconTextButton
 import com.banlimusic.shared.ui.components.TRACK_LIST_HEADER_ITEM_COUNT
 import com.banlimusic.shared.ui.components.TrackListHeaderSpec
 import com.banlimusic.shared.ui.components.TrackListPanel
+import com.banlimusic.shared.ui.components.TrackQualitySizeLabel
 import com.banlimusic.shared.ui.components.formatBytes
 import com.banlimusic.shared.ui.components.qualityShortLabel
 import com.banlimusic.shared.ui.theme.BANLI_DEFAULT_SEED
@@ -188,6 +189,7 @@ data class SettingsUiState(
     val rateStatus: RateLimitStatus? = null,
     val cacheUsage: CacheUsage = CacheUsage(),
     val cachedTracks: List<CachedTrack> = emptyList(),
+    val favoriteFolders: Map<String, Set<String>> = emptyMap(),
     val sync: SyncUiState = SyncUiState(),
     val playbackQualities: List<Int> = QualityTiers.PRESET_KBPS,
     val downloadQualities: List<Int> = QualityTiers.PRESET_KBPS,
@@ -257,6 +259,12 @@ interface SettingsActions {
 
 /** Back navigation for the settings page stack. */
 class SettingsScreenController {
+    internal var backHandler: (() -> Boolean)? = null
+    fun handleBack(): Boolean = backHandler?.invoke() == true
+}
+
+/** Lets the cached-track page consume back before the settings stack does. */
+class CachedTracksScreenController {
     internal var backHandler: (() -> Boolean)? = null
     fun handleBack(): Boolean = backHandler?.invoke() == true
 }
@@ -332,12 +340,14 @@ fun BanLiSettingsScreen(
     controller: SettingsScreenController = remember { SettingsScreenController() },
 ) {
     var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
+    val cachedTracksController = remember { CachedTracksScreenController() }
 
-    DisposableEffect(controller, page) {
+    DisposableEffect(controller, page, cachedTracksController) {
         controller.backHandler = {
-            when (page) {
-                null -> false
-                SettingsPage.CACHED_TRACKS -> {
+            when {
+                page == null -> false
+                page == SettingsPage.CACHED_TRACKS && cachedTracksController.handleBack() -> true
+                page == SettingsPage.CACHED_TRACKS -> {
                     page = SettingsPage.DOWNLOAD_CACHE
                     true
                 }
@@ -376,10 +386,14 @@ fun BanLiSettingsScreen(
         BanLiDetailHeader(
             title = current.title,
             onBack = {
-                page = if (current == SettingsPage.CACHED_TRACKS) {
-                    SettingsPage.DOWNLOAD_CACHE
+                if (current == SettingsPage.CACHED_TRACKS && cachedTracksController.handleBack()) {
+                    // Selection mode and delete confirmation handle back first.
                 } else {
-                    null
+                    page = if (current == SettingsPage.CACHED_TRACKS) {
+                        SettingsPage.DOWNLOAD_CACHE
+                    } else {
+                        null
+                    }
                 }
             },
             icon = current.icon,
@@ -389,6 +403,7 @@ fun BanLiSettingsScreen(
             CachedTracksPage(
                 state = state,
                 actions = actions,
+                controller = cachedTracksController,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
@@ -1231,6 +1246,7 @@ private fun LibrarySettings(state: SettingsUiState, actions: SettingsActions) {
 private fun CachedTracksPage(
     state: SettingsUiState,
     actions: SettingsActions,
+    controller: CachedTracksScreenController,
     modifier: Modifier = Modifier,
 ) {
     var filter by rememberSaveable { mutableStateOf(CacheFilter.ALL) }
@@ -1266,6 +1282,23 @@ private fun CachedTracksPage(
     fun exitSelection() {
         selectionMode = false
         selectedKeys = emptySet()
+    }
+
+    DisposableEffect(controller, selectionMode, pendingDeleteKeys) {
+        controller.backHandler = {
+            when {
+                pendingDeleteKeys != null -> {
+                    pendingDeleteKeys = null
+                    true
+                }
+                selectionMode -> {
+                    exitSelection()
+                    true
+                }
+                else -> false
+            }
+        }
+        onDispose { controller.backHandler = null }
     }
 
     TrackListPanel(
@@ -1355,28 +1388,26 @@ private fun CachedTracksPage(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.weight(1f))
-                        TextButton(
-                            enabled = selectedKeys.isNotEmpty(),
+                        SelectionIconTextButton(
+                            icon = Icons.Rounded.Download,
+                            label = "转为下载",
                             onClick = {
                                 actions.convertCachedToDownloads(
                                     sorted.filter { it.cacheKey in selectedKeys },
                                 )
                                 exitSelection()
                             },
-                        ) { Text("转为下载") }
-                        IconButton(
+                            enabled = selectedKeys.isNotEmpty(),
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        SelectionIconTextButton(
+                            icon = Icons.Rounded.DeleteOutline,
+                            label = "删除",
                             onClick = {
                                 if (selectedKeys.isNotEmpty()) pendingDeleteKeys = selectedKeys
                             },
                             enabled = selectedKeys.isNotEmpty(),
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.DeleteOutline,
-                                contentDescription = "删除缓存",
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
+                        )
                     }
                 }
             }
@@ -1397,43 +1428,22 @@ private fun CachedTracksPage(
                     selectedKeys = setOf(entry.cacheKey)
                 }
             },
-            onLongClick = {
-                selectionMode = true
-                selectedKeys = selectedKeys + entry.cacheKey
-            },
             selected = if (selectionMode) entry.cacheKey in selectedKeys else null,
+            categoryLabel = state.favoriteFolders[entry.track.id]?.joinToString(" · "),
             extraBadges = {
-                Text(
-                    text = buildString {
-                        append(
-                            if (entry.qualityKbps > 0) {
-                                qualityShortLabel(entry.qualityKbps)
-                            } else {
-                                "音质未知"
-                            },
-                        )
-                        append(" · ")
-                        append(formatBytes(entry.cachedBytes))
-                        if (!entry.isComplete) append(" · 部分缓存")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (!entry.isComplete) {
+                    Text(
+                        text = "部分缓存",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             },
             trailing = {
-                if (state.audioCacheSupported) {
-                    IconButton(
-                        onClick = { pendingDeleteKeys = setOf(entry.cacheKey) },
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.DeleteOutline,
-                            contentDescription = "删除缓存",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
+                TrackQualitySizeLabel(
+                    qualityKbps = entry.qualityKbps,
+                    sizeBytes = entry.cachedBytes,
+                )
             },
         )
     }

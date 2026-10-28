@@ -22,6 +22,7 @@ import javax.swing.JFileChooser
 fun DesktopDownloadsScreen(state: DesktopAppState) {
     val tasks by state.downloads.collectAsState()
     val settings by state.settings.collectAsState()
+    val favoriteFolders by state.favoriteFolders.collectAsState()
     val completed = remember(tasks) {
         tasks.filter { it.status == DesktopDownloadStatus.COMPLETED }
     }
@@ -76,6 +77,7 @@ fun DesktopDownloadsScreen(state: DesktopAppState) {
                     },
                 )
             },
+            favoriteFolders = favoriteFolders,
             immediateDragSelection = true,
         ),
         actions = actions,
