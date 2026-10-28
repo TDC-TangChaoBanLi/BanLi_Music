@@ -22,12 +22,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -60,11 +72,15 @@ fun formatPlaybackTime(millis: Long): String {
     return "%d:%02d".format(java.util.Locale.ROOT, totalSeconds / 60, totalSeconds % 60)
 }
 
+/**
+ * Display-only quality tier. Technical bitrates are deliberately hidden so the
+ * Android and desktop builds show identical wording (标准/较高/高品/无损).
+ */
 fun qualityLabel(kbps: Int): String = when (QualityTiers.normalize(kbps)) {
-    128 -> "标准 128K"
-    192 -> "较高 192K"
-    320 -> "高品 320K"
-    740 -> "无损 740K"
+    128 -> "标准"
+    192 -> "较高"
+    320 -> "高品"
+    740 -> "无损"
     else -> "${kbps}K"
 }
 
@@ -374,6 +390,181 @@ fun BanLiSettingsNavRow(
     }
 }
 
+@Composable
+fun BanLiSettingsSectionLabel(
+    icon: ImageVector,
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+fun BanLiSettingsSlider(
+    title: String,
+    valueText: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onValueChangeFinished: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    steps: Int = 0,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = valueText,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        var current by remember(value) { mutableFloatStateOf(value) }
+        Slider(
+            value = current.coerceIn(valueRange.start, valueRange.endInclusive),
+            onValueChange = { current = it },
+            valueRange = valueRange,
+            steps = steps,
+            onValueChangeFinished = { onValueChangeFinished(current) },
+        )
+    }
+}
+
+@Composable
+fun BanLiSettingsValueRow(
+    title: String,
+    value: String,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    clearLabel: String = "清理",
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+        }
+        Text(
+            text = title,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = onClear, enabled = enabled) { Text(clearLabel) }
+    }
+}
+
+@Composable
+fun BanLiSettingsActionRow(
+    title: String,
+    description: String,
+    actionText: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = description,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = onClick, enabled = enabled) { Text(actionText) }
+    }
+}
+
+/** Page title used by settings detail pages on both platforms. */
+@Composable
+fun BanLiDetailHeader(
+    title: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    backIcon: ImageVector? = null,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            if (backIcon != null) {
+                Icon(backIcon, contentDescription = "返回")
+            } else {
+                Text("返回")
+            }
+        }
+        if (icon != null) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
 /**
  * Common track row. Artwork, badges and trailing actions stay platform specific
  * so Android can keep its download/source controls and desktop its file actions.
@@ -518,14 +709,112 @@ fun BanLiPlaybackBar(
                 }
                 controls()
             }
-            LinearProgressIndicator(
-                progress = { progress.coerceIn(0f, 1f) },
+            // A plain Box draws the fraction on every Compose target. Material3's
+            // indicator was invisible on some desktop Skiko backends.
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(2.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    .height(3.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .height(3.dp)
+                        .background(MaterialTheme.colorScheme.primary),
+                )
+            }
+        }
+    }
+}
+
+/** Play order shown by the shared playback controls. */
+enum class BanLiPlayMode { SEQUENTIAL, REPEAT_ALL, REPEAT_ONE, SHUFFLE }
+
+/** Full-size playback controls: play order, previous, play/pause, next. */
+@Composable
+fun BanLiPlaybackControls(
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    hasNext: Boolean,
+    hasPrevious: Boolean,
+    playMode: BanLiPlayMode,
+    onTogglePlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onCyclePlayMode: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier.fillMaxWidth()) {
+        IconButton(
+            onClick = onCyclePlayMode,
+            modifier = Modifier.align(Alignment.CenterStart),
+        ) {
+            Icon(
+                imageVector = when (playMode) {
+                    BanLiPlayMode.REPEAT_ONE -> Icons.Rounded.RepeatOne
+                    BanLiPlayMode.SHUFFLE -> Icons.Rounded.Shuffle
+                    else -> Icons.Rounded.Repeat
+                },
+                contentDescription = when (playMode) {
+                    BanLiPlayMode.REPEAT_ONE -> "单曲循环"
+                    BanLiPlayMode.SHUFFLE -> "随机播放"
+                    BanLiPlayMode.REPEAT_ALL -> "列表循环"
+                    BanLiPlayMode.SEQUENTIAL -> "顺序播放"
+                },
+                tint = MaterialTheme.colorScheme.primary,
             )
+        }
+        Row(
+            modifier = Modifier.align(Alignment.Center),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = onPrevious,
+                enabled = hasPrevious,
+                modifier = Modifier.size(52.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.SkipPrevious,
+                    contentDescription = "上一首",
+                    modifier = Modifier.size(34.dp),
+                )
+            }
+            FilledIconButton(
+                onClick = onTogglePlayPause,
+                modifier = Modifier.size(72.dp),
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                ),
+            ) {
+                if (isBuffering) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 3.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Rounded.Pause
+                        else Icons.Rounded.PlayArrow,
+                        contentDescription = if (isPlaying) "暂停" else "播放",
+                        modifier = Modifier.size(38.dp),
+                    )
+                }
+            }
+            IconButton(
+                onClick = onNext,
+                enabled = hasNext,
+                modifier = Modifier.size(52.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.SkipNext,
+                    contentDescription = "下一首",
+                    modifier = Modifier.size(34.dp),
+                )
+            }
         }
     }
 }

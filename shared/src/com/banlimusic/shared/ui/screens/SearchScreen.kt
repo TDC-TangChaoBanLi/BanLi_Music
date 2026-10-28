@@ -16,8 +16,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -34,13 +34,26 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.banlimusic.app.core.model.Track
+import com.banlimusic.shared.ui.components.BanLiTrackListRow
+import com.banlimusic.shared.ui.components.CompactTextButton
+import com.banlimusic.shared.ui.components.TRACK_LIST_HEADER_ITEM_COUNT
+import com.banlimusic.shared.ui.components.TrackListHeaderSpec
+import com.banlimusic.shared.ui.components.TrackSelectionActionBar
+import com.banlimusic.shared.ui.components.dragSelect
+import com.banlimusic.shared.ui.components.rememberSelectionActionsState
+import com.banlimusic.shared.ui.components.trackListHeader
 import com.banlimusic.shared.ui.components.BanLiEmptyState
 import com.banlimusic.shared.ui.components.BanLiErrorCard
 
@@ -57,6 +70,14 @@ data class SearchUiState(
     val enabledSourceNames: String = "",
     val selectionMode: Boolean = false,
     val selectedIds: Set<String> = emptySet(),
+    val favoriteIds: Set<String> = emptySet(),
+    val favoriteFolders: Map<String, Set<String>> = emptyMap(),
+    val downloadedIds: Set<String> = emptySet(),
+    val preferredSources: Map<String, String> = emptyMap(),
+    val categories: List<String> = emptyList(),
+    val defaultCategory: String = "默认收藏",
+    /** False on platforms without a source picker. */
+    val supportsSourcePicker: Boolean = true,
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -69,23 +90,53 @@ fun BanLiSearchScreen(
     onLoadMore: () -> Unit,
     onHistoryClick: (String) -> Unit,
     onClearHistory: () -> Unit,
+    artwork: @Composable (Track, Modifier) -> Unit,
+    onPlayQueue: (List<Track>, Int) -> Unit,
+    onToggleFavorite: (Track) -> Unit,
+    onSourceClick: (Track) -> Unit,
+    onAddFavorites: (List<Track>, Set<String>) -> Unit,
+    onDownload: (List<Track>, Int?) -> Unit,
+    onStartSelection: () -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onCancelSelection: () -> Unit,
+    downloadQualities: suspend (List<Track>) -> List<Int>,
     modifier: Modifier = Modifier,
     searchIcon: ImageVector? = null,
     clearIcon: ImageVector? = null,
     searchFieldModifier: Modifier = Modifier,
-    listModifier: Modifier = Modifier,
-    listState: LazyListState = rememberLazyListState(),
-    header: (LazyListScope.() -> Unit)? = null,
-    selectionBar: (@Composable () -> Unit)? = null,
-    trackRow: @Composable (Track, Int, Boolean) -> Unit,
+    /** Focuses the field and opens the keyboard when the page is entered. */
+    autoFocus: Boolean = false,
+    /** Bump this value to request focus again (e.g. tapping search on home). */
+    focusRequestKey: Int = 0,
 ) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val listState = rememberLazyListState()
+    val validIds = remember(state.results) { state.results.map { it.id }.toSet() }
+    val selectionActions = rememberSelectionActionsState(
+        selectionMode = state.selectionMode,
+        selectedIds = state.selectedIds,
+        tracks = state.results,
+        defaultCategory = state.defaultCategory,
+        downloadQualities = downloadQualities,
+    )
+    val selectedTracks = state.results.filter { it.id in state.selectedIds }
+
+    LaunchedEffect(autoFocus, focusRequestKey) {
+        if (!autoFocus) return@LaunchedEffect
+        focusRequester.requestFocus()
+        withFrameNanos { }
+        keyboard?.show()
+    }
+
     Column(modifier = modifier.fillMaxSize()) {
         BanLiSearchBar(
             query = state.query,
             onQueryChange = onQueryChange,
             onSubmit = onSubmit,
             loading = state.loading,
-            modifier = searchFieldModifier,
+            modifier = searchFieldModifier.focusRequester(focusRequester),
             searchIcon = searchIcon,
             clearIcon = clearIcon,
         )
@@ -158,11 +209,17 @@ fun BanLiSearchScreen(
                         )
                         ResultList(
                             state = state,
-                            listModifier = listModifier,
                             listState = listState,
-                            header = header,
+                            validIds = validIds,
                             onLoadMore = onLoadMore,
-                            trackRow = trackRow,
+                            artwork = artwork,
+                            onPlayQueue = onPlayQueue,
+                            onToggleFavorite = onToggleFavorite,
+                            onSourceClick = onSourceClick,
+                            onStartSelection = onStartSelection,
+                            onToggleSelection = onToggleSelection,
+                            onSelectAll = onSelectAll,
+                            onCancelSelection = onCancelSelection,
                         )
                     }
                 }
@@ -170,18 +227,33 @@ fun BanLiSearchScreen(
                 else -> {
                     ResultList(
                         state = state,
-                        listModifier = listModifier,
                         listState = listState,
-                        header = header,
+                        validIds = validIds,
                         onLoadMore = onLoadMore,
-                        trackRow = trackRow,
+                        artwork = artwork,
+                        onPlayQueue = onPlayQueue,
+                        onToggleFavorite = onToggleFavorite,
+                        onSourceClick = onSourceClick,
+                        onStartSelection = onStartSelection,
+                        onToggleSelection = onToggleSelection,
+                        onSelectAll = onSelectAll,
+                        onCancelSelection = onCancelSelection,
                     )
                 }
             }
         }
 
-        if (state.selectionMode && selectionBar != null) {
-            selectionBar()
+        if (state.selectionMode) {
+            TrackSelectionActionBar(
+                categories = state.categories,
+                state = selectionActions,
+                onFavorite = { onAddFavorites(selectedTracks, selectionActions.chosenCategories) },
+                onDownload = { onDownload(selectedTracks, selectionActions.chosenQuality) },
+                favoriteEnabled = selectedTracks.isNotEmpty() &&
+                    selectionActions.chosenCategories.isNotEmpty(),
+                downloadEnabled = selectedTracks.isNotEmpty() &&
+                    selectionActions.qualities.isNotEmpty(),
+            )
         }
     }
 }
@@ -189,24 +261,79 @@ fun BanLiSearchScreen(
 @Composable
 private fun ResultList(
     state: SearchUiState,
-    listModifier: Modifier,
     listState: LazyListState,
-    header: (LazyListScope.() -> Unit)?,
+    validIds: Set<String>,
     onLoadMore: () -> Unit,
-    trackRow: @Composable (Track, Int, Boolean) -> Unit,
+    artwork: @Composable (Track, Modifier) -> Unit,
+    onPlayQueue: (List<Track>, Int) -> Unit,
+    onToggleFavorite: (Track) -> Unit,
+    onSourceClick: (Track) -> Unit,
+    onStartSelection: () -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onSelectAll: () -> Unit,
+    onCancelSelection: () -> Unit,
 ) {
     LazyColumn(
         state = listState,
-        modifier = listModifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .dragSelect(
+                enabled = true,
+                listState = listState,
+                validKeys = validIds,
+                onSelect = { id ->
+                    if (!state.selectionMode) onStartSelection()
+                    onToggleSelection(id)
+                },
+            ),
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        header?.invoke(this)
+        trackListHeader(
+            spec = TrackListHeaderSpec(
+                countText = "找到 ${state.results.size} 首",
+                selectionMode = state.selectionMode,
+                selectedCount = state.selectedIds.size,
+            ),
+            onSelectAll = onSelectAll,
+            onCancelSelection = onCancelSelection,
+            countActions = {
+                if (state.error != null) {
+                    Text(
+                        text = "部分来源加载失败",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                CompactTextButton(text = "选择", onClick = onStartSelection)
+            },
+        )
         itemsIndexed(
             items = state.results,
             key = { _, track -> track.id },
         ) { index, track ->
-            trackRow(track, index, track.id in state.selectedIds)
+            BanLiTrackListRow(
+                track = track,
+                artwork = { artwork(track, it) },
+                onClick = {
+                    if (state.selectionMode) onToggleSelection(track.id)
+                    else onPlayQueue(state.results, index)
+                },
+                isFavorite = track.id in state.favoriteIds,
+                downloaded = track.id in state.downloadedIds,
+                categoryLabel = state.favoriteFolders[track.id]?.joinToString(" · "),
+                preferredProviderId = state.preferredSources[track.id],
+                onSourceClick = if (state.supportsSourcePicker) {
+                    { onSourceClick(track) }
+                } else {
+                    null
+                },
+                onToggleFavorite = if (state.selectionMode) null else {
+                    { onToggleFavorite(track) }
+                },
+                selected = if (state.selectionMode) track.id in state.selectedIds else null,
+            )
         }
         item {
             if (state.hasMore) {

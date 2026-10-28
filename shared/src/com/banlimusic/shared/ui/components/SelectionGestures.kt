@@ -32,6 +32,11 @@ fun Modifier.dragSelect(
     listState: LazyListState,
     validKeys: Set<String>,
     onSelect: (String) -> Unit,
+    /**
+     * Desktop keeps pointer dragging active as soon as selection mode starts;
+     * the initial long press is only needed to enter selection mode.
+     */
+    requireLongPress: Boolean = true,
 ): Modifier {
     if (!enabled) return this
     return pointerInput(listState, validKeys) {
@@ -99,26 +104,28 @@ fun Modifier.dragSelect(
                     requireUnconsumed = false,
                     pass = PointerEventPass.Initial,
                 )
-                var aborted = false
-                withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val change = event.changes.firstOrNull { it.id == down.id }
-                        if (change == null || !change.pressed) {
-                            aborted = true
-                            return@withTimeoutOrNull
-                        }
-                        if ((change.position - down.position).getDistance() >
-                            viewConfiguration.touchSlop
-                        ) {
-                            aborted = true
-                            return@withTimeoutOrNull
+                if (requireLongPress) {
+                    var aborted = false
+                    withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                            if (change == null || !change.pressed) {
+                                aborted = true
+                                return@withTimeoutOrNull
+                            }
+                            if ((change.position - down.position).getDistance() >
+                                viewConfiguration.touchSlop
+                            ) {
+                                aborted = true
+                                return@withTimeoutOrNull
+                            }
                         }
                     }
+                    // Timeout without movement means the long press fired; moving or
+                    // releasing first must keep the list's normal scrolling behaviour.
+                    if (aborted) return@awaitEachGesture
                 }
-                // Timeout without movement means the long press fired; moving or
-                // releasing first must keep the list's normal scrolling behaviour.
-                if (aborted) return@awaitEachGesture
 
                 lastKey = null
                 pointerY = down.position.y

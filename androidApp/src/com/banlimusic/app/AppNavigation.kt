@@ -20,10 +20,12 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -117,6 +119,7 @@ fun AppRoot(
     val playback = container.playbackController
     val scope = rememberCoroutineScope()
     val showNavigation = currentRoute != Routes.PLAYER
+    var searchFocusRequest by remember { mutableStateOf(0) }
 
     // Remember the page so pressing back to exit and reopening restores it.
     LaunchedEffect(currentRoute) {
@@ -223,6 +226,11 @@ fun AppRoot(
                     navOrder = destinations.map { it.route },
                     startDestination = startDestination,
                     verticalTransitions = isTablet,
+                    searchFocusRequest = searchFocusRequest,
+                    onSearchRequested = {
+                        searchFocusRequest++
+                        navigateTo(Routes.SEARCH)
+                    },
                     modifier = Modifier.fillMaxSize(),
                 )
             },
@@ -239,6 +247,8 @@ private fun AppNavHost(
     navOrder: List<String>,
     startDestination: String,
     verticalTransitions: Boolean,
+    searchFocusRequest: Int,
+    onSearchRequested: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     fun indexOf(route: String?): Int = navOrder.indexOf(route).takeIf { it >= 0 } ?: 0
@@ -312,13 +322,20 @@ private fun AppNavHost(
     ) {
         composable(Routes.HOME) {
             HomeScreen(
-                onSearchClick = { navigateTopLevel(Routes.SEARCH) },
+                onSearchClick = {
+                    // Focus the field (and show the IME) as soon as search opens.
+                    onSearchRequested()
+                },
                 onOpenLibrary = { navigateTopLevel(Routes.LIBRARY) },
                 onPlayQueue = playQueue,
             )
         }
         composable(Routes.SEARCH) {
-            SearchScreen(onPlayQueue = playQueue, onExitApp = onExitApp)
+            SearchScreen(
+                onPlayQueue = playQueue,
+                onExitApp = onExitApp,
+                focusRequestKey = searchFocusRequest,
+            )
         }
         composable(Routes.LIBRARY) {
             LibraryScreen(

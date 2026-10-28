@@ -66,6 +66,7 @@ BanLiMusic 提供 Android 客户端与 Compose Desktop 桌面端，二者共用 
 - 尚未实现独立歌单、账号体系与自建服务器适配器；OneDrive 同步目前仅 Android 端。
 - 列表页默认不主动请求专辑封面，可在“下载与缓存”设置中开启；开启后会占用 5 分钟 50 次的 API 请求额度。
 - 中文 A-Z 首字母使用轻量 GB2312 映射，多音字和生僻字可能出现近似结果。
+- 桌面端产物默认不带代码签名；Windows 未签名包可能触发 SmartScreen“未知发布者”提示，Linux 下载包建议校验 `SHA256SUMS-<version>.txt` 与 GPG 签名。签名方式见 [发布与打包](doc/development/release.md#桌面端产物签名)。
 - 已在真机验证主要播放、下载与小组件流程；不同厂商桌面和系统版本仍需分别验证。
 
 完整功能清单与限制见 [功能现状与已知限制](doc/features.md)。

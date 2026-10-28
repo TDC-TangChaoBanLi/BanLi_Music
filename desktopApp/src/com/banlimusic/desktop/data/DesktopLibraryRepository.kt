@@ -37,11 +37,14 @@ class DesktopLibraryRepository(
     private val _favoriteCategories = MutableStateFlow(listOf(DEFAULT_FAVORITE_CATEGORY))
     val favoriteCategories: StateFlow<List<String>> = _favoriteCategories.asStateFlow()
 
-    private val _favoriteFolders = MutableStateFlow<Map<String, String>>(emptyMap())
-    val favoriteFolders: StateFlow<Map<String, String>> = _favoriteFolders.asStateFlow()
+    private val _favoriteFolders = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+    val favoriteFolders: StateFlow<Map<String, Set<String>>> = _favoriteFolders.asStateFlow()
 
     private val _localTracks = MutableStateFlow<List<Track>>(emptyList())
     val localTracks: StateFlow<List<Track>> = _localTracks.asStateFlow()
+
+    /** Wall-clock add times used by the portable backup and cloud sync. */
+    private val _favoriteAddedAt = MutableStateFlow<Map<String, Long>>(emptyMap())
 
     @Volatile
     private var loadedAtLeastOnce = false
@@ -66,7 +69,7 @@ class DesktopLibraryRepository(
             val normalized = normalizeCategory(category)
             ensureCategoryLocked(normalized)
             _favorites.value = listOf(track) + current
-            _favoriteFolders.value = _favoriteFolders.value + (track.id to normalized)
+            _favoriteFolders.value = _favoriteFolders.value + (track.id to setOf(normalized))
         }
         persist()
         !existing
@@ -87,22 +90,70 @@ class DesktopLibraryRepository(
         if (_favorites.value.none { it.id == track.id }) {
             _favorites.value = listOf(track) + _favorites.value
         }
-        _favoriteFolders.value = _favoriteFolders.value + (track.id to normalized)
+        _favoriteFolders.value = _favoriteFolders.value + (
+            track.id to (_favoriteFolders.value[track.id].orEmpty() + normalized)
+            )
         persist()
     }
 
     suspend fun addFavorites(
         tracks: Collection<Track>,
         category: String = DEFAULT_FAVORITE_CATEGORY,
+    ) = addFavorites(tracks, setOf(category))
+
+    suspend fun addFavorites(
+        tracks: Collection<Track>,
+        categories: Set<String>,
     ) = withContext(Dispatchers.IO) {
-        val normalized = normalizeCategory(category)
-        ensureCategoryLocked(normalized)
+        val normalized = categories.map(::normalizeCategory).toSet()
+            .ifEmpty { setOf(DEFAULT_FAVORITE_CATEGORY) }
+        normalized.forEach(::ensureCategoryLocked)
         val incoming = tracks.distinctBy { it.id }
         if (incoming.isEmpty()) return@withContext
         _favorites.value = (incoming + _favorites.value).distinctBy { it.id }
         val folders = _favoriteFolders.value.toMutableMap()
-        incoming.forEach { folders[it.id] = normalized }
+        incoming.forEach { track ->
+            folders[track.id] = folders[track.id].orEmpty() + normalized
+        }
         _favoriteFolders.value = folders
+        persist()
+    }
+
+    suspend fun removeFavorites(tracks: Collection<Track>, category: String?) =
+        withContext(Dispatchers.IO) {
+            val ids = tracks.map { it.id }.toSet()
+            if (category == null) {
+                _favorites.value = _favorites.value.filterNot { it.id in ids }
+                _favoriteFolders.value = _favoriteFolders.value - ids
+            } else {
+                val normalized = normalizeCategory(category)
+                val folders = _favoriteFolders.value.toMutableMap()
+                ids.forEach { id ->
+                    val remaining = folders[id].orEmpty() - normalized
+                    if (remaining.isEmpty()) folders.remove(id) else folders[id] = remaining
+                }
+                _favoriteFolders.value = folders
+                _favorites.value = _favorites.value.filter { it.id in folders }
+            }
+            persist()
+        }
+
+    suspend fun deleteCategory(name: String) = withContext(Dispatchers.IO) {
+        val normalized = normalizeCategory(name)
+        _favoriteCategories.value = _favoriteCategories.value - normalized
+        val folders = _favoriteFolders.value.mapValues { (_, categories) ->
+            categories - normalized
+        }.filterValues { it.isNotEmpty() }
+        _favoriteFolders.value = folders
+        _favorites.value = _favorites.value.filter { it.id in folders }
+        persist()
+    }
+
+    suspend fun saveCategoryOrder(categories: List<String>) = withContext(Dispatchers.IO) {
+        val normalized = categories.map(::normalizeCategory).distinct()
+        val known = _favoriteCategories.value
+        _favoriteCategories.value = normalized.filter { it in known } +
+            known.filterNot { it in normalized }
         persist()
     }
 
@@ -111,6 +162,19 @@ class DesktopLibraryRepository(
         ensureCategoryLocked(normalized)
         persist()
         normalized
+    }
+
+    /** Adds individual audio files to the local index without copying them. */
+    suspend fun importLocalFiles(paths: Collection<Path>): Int = withContext(Dispatchers.IO) {
+        val imported = paths.mapNotNull { path ->
+            path.takeIf { Files.isRegularFile(it) && isAudioFile(it) }
+                ?.let(::toLocalTrack)
+        }
+        if (imported.isEmpty()) return@withContext 0
+        _localTracks.value = (imported + _localTracks.value).distinctBy { it.id }
+            .sortedBy { it.title.lowercase(Locale.ROOT) }
+        persist()
+        imported.size
     }
 
     suspend fun removeLocal(trackId: String) = withContext(Dispatchers.IO) {
@@ -164,6 +228,12 @@ class DesktopLibraryRepository(
         persist()
     }
 
+    suspend fun removeHistory(tracks: Collection<Track>) = withContext(Dispatchers.IO) {
+        val ids = tracks.map { it.id }.toSet()
+        _history.value = _history.value.filterNot { it.id in ids }
+        persist()
+    }
+
     suspend fun recordSearch(query: String) = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext
@@ -179,6 +249,73 @@ class DesktopLibraryRepository(
     }
 
     suspend fun clear() = clearFavorites()
+
+    /** Portable backup that is interchangeable with the Android export file. */
+    suspend fun exportFavoritesJson(): String = withContext(Dispatchers.IO) {
+        val folders = _favoriteFolders.value
+        val export = DesktopFavoritesExport(
+            categories = _favoriteCategories.value,
+            favorites = _favorites.value.map { track ->
+                val trackFolders = folders[track.id].orEmpty()
+                    .ifEmpty { setOf(DEFAULT_FAVORITE_CATEGORY) }
+                    .sorted()
+                DesktopFavoriteExport(
+                    category = trackFolders.first(),
+                    addedAt = _favoriteAddedAt.value[track.id] ?: 0L,
+                    track = track,
+                    folders = trackFolders,
+                )
+            },
+        )
+        json.encodeToString(DesktopFavoritesExport.serializer(), export)
+    }
+
+    /** Imports an Android or desktop favourites backup; returns the count. */
+    suspend fun importFavoritesJson(raw: String, replace: Boolean): Int =
+        withContext(Dispatchers.IO) {
+            val export = runCatching {
+                json.decodeFromString(DesktopFavoritesExport.serializer(), raw)
+            }.getOrNull() ?: return@withContext 0
+            if (replace) {
+                _favorites.value = emptyList()
+                _favoriteFolders.value = emptyMap()
+                _favoriteAddedAt.value = emptyMap()
+            }
+            val now = System.currentTimeMillis()
+            val ids = _favorites.value.mapTo(mutableSetOf()) { it.id }
+            val folders = _favoriteFolders.value.toMutableMap()
+            val addedAt = _favoriteAddedAt.value.toMutableMap()
+            val importedTracks = mutableListOf<Track>()
+            export.favorites.forEachIndexed { index, item ->
+                val trackFolders = item.folders
+                    .ifEmpty { listOf(item.category) }
+                    .map(::normalizeCategory)
+                    .filter { it.isNotBlank() }
+                    .toSet()
+                    .ifEmpty { setOf(DEFAULT_FAVORITE_CATEGORY) }
+                trackFolders.forEach(::ensureCategoryLocked)
+                folders[item.track.id] = folders[item.track.id].orEmpty() + trackFolders
+                addedAt[item.track.id] = item.addedAt.takeIf { it > 0L }
+                    ?: (now - index)
+                if (ids.add(item.track.id)) {
+                    importedTracks += item.track
+                } else {
+                    _favorites.value = _favorites.value.map {
+                        if (it.id == item.track.id) item.track else it
+                    }
+                }
+            }
+            _favoriteCategories.value = (
+                listOf(DEFAULT_FAVORITE_CATEGORY) +
+                    export.categories +
+                    folders.values.flatten()
+                ).map(::normalizeCategory).filter { it.isNotBlank() }.distinct()
+            _favoriteFolders.value = folders
+            _favoriteAddedAt.value = addedAt
+            _favorites.value = (importedTracks + _favorites.value).distinctBy { it.id }
+            persist()
+            export.favorites.size
+        }
 
     private fun load() {
         if (!Files.exists(file)) {
@@ -196,12 +333,18 @@ class DesktopLibraryRepository(
                 .distinctBy { it.track.id }
             _favorites.value = favorites.map { it.track }
             _favoriteFolders.value = favorites.associate { favorite ->
-                favorite.track.id to normalizeCategory(favorite.category)
+                favorite.track.id to (
+                    favorite.categories.ifEmpty { listOf(favorite.category) }
+                        .map(::normalizeCategory).toSet()
+                    )
+            }
+            _favoriteAddedAt.value = favorites.associate { favorite ->
+                favorite.track.id to favorite.addedAt
             }
             _favoriteCategories.value = (
                 listOf(DEFAULT_FAVORITE_CATEGORY) +
                     document.categories +
-                    favorites.map { normalizeCategory(it.category) }
+                    _favoriteFolders.value.values.flatten()
                 ).filter { it.isNotBlank() }.distinct()
             _history.value = document.recent
                 .map { it.track }
@@ -242,14 +385,20 @@ class DesktopLibraryRepository(
         }
     }
 
-    private fun favoriteEntries(): List<DesktopFavorite> =
-        _favorites.value.mapIndexed { index, track ->
+    private fun favoriteEntries(): List<DesktopFavorite> {
+        val folders = _favoriteFolders.value
+        return _favorites.value.mapIndexed { index, track ->
+            val categories = folders[track.id].orEmpty()
+                .ifEmpty { setOf(DEFAULT_FAVORITE_CATEGORY) }
             DesktopFavorite(
                 track = track,
-                addedAt = (_favorites.value.size - index).toLong(),
-                category = _favoriteFolders.value[track.id] ?: DEFAULT_FAVORITE_CATEGORY,
+                addedAt = _favoriteAddedAt.value[track.id]
+                    ?: (_favorites.value.size - index).toLong(),
+                category = categories.first(),
+                categories = categories.toList(),
             )
         }
+    }
 
     private fun normalizeCategory(value: String): String =
         value.trim().ifBlank { DEFAULT_FAVORITE_CATEGORY }
@@ -330,8 +479,25 @@ private data class DesktopLibraryFile(
 )
 
 @Serializable
+private data class DesktopFavoritesExport(
+    val version: Int = 2,
+    val categories: List<String> = emptyList(),
+    val favorites: List<DesktopFavoriteExport> = emptyList(),
+)
+
+@Serializable
+private data class DesktopFavoriteExport(
+    val category: String = DEFAULT_FAVORITE_CATEGORY,
+    val addedAt: Long = 0L,
+    val track: Track,
+    val folders: List<String> = emptyList(),
+)
+
+@Serializable
 private data class DesktopFavorite(
     val track: Track,
     val addedAt: Long = 0L,
     val category: String = DEFAULT_FAVORITE_CATEGORY,
+    /** Multiple folders per track, added in desktop build 3. */
+    val categories: List<String> = emptyList(),
 )

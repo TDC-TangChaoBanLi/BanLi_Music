@@ -83,7 +83,7 @@ data class ProviderSettings(
 
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
-    val dynamicColor: Boolean = true,
+    val dynamicColor: Boolean = false,
     /** Custom ARGB seed for the theme; null keeps dynamic/system colors. */
     val customThemeColor: Int? = null,
     val providers: ProviderSettings = ProviderSettings(),

@@ -12,42 +12,60 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import com.banlimusic.app.core.datastore.ThemeMode
 
-/** Default light palette shared by every platform. */
+/**
+ * Default brand seed. It matches the amber-brown application icon so the
+ * Android and desktop builds open with the same warm palette.
+ */
+const val BANLI_DEFAULT_SEED = 0xFFA9723F.toInt()
+
+/** Default light palette shared by every platform (warm amber-brown). */
 val BanLiLightColorScheme: ColorScheme = lightColorScheme(
-    primary = Color(0xFF0F766E),
+    primary = Color(0xFFA9723F),
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFB2DFDA),
-    onPrimaryContainer = Color(0xFF00201D),
-    secondary = Color(0xFF4A635F),
+    primaryContainer = Color(0xFFF6E1C8),
+    onPrimaryContainer = Color(0xFF3E2410),
+    secondary = Color(0xFF7A5B3C),
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFCCE8E3),
-    onSecondaryContainer = Color(0xFF06201D),
-    tertiary = Color(0xFF9A5B2C),
-    tertiaryContainer = Color(0xFFFFDCC6),
-    background = Color(0xFFF7FAF8),
-    surface = Color(0xFFF7FAF8),
-    surfaceVariant = Color(0xFFDBE5E2),
-    surfaceContainer = Color(0xFFEDF3F0),
-    surfaceContainerHigh = Color(0xFFE6EEEA),
-    outline = Color(0xFF6F7977),
+    secondaryContainer = Color(0xFFEFE1D1),
+    onSecondaryContainer = Color(0xFF2C1D0E),
+    tertiary = Color(0xFF8C5A2B),
+    tertiaryContainer = Color(0xFFFFDCC0),
+    onTertiaryContainer = Color(0xFF301804),
+    background = Color(0xFFFBF7F1),
+    surface = Color(0xFFFBF7F1),
+    surfaceVariant = Color(0xFFE9DDCD),
+    onSurfaceVariant = Color(0xFF51453A),
+    surfaceContainer = Color(0xFFF4ECE1),
+    surfaceContainerLow = Color(0xFFF8F2EA),
+    surfaceContainerHigh = Color(0xFFEEE3D5),
+    surfaceContainerHighest = Color(0xFFE9DDCD),
+    outline = Color(0xFF85705C),
+    outlineVariant = Color(0xFFD6C6B4),
 )
 
-/** Default dark palette shared by every platform. */
+/** Default dark palette shared by every platform (warm amber-brown). */
 val BanLiDarkColorScheme: ColorScheme = darkColorScheme(
-    primary = Color(0xFF7FD5CD),
-    onPrimary = Color(0xFF003733),
-    primaryContainer = Color(0xFF005049),
-    onPrimaryContainer = Color(0xFFB2DFDA),
-    secondary = Color(0xFFB0CCC7),
-    secondaryContainer = Color(0xFF334B47),
-    tertiary = Color(0xFFFFB784),
-    tertiaryContainer = Color(0xFF743F12),
-    background = Color(0xFF081311),
-    surface = Color(0xFF081311),
-    surfaceVariant = Color(0xFF3F4947),
-    surfaceContainer = Color(0xFF121E1B),
-    surfaceContainerHigh = Color(0xFF1C2926),
-    outline = Color(0xFF899390),
+    primary = Color(0xFFE7B87F),
+    onPrimary = Color(0xFF43290F),
+    primaryContainer = Color(0xFF5C3B1B),
+    onPrimaryContainer = Color(0xFFF7DFC4),
+    secondary = Color(0xFFD6BFA2),
+    onSecondary = Color(0xFF3A2A19),
+    secondaryContainer = Color(0xFF4A3A28),
+    onSecondaryContainer = Color(0xFFF0E0CC),
+    tertiary = Color(0xFFE9C08A),
+    tertiaryContainer = Color(0xFF6B4520),
+    onTertiaryContainer = Color(0xFFFFDCC0),
+    background = Color(0xFF15110C),
+    surface = Color(0xFF15110C),
+    surfaceVariant = Color(0xFF4E4335),
+    onSurfaceVariant = Color(0xFFD6C6B4),
+    surfaceContainer = Color(0xFF1E1812),
+    surfaceContainerLow = Color(0xFF191410),
+    surfaceContainerHigh = Color(0xFF292117),
+    surfaceContainerHighest = Color(0xFF352B20),
+    outline = Color(0xFFA08B75),
+    outlineVariant = Color(0xFF4E4335),
 )
 
 /**

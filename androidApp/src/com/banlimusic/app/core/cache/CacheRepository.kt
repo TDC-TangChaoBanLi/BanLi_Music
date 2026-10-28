@@ -13,20 +13,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
-data class CachedTrack(
-    val cacheKey: String,
-    val track: Track,
-    val qualityKbps: Int,
-    val cachedBytes: Long,
-    val totalBytes: Long,
-    val fileExtension: String,
-    val createdAt: Long,
-    val lastAccessAt: Long,
-) {
-    val isComplete: Boolean
-        get() = totalBytes > 0L && cachedBytes >= (totalBytes - totalBytes / 100L).coerceAtLeast(1L)
-}
-
 /**
  * Application-level index for Media3's playback cache. Media3 stores cache keys,
  * not track metadata, so this repository records which track/quality each stable

@@ -57,6 +57,7 @@ fun <T> TrackListPanel(
                 enabled = true,
                 listState = listState,
                 validKeys = validKeys,
+                requireLongPress = !selectionMode,
                 onSelect = { id ->
                     if (!selectionMode) onStartSelection()
                     onSelect(id)

@@ -218,6 +218,26 @@ class SearchViewModel(
         }
     }
 
+    /** Batch favourite for callers that already know the selected tracks. */
+    fun addFavoritesTo(tracks: List<Track>, categories: Set<String>) {
+        if (tracks.isEmpty() || categories.isEmpty()) return
+        viewModelScope.launch {
+            library.addFavorites(tracks, categories)
+            _message.value = "已收藏 ${tracks.size} 首到“${categories.joinToString("、")}”"
+            clearSelection()
+        }
+    }
+
+    /** Batch download for callers that already know the selected tracks. */
+    fun downloadTracks(tracks: List<Track>, qualityKbps: Int?) {
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            val queued = downloads.enqueueAll(tracks, qualityKbps = qualityKbps)
+            _message.value = "已加入下载队列：$queued 首"
+            clearSelection()
+        }
+    }
+
     fun setPreferredSource(trackId: String, providerId: String?) {
         viewModelScope.launch { sourcePreferences.setPreferred(trackId, providerId) }
     }

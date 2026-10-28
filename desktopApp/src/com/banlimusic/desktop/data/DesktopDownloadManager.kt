@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
 enum class DesktopDownloadStatus {
     QUEUED,
     DOWNLOADING,
+    PAUSED,
     COMPLETED,
     FAILED,
     CANCELLED,
@@ -57,6 +58,13 @@ data class DesktopDownloadTask(
     val isActive: Boolean
         get() = status == DesktopDownloadStatus.QUEUED ||
             status == DesktopDownloadStatus.DOWNLOADING
+
+    val canPause: Boolean get() = isActive
+
+    val canResume: Boolean
+        get() = status == DesktopDownloadStatus.PAUSED ||
+            status == DesktopDownloadStatus.FAILED ||
+            status == DesktopDownloadStatus.CANCELLED
 
     val file: File? get() = filePath?.let(::File)
 }
@@ -116,6 +124,18 @@ class DesktopDownloadManager(
             it.copy(
                 status = DesktopDownloadStatus.CANCELLED,
                 error = "已取消",
+                updatedAt = System.currentTimeMillis(),
+            )
+        }
+        persist()
+    }
+
+    fun pause(id: String) {
+        jobs.remove(id)?.cancel()
+        updateTask(id) {
+            it.copy(
+                status = DesktopDownloadStatus.PAUSED,
+                error = "已暂停",
                 updatedAt = System.currentTimeMillis(),
             )
         }
@@ -256,14 +276,21 @@ class DesktopDownloadManager(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            val wasCancelled = _tasks.value
-                .firstOrNull { it.id == id }
-                ?.status == DesktopDownloadStatus.CANCELLED
+            val previous = _tasks.value.firstOrNull { it.id == id }?.status
+            val wasCancelled = previous == DesktopDownloadStatus.CANCELLED
+            val wasPaused = previous == DesktopDownloadStatus.PAUSED
             updateTask(id) {
                 it.copy(
-                    status = if (wasCancelled) DesktopDownloadStatus.CANCELLED
-                    else DesktopDownloadStatus.FAILED,
-                    error = if (wasCancelled) "已取消" else error.userMessage(),
+                    status = when {
+                        wasPaused -> DesktopDownloadStatus.PAUSED
+                        wasCancelled -> DesktopDownloadStatus.CANCELLED
+                        else -> DesktopDownloadStatus.FAILED
+                    },
+                    error = when {
+                        wasPaused -> "已暂停"
+                        wasCancelled -> "已取消"
+                        else -> error.userMessage()
+                    },
                     updatedAt = System.currentTimeMillis(),
                 )
             }

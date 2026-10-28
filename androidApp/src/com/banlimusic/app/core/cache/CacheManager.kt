@@ -7,14 +7,6 @@ import android.content.Context
 import androidx.media3.common.util.UnstableApi
 import java.io.File
 
-data class CacheUsage(
-    val totalBytes: Long = 0L,
-    val audioBytes: Long = 0L,
-    val artworkBytes: Long = 0L,
-    val lyricsBytes: Long = 0L,
-    val otherBytes: Long = 0L,
-)
-
 /**
  * Owns non-audio app cache directories (OkHttp, Coil, widget artwork, temporary
  * downloads) and reports per-category sizes. Audio is owned by Media3's

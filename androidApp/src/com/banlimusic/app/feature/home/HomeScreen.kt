@@ -14,7 +14,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.feature.common.AppViewModelProvider
 import com.banlimusic.app.ui.components.TrackArtwork
-import com.banlimusic.app.ui.components.TrackRow
 import com.banlimusic.shared.ui.screens.BanLiHomeScreen
 import com.banlimusic.shared.ui.screens.HomeUiState
 
@@ -46,11 +45,6 @@ fun HomeScreen(
         },
         modifier = Modifier.fillMaxSize(),
         searchIcon = Icons.Rounded.Search,
-        favoriteRow = { track, index ->
-            TrackRow(
-                track = track,
-                onClick = { onPlayQueue(favorites, index) },
-            )
-        },
+
     )
 }

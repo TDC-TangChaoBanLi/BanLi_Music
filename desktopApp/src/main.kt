@@ -35,7 +35,10 @@ import com.banlimusic.shared.resources.banli_logo
 import com.banlimusic.shared.ui.navigation.BanLiAppShell
 import com.banlimusic.shared.ui.navigation.BanLiBarPosition
 import com.banlimusic.shared.ui.navigation.BanLiDestination
+import com.banlimusic.app.core.datastore.TabletMiniPlayerPosition
+import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.shared.ui.navigation.BanLiNavigationLayout
+import com.banlimusic.shared.ui.navigation.BanLiNavigationSide
 import java.awt.Dimension
 import org.jetbrains.compose.resources.painterResource
 
@@ -78,8 +81,13 @@ private fun DesktopApp(container: DesktopContainer, onExit: () -> Unit) {
 private fun DesktopMain(container: DesktopContainer) {
     val scope = rememberCoroutineScope()
     val state = remember(container, scope) { DesktopAppState(container, scope) }
-    val destinations = remember {
-        DesktopTab.entries.map { tab ->
+    val settings by state.settings.collectAsState()
+    val orderedTabs = remember(settings.bottomNavItems) {
+        val order = settings.bottomNavItems.withIndex().associate { it.value to it.index }
+        DesktopTab.entries.sortedBy { order[it.id] ?: Int.MAX_VALUE }
+    }
+    val destinations = remember(orderedTabs) {
+        orderedTabs.map { tab ->
             BanLiDestination(route = tab.name, label = tab.label, icon = tab.icon)
         }
     }
@@ -93,14 +101,24 @@ private fun DesktopMain(container: DesktopContainer) {
         destinations = destinations,
         currentRoute = if (state.showPlayer) null else state.tab.name,
         onNavigate = { route ->
-            DesktopTab.entries.firstOrNull { it.name == route }?.let(state::selectTab)
+            orderedTabs.firstOrNull { it.name == route }?.let(state::selectTab)
         },
         navigationLayout = BanLiNavigationLayout.SIDE,
-        navigationContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-        railWidth = 104.dp,
-        showRailDivider = true,
+        showNavigation = !state.showPlayer,
+        navigationSide = if (settings.tabletNavPosition == TabletNavPosition.RIGHT) {
+            BanLiNavigationSide.END
+        } else {
+            BanLiNavigationSide.START
+        },
+        navigationContainerColor = MaterialTheme.colorScheme.surface,
         playerBar = playerBar,
-        playerBarPosition = BanLiBarPosition.BOTTOM,
+        playerBarPosition = if (
+            settings.tabletMiniPlayerPosition == TabletMiniPlayerPosition.TOP
+        ) {
+            BanLiBarPosition.TOP
+        } else {
+            BanLiBarPosition.BOTTOM
+        },
         railHeader = {
             Spacer(Modifier.height(18.dp))
             Text(
@@ -113,16 +131,12 @@ private fun DesktopMain(container: DesktopContainer) {
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            Spacer(Modifier.height(18.dp))
-        },
-        railFooter = {
-            Spacer(Modifier.weight(1f))
             Text(
-                text = "GD",
+                text = "Music",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(18.dp))
         },
         content = {
             if (state.showPlayer) {

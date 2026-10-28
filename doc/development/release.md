@@ -179,7 +179,9 @@ jpackage `
 
 把 `--type exe` 换成 `--type msi` 即可生成 MSI；其余参数相同。去掉 `--win-per-user-install` 可改为全局安装。
 
-可选使用 `signtool` 对 `.exe`/`.msi` 做代码签名，证书与口令保存在仓库外，不要写入命令行历史或文档。
+> 如需 Authenticode 签名，先单独生成 app-image，用 `signtool` 签其中的 `BanLiMusic.exe`，再用 `--app-image "<APP_IMAGE>"` 生成 exe/msi 并签安装包。直接由 jpackage 生成安装包时，内部的 app-image 无法插入签名步骤；打包脚本的 `-Sign` 已按此顺序处理。
+
+可选使用 `signtool` 对 `.exe`/`.msi` 做代码签名；证书与口令保存在仓库外，不要写入命令行历史或文档。
 
 ### 不带 runtime：Linux / Windows
 
@@ -300,6 +302,9 @@ Linux 桌面发行版**通常不预装 Java**，不能假设用户环境已有 J
 
 # Linux：只打某个目标
 ./scripts/package-linux.sh --jlink linux-tar linux-nojre-deb
+
+# Linux：打包并用 GPG 密钥签名
+./scripts/package-linux.sh --jlink --gpg-key <GPG_KEY_ID> all-linux
 ```
 
 ```powershell
@@ -310,6 +315,12 @@ powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Jlink
 powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 `
     -Targets zip,exe,nojre-msi -Jlink `
     -JdkHome <WIN_JDK> -WixDir <WIX_DIR>
+
+# Windows：打包并用 Authenticode 证书签名
+$env:BANLI_SIGN_PASSWORD = "<PFX_PASSWORD>"
+powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 `
+    -Targets zip,exe,msi -Sign `
+    -CertificatePath "<KEYSTORE_DIR>\banli.pfx"
 ```
 
 脚本会自动构建 `desktopApp`、读取或生成运行时 classpath、按平台过滤 Skiko jar，并把产物写入 `dist/`，同时生成 `SHA256SUMS-<version>.txt`。Linux 依赖 `jpackage`、`dpkg-deb`、`fakeroot`、`rpmbuild`；Windows 依赖 JDK 25 与 WiX 3.14。`--jlink`/`-Jlink` 使用以下模块集：
@@ -318,6 +329,75 @@ powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 `
 java.base,java.desktop,java.instrument,java.logging,java.prefs,
 jdk.unsupported,jdk.crypto.ec,jdk.zipfs
 ```
+
+### 桌面端产物签名
+
+桌面平台没有 Android 那样“未签名不能安装”的强制机制，但未签名产物会带来两类问题：Windows 的 SmartScreen 显示“未知发布者”，Linux 用户也无法确认下载文件来自发布者。签名是可选的发布步骤，私钥、证书和口令必须保存在仓库外。
+
+#### 证书与密钥从哪里来
+
+- **SignPath Foundation（推荐开源项目）**：为 OSS 提供免费代码签名，证书签发给 SignPath Foundation，私钥保存在其 HSM，通过 CI 提交签名请求。要求项目使用 OSI 认可许可证、公开仓库、已有发布、持续维护，并在项目主页声明代码签名策略、团队角色与隐私政策；每次发布需人工批准。申请：<https://signpath.org/apply>，条件：<https://signpath.org/terms>。
+- **Certum Open Source Code Signing**：商业证书，面向使用开源许可证的项目，费用低于普通 OV/EV；证书可显示开源开发者信息。购买前确认私钥交付方式（PFX、硬件令牌或云端签名），当前脚本的 `-CertificatePath` 只适用于 PFX。参考：<https://www.certum.eu/en/code-signing-certificates/>。
+- **Azure Artifact Signing（原 Trusted Signing）**：按量付费，证书由 Microsoft 管理，适合能使用 Azure 的团队；Public Trust 对个人开发者和组织有地区限制（个人目前限美国/加拿大，组织限指定国家/地区），中国大陆暂不适用。参考：<https://learn.microsoft.com/azure/artifact-signing/>。
+- **传统 OV/EV 证书**：DigiCert、Sectigo、GlobalSign、SSL.com 等，费用较高；私钥通常放在硬件令牌或云端 HSM，CI 签名需要额外的云签名方案。
+- **自签名证书**：免费，只适合内部测试；目标机器必须手动信任根证书，不能消除公开分发的“未知发布者”。
+- **Linux GPG**：不需要 CA，免费生成并发布公钥即可；建议使用独立签名子密钥并将主密钥离线保存。公钥指纹应写入 README 和发布说明。
+
+> 申请 SignPath/Certum 前，仓库必须包含 OSI 认可的开源许可证文件；当前仓库尚未添加 `LICENSE`。许可证选择需由项目维护者确认，并确保不违反上游 GD 音乐台的使用条款。
+
+#### Windows（Authenticode）
+
+`jpackage` 不会自动签名。Windows 脚本在传入 `-Sign` 后会：
+
+1. 生成 app-image，并用 `signtool` 签名其中的 `BanLiMusic.exe`；
+2. 用已签名的 app-image 生成 exe/msi，再签名安装包；
+3. 对每个签名文件执行 `signtool verify /pa`，失败时终止打包。
+
+使用 PFX 证书（口令通过环境变量传入，避免出现在命令历史中）：
+
+```powershell
+$env:BANLI_SIGN_PASSWORD = "<PFX_PASSWORD>"
+powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 `
+    -Targets zip,exe,msi -Sign `
+    -CertificatePath "<KEYSTORE_DIR>\banli.pfx" `
+    -TimestampUrl "http://timestamp.digicert.com"
+```
+
+也可以使用当前用户证书存储中的证书：
+
+```powershell
+powershell ... -Targets exe,msi -Sign `
+    -CertificateThumbprint "<CERT_SHA1_THUMBPRINT>"
+```
+
+`-SignTool` 可指定 `signtool.exe` 路径；未指定时从 `PATH` 或 Windows SDK 中查找。签名后手动验证：
+
+```powershell
+signtool verify /pa /v "dist\BanLiMusic-<version>.exe"
+signtool verify /pa /v "dist\BanLiMusic-<version>.msi"
+```
+
+证书选择：
+
+- **OV/EV 代码签名证书**：传统 PFX 方式；OV 仍需积累 SmartScreen 信誉，EV 通常更快建立信任。
+- **Azure Trusted Signing**：按需付费，使用 `signtool` 的 Trusted Signing 参数；需要额外的元数据配置，本脚本未封装。
+- **开源项目免费签名**：可申请 SignPath 等服务，在 CI 中完成签名。
+- **自签名证书**：仅适合内部测试，目标机器必须先信任根证书，不能消除公开分发时的“未知发布者”。
+
+#### Linux（GPG）
+
+Linux 没有统一的“可执行文件签名”校验机制。发布脚本使用 GPG 分离签名，对每个产物生成 `.asc`，并签名 `SHA256SUMS-<version>.txt`：
+
+```bash
+./scripts/package-linux.sh --jlink --gpg-key "<GPG_KEY_ID>" all-linux
+
+gpg --verify "dist/SHA256SUMS-<version>.txt.asc" "dist/SHA256SUMS-<version>.txt"
+cd dist && sha256sum -c "SHA256SUMS-<version>.txt"
+```
+
+`<GPG_KEY_ID>` 可以是密钥 ID 或指纹；脚本会为 `SHA256SUMS-<version>.txt` 中列出的每个文件生成同名 `.asc`。CI 中应通过受保护的密钥环或 `gpg-agent` 提供私钥，不要把私钥或口令写入仓库。
+
+如果通过 apt/dnf 仓库分发，还需要签名仓库元数据（apt 的 `Release`/`InRelease`、dnf 的 `repomd.xml`）；`dpkg -i` 与 `rpm -i` 默认不校验安装包签名，因此 deb/rpm 的 `.asc` 主要用于下载校验。
 
 ### 体积参考与选择
 
@@ -357,6 +437,8 @@ jdk.unsupported,jdk.crypto.ec,jdk.zipfs
 - [ ] release APK 已使用仓库外的 keystore 签名，并在真机验证安装与启动。
 - [ ] Linux 带 runtime 的 app-image 与 deb/rpm 已安装验证。
 - [ ] Windows 带 runtime 的 app-image、exe/msi 已在 Windows 上安装验证。
+- [ ] 如使用 Windows 代码签名，`BanLiMusic.exe` 与 exe/msi 均已通过 `signtool verify /pa`。
+- [ ] 如使用 Linux GPG 签名，产物 `.asc` 与 `SHA256SUMS-<version>.txt.asc` 均已验证通过。
 - [ ] 使用 `scripts/package-linux.sh` 与 `scripts/package-windows.ps1` 打包时，带 runtime 产物已验证 `--jlink`/`-Jlink` 裁剪后的启动、网络与资源加载。
 - [ ] Linux 与 Windows 打包分别在对应系统执行，未在 Linux 上交叉生成 Windows 安装包。
 - [ ] Linux/Windows 的无 runtime 便携包已在仅安装 Java 17+ 的干净环境验证。

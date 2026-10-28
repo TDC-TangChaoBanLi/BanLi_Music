@@ -13,6 +13,7 @@ KEEP_TEMP=0
 CP_FILE=""
 LINUX_JDK=""
 EXTRA_PATH=""
+GPG_KEY=""
 JLINK_MODULES="java.base,java.desktop,java.instrument,java.logging,java.prefs,jdk.unsupported,jdk.crypto.ec,jdk.zipfs"
 RAW_TARGETS=()
 TARGETS=()
@@ -47,6 +48,7 @@ usage() {
   --classpath-file <f>   使用包含 -cp 行的文件（例如 build/temp/java-args-*.txt）
   --linux-jdk <dir>      Linux JDK 目录（默认 JAVA_HOME 或 jpackage 所在 JDK）
   --extra-path <dir>     临时加入 PATH，例如本地的 fakeroot/rpmbuild 包装器
+  --gpg-key <keyid>      使用 GPG 密钥为产物生成 .asc 分离签名，并签名 SHA256SUMS
   --keep-temp           保留输入 jar 等中间目录
   -h, --help             显示帮助
 
@@ -85,6 +87,7 @@ while [[ $# -gt 0 ]]; do
         --classpath-file) CP_FILE="${2:-}"; shift 2 ;;
         --linux-jdk) LINUX_JDK="${2:-}"; shift 2 ;;
         --extra-path) EXTRA_PATH="${2:-}"; shift 2 ;;
+        --gpg-key) GPG_KEY="${2:-}"; shift 2 ;;
         --keep-temp) KEEP_TEMP=1; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) die "未知选项：$1（使用 --help 查看帮助）" ;;
@@ -540,7 +543,7 @@ note "生成校验和"
     cd "$DIST"
     names=()
     for f in *"$VERSION"*; do
-        [[ -f "$f" && "$f" != SHA256SUMS-* ]] && names+=("$f")
+        [[ -f "$f" && "$f" != SHA256SUMS-* && "$f" != *.asc && "$f" != *.sig ]] && names+=("$f")
     done
     if [[ ${#names[@]} -gt 0 ]]; then
         printf '%s\n' "${names[@]}" | sort -u | while IFS= read -r name; do
@@ -548,5 +551,33 @@ note "生成校验和"
         done > "SHA256SUMS-$VERSION.txt"
     fi
 )
+
+if [[ -n "$GPG_KEY" ]]; then
+    require_command gpg "GPG 签名需要 gpg"
+    sums="$DIST/SHA256SUMS-$VERSION.txt"
+    [[ -f "$sums" ]] || die "未生成 $sums，无法签名"
+    note "使用 GPG 密钥 $GPG_KEY 签名产物"
+    signed=0
+    while IFS= read -r line; do
+        name="${line#*  }"
+        [[ -n "$name" ]] || continue
+        file="$DIST/$name"
+        [[ -f "$file" ]] || die "校验和中的文件不存在：$file"
+        rm -f "$file.asc"
+        gpg --batch --yes --armor --detach-sign \
+            --local-user "$GPG_KEY" --output "$file.asc" "$file" </dev/null || \
+            die "GPG 签名失败：$file"
+        gpg --batch --verify "$file.asc" "$file" </dev/null >/dev/null || \
+            die "GPG 签名校验失败：$file"
+        signed=$((signed + 1))
+    done < "$sums"
+    rm -f "$sums.asc"
+    gpg --batch --yes --armor --detach-sign \
+        --local-user "$GPG_KEY" --output "$sums.asc" "$sums" </dev/null || \
+        die "GPG 签名失败：$sums"
+    gpg --batch --verify "$sums.asc" "$sums" </dev/null >/dev/null || \
+        die "GPG 签名校验失败：$sums"
+    note "已生成 $signed 个产物签名及校验和签名"
+fi
 
 note "完成。产物目录：$DIST"

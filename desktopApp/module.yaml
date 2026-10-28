@@ -14,6 +14,7 @@ dependencies:
   - org.jetbrains.compose.desktop:desktop-jvm-windows-x64:1.12.1
   - $libs.compose.material3
   - $libs.compose.material.icons.core
+  - $libs.compose.material.icons.extended
   - $libs.kotlinx.coroutines.core
   - $libs.kotlinx.serialization.json
   - $libs.okhttp

@@ -53,7 +53,6 @@ fun BanLiHomeScreen(
     modifier: Modifier = Modifier,
     searchIcon: ImageVector? = null,
     recentTrackLimit: Int = Int.MAX_VALUE,
-    favoriteRow: (@Composable (Track, Int) -> Unit)? = null,
 ) {
     val greeting = remember { homeGreeting() }
     val sourceNames = state.enabledSourceIds
@@ -160,21 +159,13 @@ fun BanLiHomeScreen(
                     description = "在播放页或搜索结果中点击心形图标即可收藏。",
                 )
             }
-        } else if (favoriteRow != null) {
-            itemsIndexed(
-                items = state.favoriteTracks.take(5),
-                key = { _, track -> track.id },
-            ) { index, track ->
-                favoriteRow(track, index)
-            }
         } else {
             itemsIndexed(
                 items = state.favoriteTracks.take(5),
                 key = { _, track -> track.id },
             ) { index, track ->
-                com.banlimusic.shared.ui.components.BanLiTrackRow(
-                    title = track.title,
-                    subtitle = track.artistLine,
+                com.banlimusic.shared.ui.components.BanLiTrackListRow(
+                    track = track,
                     artwork = { artworkModifier -> artwork(track, artworkModifier) },
                     onClick = { onPlayQueue(state.favoriteTracks, index) },
                 )

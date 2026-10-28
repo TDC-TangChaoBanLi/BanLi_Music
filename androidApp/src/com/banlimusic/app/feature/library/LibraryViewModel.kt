@@ -157,13 +157,12 @@ class LibraryViewModel(
         viewModelScope.launch { library.clearHistory() }
     }
 
-    /** Removes only the selected play-history rows. */
+    /** Removes the supplied play-history rows. */
     fun deleteHistorySelection(tracks: List<Track>) {
-        val selected = tracks.filter { it.id in _selectedIds.value }
-        if (selected.isEmpty()) return
+        if (tracks.isEmpty()) return
         viewModelScope.launch {
-            library.deleteHistory(selected.map { it.id })
-            _message.value = "已删除 ${selected.size} 条播放记录"
+            library.deleteHistory(tracks.map { it.id })
+            _message.value = "已删除 ${tracks.size} 条播放记录"
             clearSelection()
         }
     }
@@ -218,12 +217,11 @@ class LibraryViewModel(
      * are never deleted; download files follow the download page's policy.
      */
     fun deleteLocalSelection(tracks: List<Track>) {
-        val selected = tracks.filter { it.id in _selectedIds.value }
-        if (selected.isEmpty()) return
-        val imported = selected.filter { track ->
+        if (tracks.isEmpty()) return
+        val imported = tracks.filter { track ->
             track.sources.any { it.providerId == "local" }
         }
-        val downloaded = selected.filter { track ->
+        val downloaded = tracks.filter { track ->
             track.sources.any { it.providerId == "download" }
         }
         viewModelScope.launch {
@@ -282,38 +280,32 @@ class LibraryViewModel(
     }
 
     fun addFavorites(tracks: List<Track>, folders: Set<String>) {
-        val selected = tracks.filter { it.id in _selectedIds.value }
-        if (selected.isEmpty() || folders.isEmpty()) return
+        if (tracks.isEmpty() || folders.isEmpty()) return
         viewModelScope.launch {
-            library.addFavorites(selected, folders)
-            _message.value = "已收藏 ${selected.size} 首到“${folders.joinToString("、")}”"
-            clearSelection()
+            library.addFavorites(tracks, folders)
+            _message.value = "已收藏 ${tracks.size} 首到“${folders.joinToString("、")}”"
         }
     }
 
     fun removeFavoriteFromFolder(tracks: List<Track>, folder: String) {
-        val selected = tracks.filter { it.id in _selectedIds.value }
-        if (selected.isEmpty()) return
+        if (tracks.isEmpty()) return
         viewModelScope.launch {
-            selected.forEach { library.removeFavoriteFromFolder(it.id, folder) }
-            _message.value = "已从“$folder”移除 ${selected.size} 首"
-            clearSelection()
+            tracks.forEach { library.removeFavoriteFromFolder(it.id, folder) }
+            _message.value = "已从“$folder”移除 ${tracks.size} 首"
         }
     }
 
     /** Removes every membership when [folder] is null, otherwise only that folder. */
     fun removeFavorites(tracks: List<Track>, folder: String?) {
-        val selected = tracks.filter { it.id in _selectedIds.value }
-        if (selected.isEmpty()) return
+        if (tracks.isEmpty()) return
         viewModelScope.launch {
             if (folder == null) {
-                selected.forEach { library.removeFavorite(it.id) }
-                _message.value = "已取消收藏 ${selected.size} 首"
+                tracks.forEach { library.removeFavorite(it.id) }
+                _message.value = "已取消收藏 ${tracks.size} 首"
             } else {
-                selected.forEach { library.removeFavoriteFromFolder(it.id, folder) }
-                _message.value = "已从“$folder”移除 ${selected.size} 首"
+                tracks.forEach { library.removeFavoriteFromFolder(it.id, folder) }
+                _message.value = "已从“$folder”移除 ${tracks.size} 首"
             }
-            clearSelection()
         }
     }
 
@@ -337,25 +329,21 @@ class LibraryViewModel(
 
     /** Removes the download records (and their files) for the selected tracks. */
     fun removeDownloadedSelection(tracks: List<Track>) {
-        val selected = tracks.filter { it.id in _selectedIds.value }
-        if (selected.isEmpty()) return
+        if (tracks.isEmpty()) return
         viewModelScope.launch {
-            val wanted = selected.map { it.id }.toSet()
+            val wanted = tracks.map { it.id }.toSet()
             downloads.observeTasks().first()
                 .filter { it.track.id in wanted }
                 .forEach { downloads.remove(it.id) }
-            _message.value = "已删除 ${selected.size} 首已下载歌曲及其文件"
-            clearSelection()
+            _message.value = "已删除 ${tracks.size} 首已下载歌曲及其文件"
         }
     }
 
     fun downloadSelected(tracks: List<Track>, qualityKbps: Int? = null) {
-        val selected = tracks.filter { it.id in _selectedIds.value }
-        if (selected.isEmpty()) return
+        if (tracks.isEmpty()) return
         viewModelScope.launch {
-            val queued = downloads.enqueueAll(selected, qualityKbps = qualityKbps)
+            val queued = downloads.enqueueAll(tracks, qualityKbps = qualityKbps)
             _message.value = "已加入下载队列：$queued 首"
-            clearSelection()
         }
     }
 

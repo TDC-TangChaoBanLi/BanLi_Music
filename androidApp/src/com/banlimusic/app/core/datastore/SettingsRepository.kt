@@ -106,7 +106,7 @@ class SettingsRepository(private val context: Context) {
                 themeMode = preferences[Keys.themeMode]
                     ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
                     ?: ThemeMode.SYSTEM,
-                dynamicColor = preferences[Keys.dynamicColor] ?: true,
+                dynamicColor = preferences[Keys.dynamicColor] ?: false,
                 customThemeColor = preferences[Keys.customThemeColor]
                     ?.takeIf { it != 0L }
                     ?.toInt(),

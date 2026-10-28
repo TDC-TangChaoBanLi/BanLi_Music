@@ -24,8 +24,8 @@ shared/                       KMP 共享核心（android + jvm）
     com/banlimusic/shared/
       ui/theme                两端共用的 Material 3 主题与自定义主题色
       ui/navigation           两端共用的自适应应用外壳（侧边/底部导航）
-      ui/screens              两端共用的首页、搜索、播放页等页面布局
-      ui/components           两端共用的列表面板、表头、多选栏、A-Z 索引、曲目行等
+      ui/screens              两端共用的首页、搜索、音乐库、下载、设置、播放页布局
+      ui/components           两端共用的列表面板、表头、多选栏、曲目行、迷你播放条、播放操作与来源徽标等
       ui/player               两端共用的歌词视图
       ui/agreement            两端共用的用户协议界面
 desktopApp/                   Compose Desktop 桌面端
@@ -34,7 +34,7 @@ desktopApp/                   Compose Desktop 桌面端
   src/com/banlimusic/desktop/
     data/                     设置、收藏夹/历史/本地音乐、下载、缓存、仓库
     player/                   JLayer MP3 播放引擎
-    ui/                       首页、搜索、音乐库、下载、设置、播放页
+    ui/                       平台适配层：只负责数据映射、文件选择与图片加载
 androidApp/
   module.yaml                 android/app 构建配置
   src/
@@ -50,7 +50,7 @@ androidApp/
         download/             下载状态机与 WorkManager Worker
         playback/             流地址解析
       player/                 Media3 服务、队列持久化、收藏自定义命令
-      feature/                Compose 页面与 ViewModel
+      feature/                共享页面的平台适配层与 ViewModel
       widget/                 RemoteViews 小组件、封面位图缓存
       ui/                     主题、通用组件与 A-Z 索引条
   res/
@@ -59,6 +59,19 @@ androidApp/
 ```
 
 跨平台代码位于 `shared/`（`kmp/lib`，platforms `android` + `jvm`），与平台无关的模型、Provider、GD 客户端、限流、文本/歌词解析、去重、URI 编解码、排序与首字母索引已下沉；Compose Multiplatform 主题、自适应应用外壳、首页/搜索/播放页布局、协议页、歌词、播放条、曲目行、列表表头、多选栏与 A-Z 索引也位于共享模块。`desktopApp/`（`jvm/app` + Compose Desktop）复用共享核心与共享 UI，使用 Compose Desktop + JLayer 实现桌面 UI 与 MP3 播放；设置使用系统 Preferences，收藏/历史和下载任务使用 JSON 文件。由于共享模块当前允许使用 `java.*` API，它面向 Android/JVM，不包含 iOS 目标。
+
+### UI 单一来源
+
+所有页面布局、列表、弹窗、导航与播放控件都在
+`shared/src/com/banlimusic/shared/ui` 中实现。Android 的 `feature/*Screen.kt` 与桌面的 `ui/*Screen.kt` 只做平台适配：
+
+- 把仓库/ViewModel 的 Flow 映射为共享页面的 `*UiState`；
+- 实现共享页面的 `*Actions`，调用平台仓库或 ViewModel；
+- 提供平台专属能力：媒体权限、SAF/文件选择器、系统剪贴板、Coil 与 AWT 图片加载；
+- 处理平台返回键（通过共享页面的 `*ScreenController` 转发）。
+
+因此新增或调整 UI 布局时只需修改 `shared` 中的对应页面，两端会同时生效；平台文件
+不应再包含第二套布局。
 
 ## 关键原则
 

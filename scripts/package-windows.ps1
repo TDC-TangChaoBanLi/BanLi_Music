@@ -14,6 +14,11 @@
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 `
       -Targets zip,exe,nojre-msi -Jlink -JdkHome C:\JDK\jdk-25 -WixDir C:\wix314
+
+.EXAMPLE
+  $env:BANLI_SIGN_PASSWORD = "<PFX_PASSWORD>"
+  powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 `
+      -Targets zip,exe,msi -Sign -CertificatePath C:\keys\banli.pfx
 #>
 param(
     [string]$Version = "",
@@ -27,7 +32,12 @@ param(
     [string]$JlinkModules = "java.base,java.desktop,java.instrument,java.logging,java.prefs,jdk.unsupported,jdk.crypto.ec,jdk.zipfs",
     [switch]$Jlink,
     [switch]$SkipBuild,
-    [switch]$KeepTemp
+    [switch]$KeepTemp,
+    [switch]$Sign,
+    [string]$SignTool = "",
+    [string]$CertificatePath = "",
+    [string]$CertificateThumbprint = "",
+    [string]$TimestampUrl = "http://timestamp.digicert.com"
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +50,7 @@ if (-not $WorkDir) { $WorkDir = Join-Path $env:TEMP "banli-package" }
 $InputDir = Join-Path $WorkDir "input"
 $UpgradeUuid = "96341748-fd12-47ca-a45f-db1d1c6a8358"
 $NoJreUpgradeCode = "26e51776-c54b-45ed-8989-a94a5f55bba3"
+$CertificatePassword = $env:BANLI_SIGN_PASSWORD
 $BuiltFiles = @()
 
 function Fail([string]$Message) {
@@ -48,6 +59,54 @@ function Fail([string]$Message) {
 
 function Note([string]$Message) {
     Write-Host "==> $Message"
+}
+
+function Resolve-SignTool {
+    if ($SignTool) {
+        if (Test-Path $SignTool) { return (Resolve-Path $SignTool).Path }
+        $command = Get-Command $SignTool -ErrorAction SilentlyContinue
+        if ($command) { return $command.Source }
+        Fail "signtool not found: $SignTool"
+    }
+    $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    $roots = @()
+    if (${env:ProgramFiles(x86)}) { $roots += (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin") }
+    if ($env:ProgramFiles) { $roots += (Join-Path $env:ProgramFiles "Windows Kits\10\bin") }
+    foreach ($root in $roots) {
+        if (-not (Test-Path $root)) { continue }
+        $candidate = Get-ChildItem $root -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName "x64\signtool.exe" } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+        if ($candidate) { return $candidate }
+    }
+    Fail "signtool.exe not found; install Windows SDK or pass -SignTool"
+}
+
+function Invoke-SignFile([string]$File) {
+    if (-not $Sign) { return }
+    if (-not (Test-Path $File)) { Fail "signing target not found: $File" }
+    $signArgs = @(
+        "sign",
+        "/fd", "SHA256",
+        "/td", "SHA256",
+        "/tr", $TimestampUrl,
+        "/d", "BanLiMusic"
+    )
+    if ($CertificatePath) {
+        $signArgs += @("/f", (Resolve-Path $CertificatePath).Path)
+        if ($CertificatePassword) { $signArgs += @("/p", $CertificatePassword) }
+    } else {
+        $signArgs += @("/sha1", $CertificateThumbprint)
+    }
+    $signArgs += $File
+    Note "Signing $(Split-Path -Leaf $File)"
+    & $script:SignToolPath @signArgs | Out-Host
+    if ($LASTEXITCODE -ne 0) { Fail "signtool sign failed: $File" }
+    & $script:SignToolPath verify /pa /v $File | Out-Host
+    if ($LASTEXITCODE -ne 0) { Fail "signtool verify failed: $File" }
 }
 
 if (-not $Version) {
@@ -99,6 +158,17 @@ if ($needsWix) {
     if (($targetList -contains "nojre-msi") -and (-not (Get-Command "heat.exe" -ErrorAction SilentlyContinue))) {
         Fail "heat.exe not found; nojre-msi requires WiX"
     }
+}
+
+$script:SignToolPath = $null
+if ($Sign) {
+    if (-not $CertificatePath -and -not $CertificateThumbprint) {
+        Fail "signing requires -CertificatePath or -CertificateThumbprint"
+    }
+    if ($CertificatePath -and -not (Test-Path $CertificatePath)) {
+        Fail "certificate not found: $CertificatePath"
+    }
+    $script:SignToolPath = Resolve-SignTool
 }
 
 New-Item -ItemType Directory -Force -Path $Dist, $BuildDir | Out-Null
@@ -258,6 +328,16 @@ $commonArgs = @(
 if ($runtimeImage) { $commonArgs += @("--runtime-image", $runtimeImage) }
 if ($Icon) { $commonArgs += @("--icon", $Icon) }
 
+function Get-PackageArgs([string]$AppImage) {
+    $packageArgs = @(
+        "--name", "BanLiMusic",
+        "--app-version", $Version,
+        "--app-image", $AppImage
+    )
+    if ($Icon) { $packageArgs += @("--icon", $Icon) }
+    return $packageArgs
+}
+
 function Invoke-JPackage([string[]]$Arguments) {
     & $jpackage @Arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { Fail "jpackage failed with exit code $LASTEXITCODE" }
@@ -273,6 +353,7 @@ function Get-AppImage {
     Invoke-JPackage ($commonArgs + @("--type", "app-image", "--dest", $dest))
     $app = Join-Path $dest "BanLiMusic"
     if (-not (Test-Path (Join-Path $app "BanLiMusic.exe"))) { Fail "BanLiMusic.exe missing from app-image" }
+    Invoke-SignFile (Join-Path $app "BanLiMusic.exe")
     $script:AppImagePath = $app
     return $app
 }
@@ -403,6 +484,7 @@ function Build-NoJreMsi {
     if ($LASTEXITCODE -ne 0) { Fail "light.exe failed with exit code $LASTEXITCODE" }
     $pdb = [IO.Path]::ChangeExtension($msi, ".wixpdb")
     if (Test-Path $pdb) { Remove-Item -Force $pdb }
+    Invoke-SignFile $msi
     return $msi
 }
 
@@ -423,22 +505,36 @@ foreach ($target in $targetList) {
             $BuiltFiles += $zip
         }
         "exe" {
+            $packageArgs = $commonArgs
+            if ($Sign) {
+                $app = Get-AppImage
+                $packageArgs = Get-PackageArgs $app
+            }
             Note "Creating Windows exe installer"
-            Invoke-JPackage ($commonArgs + @(
+            Invoke-JPackage ($packageArgs + @(
                 "--type", "exe", "--dest", $Dist,
                 "--win-shortcut", "--win-menu", "--win-dir-chooser",
                 "--win-per-user-install", "--win-upgrade-uuid", $UpgradeUuid
             ))
-            $BuiltFiles += (Join-Path $Dist "BanLiMusic-$Version.exe")
+            $installer = Join-Path $Dist "BanLiMusic-$Version.exe"
+            Invoke-SignFile $installer
+            $BuiltFiles += $installer
         }
         "msi" {
+            $packageArgs = $commonArgs
+            if ($Sign) {
+                $app = Get-AppImage
+                $packageArgs = Get-PackageArgs $app
+            }
             Note "Creating Windows msi installer"
-            Invoke-JPackage ($commonArgs + @(
+            Invoke-JPackage ($packageArgs + @(
                 "--type", "msi", "--dest", $Dist,
                 "--win-shortcut", "--win-menu", "--win-dir-chooser",
                 "--win-per-user-install", "--win-upgrade-uuid", $UpgradeUuid
             ))
-            $BuiltFiles += (Join-Path $Dist "BanLiMusic-$Version.msi")
+            $installer = Join-Path $Dist "BanLiMusic-$Version.msi"
+            Invoke-SignFile $installer
+            $BuiltFiles += $installer
         }
         "nojre-zip" {
             $app = Join-Path $WorkDir "nojre-zip\BanLiMusic"

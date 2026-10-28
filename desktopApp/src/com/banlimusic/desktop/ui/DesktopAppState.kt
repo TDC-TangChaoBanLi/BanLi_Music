@@ -1,8 +1,9 @@
 package com.banlimusic.desktop.ui
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.getValue
@@ -19,12 +20,16 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URI
 
-enum class DesktopTab(val label: String, val icon: ImageVector) {
-    HOME("首页", Icons.Rounded.Home),
-    SEARCH("搜索", Icons.Rounded.Search),
-    LIBRARY("音乐库", Icons.AutoMirrored.Rounded.List),
-    DOWNLOADS("下载", DesktopIcons.Download),
-    SETTINGS("设置", Icons.Rounded.Settings),
+enum class DesktopTab(
+    val id: String,
+    val label: String,
+    val icon: ImageVector,
+) {
+    HOME("home", "首页", Icons.Rounded.Home),
+    SEARCH("search", "搜索", Icons.Rounded.Search),
+    LIBRARY("library", "音乐库", Icons.Rounded.LibraryMusic),
+    DOWNLOADS("downloads", "下载", Icons.Rounded.Download),
+    SETTINGS("settings", "设置", Icons.Rounded.Settings),
 }
 
 data class DesktopSearchState(
@@ -57,7 +62,10 @@ class DesktopAppState(
     var localScanError by mutableStateOf<String?>(null)
         private set
 
-    var tab by mutableStateOf(DesktopTab.HOME)
+    var tab by mutableStateOf(
+        DesktopTab.entries.firstOrNull { it.id == settings.value.defaultNavItem }
+            ?: DesktopTab.HOME,
+    )
     var showPlayer by mutableStateOf(false)
         private set
     var search by mutableStateOf(DesktopSearchState())
@@ -157,18 +165,82 @@ class DesktopAppState(
         container.downloads.download(track, qualityKbps)
     }
 
+    /** Imports a portable download manifest and queues missing songs. */
+    fun importManifest(file: File) {
+        scope.launch {
+            try {
+                val text = file.readText()
+                val manifest = container.json.decodeFromString(
+                    com.banlimusic.app.core.model.DownloadManifest.serializer(),
+                    text,
+                )
+                manifest.entries.forEach { entry ->
+                    container.downloads.download(
+                        entry.track,
+                        entry.qualityKbps.takeIf { it > 0 }
+                            ?: settings.value.downloadQualityKbps,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                localScanError = error.userMessage()
+            }
+        }
+    }
+
     fun downloadTracks(tracks: Collection<Track>, qualityKbps: Int) {
         tracks.forEach { container.downloads.download(it, qualityKbps) }
     }
 
     fun addTracksToCategory(tracks: Collection<Track>, category: String) {
+        addTracksToCategories(tracks, setOf(category))
+    }
+
+    fun addTracksToCategories(tracks: Collection<Track>, categories: Set<String>) {
         scope.launch {
             try {
-                container.libraryRepository.addFavorites(tracks, category)
+                container.libraryRepository.addFavorites(tracks, categories)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Throwable) {
                 // The list remains unchanged; the user can retry.
+            }
+        }
+    }
+
+    fun removeFavorites(tracks: Collection<Track>, category: String?) {
+        scope.launch {
+            try {
+                container.libraryRepository.removeFavorites(tracks, category)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Keep the list as-is so the user can retry.
+            }
+        }
+    }
+
+    fun deleteFavoriteCategory(name: String) {
+        scope.launch {
+            try {
+                container.libraryRepository.deleteCategory(name)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Keep the folder so the user does not lose data silently.
+            }
+        }
+    }
+
+    fun saveFavoriteCategoryOrder(categories: List<String>) {
+        scope.launch {
+            try {
+                container.libraryRepository.saveCategoryOrder(categories)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Ordering is cosmetic; ignore failures.
             }
         }
     }
@@ -202,6 +274,59 @@ class DesktopAppState(
         }
     }
 
+    fun importLocalFiles(files: List<File>) {
+        if (files.isEmpty()) return
+        scope.launch {
+            try {
+                container.libraryRepository.importLocalFiles(files.map { it.toPath() })
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                localScanError = error.userMessage()
+            }
+        }
+    }
+
+    fun clearHistory() {
+        scope.launch {
+            try {
+                container.libraryRepository.clearHistory()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Keep the list; the user can retry.
+            }
+        }
+    }
+
+    fun removeHistory(tracks: Collection<Track>) {
+        scope.launch {
+            try {
+                container.libraryRepository.removeHistory(tracks)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Keep the list; the user can retry.
+            }
+        }
+    }
+
+    fun removeLocalTracks(tracks: Collection<Track>) {
+        scope.launch {
+            try {
+                tracks.forEach { container.libraryRepository.removeLocal(it.id) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Keep the list; the user can retry.
+            }
+        }
+    }
+
+    fun removeDownloaded(tracks: Collection<Track>) {
+        tracks.forEach { container.downloads.remove(it.id) }
+    }
+
     fun clearLocalMusic() {
         scope.launch {
             try {
@@ -229,6 +354,7 @@ class DesktopAppState(
             container.player.play(track, queue)
         }
         recordPlay(track)
+        if (settings.value.openPlayerOnTrackClick) showPlayer = true
     }
 
     private fun localFileOf(track: Track): File? = track.sources

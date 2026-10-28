@@ -21,8 +21,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.banlimusic.app.core.model.Track
-import com.banlimusic.app.ui.components.NON_PROVIDER_SOURCE_IDS
-import com.banlimusic.app.ui.components.sourceDisplayName
+import com.banlimusic.shared.ui.components.NON_PROVIDER_SOURCE_IDS
+import com.banlimusic.shared.ui.components.sourceDisplayName
 
 /**
  * Lists every provider source of a merged track. Selecting one only changes

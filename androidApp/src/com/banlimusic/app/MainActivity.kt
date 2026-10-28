@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
             }
             BanLiMusicTheme(
                 themeMode = settings?.themeMode ?: ThemeMode.SYSTEM,
-                dynamicColor = settings?.dynamicColor ?: true,
+                dynamicColor = settings?.dynamicColor ?: false,
                 customThemeColor = settings?.customThemeColor,
             ) {
                 val scope = rememberCoroutineScope()
