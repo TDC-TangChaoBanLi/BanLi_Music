@@ -1,10 +1,13 @@
+/**
+ * 文件作用：定义跨平台设置模型、默认值、导航与音质选项常量。
+ */
 package com.banlimusic.app.core.datastore
 
 import kotlinx.serialization.Serializable
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
-enum class WidgetTheme { SYSTEM, BLACK, WHITE }
+enum class WidgetTheme { SYSTEM, BLACK, WHITE, CUSTOM }
 
 /** Side used by the tablet navigation rail; ignored on phones. */
 enum class TabletNavPosition { LEFT, RIGHT }
@@ -12,9 +15,9 @@ enum class TabletNavPosition { LEFT, RIGHT }
 /** Vertical position of the tablet mini player relative to page content. */
 enum class TabletMiniPlayerPosition { TOP, BOTTOM }
 
-const val DEFAULT_CACHE_MAX_BYTES = 200L * 1024L * 1024L
-const val MIN_CACHE_MAX_BYTES = 50L * 1024L * 1024L
-const val MAX_CACHE_MAX_BYTES = 2L * 1024L * 1024L * 1024L
+const val DEFAULT_CACHE_MAX_BYTES = 2048L * 1024L * 1024L
+const val MIN_CACHE_MAX_BYTES = 0L
+const val MAX_CACHE_MAX_BYTES = Long.MAX_VALUE
 const val DEFAULT_FAVORITE_CATEGORY = "默认收藏"
 const val MAX_API_LIMIT_PER_WINDOW = 50
 const val MIN_GD_REQUEST_INTERVAL_MS = 1_000L
@@ -127,6 +130,10 @@ data class AppSettings(
     val favoriteCategoryOrder: List<String> = emptyList(),
     val autoImportLocalMusic: Boolean = false,
     val widgetTheme: WidgetTheme = WidgetTheme.SYSTEM,
+    /** Custom widget background ARGB; null follows the black/white theme. */
+    val widgetBackgroundColor: Int? = null,
+    /** Widget background opacity percentage, 20..100. */
+    val widgetBackgroundOpacity: Int = 80,
     /** Desktop-only placeholder for the floating lyrics window. */
     val desktopFloatingLyrics: Boolean = false,
     /** Requests a ~90Hz display mode while browsing track lists. */

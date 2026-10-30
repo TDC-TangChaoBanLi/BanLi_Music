@@ -1,3 +1,6 @@
+/**
+ * 文件作用：桌面设置页适配层，提供缓存清理、目录选择与云同步操作。
+ */
 package com.banlimusic.desktop.ui
 
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +32,7 @@ import com.banlimusic.shared.ui.screens.SettingsUiState
 import com.banlimusic.shared.ui.screens.SyncAuthState
 import com.banlimusic.shared.ui.screens.SyncUiState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.Desktop
@@ -222,16 +226,9 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
             }
 
             override fun convertCachedToDownloads(entries: List<CachedTrack>) {
+                state.convertCachedToDownloads(entries)
                 scope.launch {
-                    entries.forEach { entry ->
-                        state.container.playbackCache.fileFor(entry.cacheKey)?.let { file ->
-                            state.container.downloads.adoptCached(
-                                entry.track,
-                                file,
-                                entry.qualityKbps,
-                            )
-                        }
-                    }
+                    delay(300L)
                     refreshCacheUsage()
                 }
             }

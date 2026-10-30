@@ -136,10 +136,7 @@ class DesktopSettingsRepository {
     }
 
     fun setCacheMaxBytes(bytes: Long) = update {
-        prefs.putLong(KEY_CACHE_MAX, bytes.coerceIn(
-            com.banlimusic.app.core.datastore.MIN_CACHE_MAX_BYTES,
-            com.banlimusic.app.core.datastore.MAX_CACHE_MAX_BYTES,
-        ))
+        prefs.putLong(KEY_CACHE_MAX, bytes.coerceAtLeast(0L))
     }
 
     fun setDefaultFavoriteCategory(category: String) = update {
@@ -217,7 +214,7 @@ class DesktopSettingsRepository {
             cacheMaxBytes = prefs.getLong(
                 KEY_CACHE_MAX,
                 com.banlimusic.app.core.datastore.DEFAULT_CACHE_MAX_BYTES,
-            ),
+            ).coerceAtLeast(0L),
             bottomNavItems = prefs.get(KEY_NAV_ITEMS, "")
                 .split(',')
                 .map { it.trim() }

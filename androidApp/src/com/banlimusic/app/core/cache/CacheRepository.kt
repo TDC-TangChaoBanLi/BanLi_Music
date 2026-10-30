@@ -5,6 +5,10 @@ package com.banlimusic.app.core.cache
 
 import com.banlimusic.app.core.database.dao.CacheDao
 import com.banlimusic.app.core.database.entity.CachedTrackEntity
+import com.banlimusic.app.core.model.DownloadQueueOutcome
+import com.banlimusic.app.core.model.DownloadQualityDecision
+import com.banlimusic.app.core.model.DownloadRequestItem
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.data.repository.DownloadRepository
 import kotlinx.coroutines.Dispatchers
@@ -77,6 +81,20 @@ class CacheRepository(
             dao.getForTrackAndQuality(trackId, qualityKbps)?.let(::toCachedTrack)
         }
 
+    /**
+     * Highest cached quality at or above [minQualityKbps]. Playback uses this so
+     * a complete high-quality cache wins over a lower playback preference.
+     */
+    suspend fun bestQualityAtOrAbove(trackId: String, minQualityKbps: Int): Int? =
+        withContext(Dispatchers.IO) {
+            dao.getForTrack(trackId)
+                .asSequence()
+                .filter { QualityTiers.normalize(it.qualityKbps) >= minQualityKbps }
+                .sortedByDescending { QualityTiers.normalize(it.qualityKbps) }
+                .firstOrNull { playbackCache.cachedBytes(it.cacheKey) > 0L }
+                ?.let { QualityTiers.normalize(it.qualityKbps) }
+        }
+
     suspend fun removeTrack(trackId: String) = withContext(Dispatchers.IO) {
         playbackCache.removeTrack(trackId)
         dao.deleteByTrackId(trackId)
@@ -119,18 +137,27 @@ class CacheRepository(
     }
 
     /**
-     * Queues one download per cached track. Tracks that are already downloaded
-     * are removed from the playback cache immediately; the worker removes the
-     * cache of the others after a successful download.
+     * Queues one download per cached track, keeping only the highest cached
+     * quality of each track. [decision] resolves existing-download conflicts.
+     * Tracks that are already downloaded are removed from the playback cache
+     * immediately; the worker removes the others after a successful download.
      */
-    suspend fun convertToDownloads(cached: Collection<CachedTrack>): Int = withContext(Dispatchers.IO) {
-        var queued = 0
-        cached.distinctBy { it.track.id }.forEach { entry ->
-            val result = downloads.enqueue(entry.track, entry.qualityKbps.takeIf { it > 0 })
-            if (result.isSuccess) queued++
+    suspend fun convertToDownloads(
+        cached: Collection<CachedTrack>,
+        decision: DownloadQualityDecision = DownloadQualityDecision.COEXIST,
+    ): DownloadQueueOutcome = withContext(Dispatchers.IO) {
+        val entries = cached
+            .groupBy { it.track.id }
+            .values
+            .mapNotNull { versions -> versions.maxByOrNull { it.qualityKbps } }
+        val items = entries.map { entry ->
+            DownloadRequestItem(entry.track, QualityTiers.normalize(entry.qualityKbps))
+        }
+        val outcome = downloads.enqueueAll(items = items, decision = decision)
+        entries.forEach { entry ->
             if (downloads.hasCompleted(entry.track.id)) removeTrack(entry.track.id)
         }
-        queued
+        outcome
     }
 
     private fun toCachedTrack(entity: CachedTrackEntity): CachedTrack? {

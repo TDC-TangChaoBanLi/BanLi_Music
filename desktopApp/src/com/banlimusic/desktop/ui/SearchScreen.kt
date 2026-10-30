@@ -71,6 +71,7 @@ fun DesktopSearchScreen(state: DesktopAppState) {
             preferredSources = emptyMap(),
             categories = folderCategories,
             defaultCategory = settings.defaultFavoriteCategory,
+            downloadQualityKbps = settings.downloadQualityKbps,
             supportsSourcePicker = false,
             immediateDragSelection = true,
         ),

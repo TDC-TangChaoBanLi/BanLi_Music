@@ -7,10 +7,12 @@ import android.content.Context
 import android.content.res.Configuration
 import android.os.SystemClock
 import androidx.core.content.edit
+import androidx.core.graphics.ColorUtils
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.banlimusic.app.MusicApplication
+import com.banlimusic.app.core.datastore.AppSettings
 import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.player.TrackMediaItems
 import kotlinx.coroutines.sync.Mutex
@@ -26,6 +28,8 @@ data class WidgetState(
     val positionMs: Long,
     val durationMs: Long,
     val dark: Boolean,
+    val backgroundColor: Int?,
+    val opacityPercent: Int,
 )
 
 /**
@@ -45,6 +49,8 @@ object PlayerWidgetUpdater {
     const val KEY_POSITION_AT = "position_at_elapsed"
     const val KEY_DURATION_MS = "duration_ms"
     const val KEY_WIDGET_THEME = "widget_theme"
+    const val KEY_WIDGET_BG_COLOR = "widget_background_color"
+    const val KEY_WIDGET_BG_OPACITY = "widget_background_opacity"
 
     private val renderMutex = Mutex()
 
@@ -53,15 +59,24 @@ object PlayerWidgetUpdater {
         val theme = prefs.getString(KEY_WIDGET_THEME, null)
             ?.let { runCatching { WidgetTheme.valueOf(it) }.getOrNull() }
             ?: WidgetTheme.SYSTEM
-        val dark = when (theme) {
+        val themeDark = when (theme) {
             WidgetTheme.BLACK -> true
             WidgetTheme.WHITE -> false
-            WidgetTheme.SYSTEM -> {
+            WidgetTheme.SYSTEM, WidgetTheme.CUSTOM -> {
                 val mode = context.resources.configuration.uiMode and
                     Configuration.UI_MODE_NIGHT_MASK
                 mode == Configuration.UI_MODE_NIGHT_YES
             }
         }
+        // The stored colour is only meaningful for the custom theme; switching
+        // back to a preset theme must ignore a previously chosen colour.
+        val storedColor = prefs.getInt(KEY_WIDGET_BG_COLOR, 0).takeIf { it != 0 }
+        val backgroundColor = if (theme == WidgetTheme.CUSTOM) storedColor else null
+        val opacityPercent = prefs.getInt(KEY_WIDGET_BG_OPACITY, 80).coerceIn(20, 100)
+        val baseColor = backgroundColor
+            ?: if (themeDark) 0xFF111111.toInt() else 0xFFF7F7F7.toInt()
+        // A custom light colour needs dark glyphs even when the app is in dark mode.
+        val dark = ColorUtils.calculateLuminance(baseColor) < 0.5
         val isPlaying = prefs.getBoolean(KEY_IS_PLAYING, false)
         val duration = prefs.getLong(KEY_DURATION_MS, 0L)
         val sampledPosition = prefs.getLong(KEY_POSITION_MS, 0L)
@@ -84,6 +99,8 @@ object PlayerWidgetUpdater {
             positionMs = position,
             durationMs = duration,
             dark = dark,
+            backgroundColor = backgroundColor,
+            opacityPercent = opacityPercent,
         )
     }
 
@@ -121,9 +138,20 @@ object PlayerWidgetUpdater {
         render(context, full = true)
     }
 
-    suspend fun setTheme(context: Context, theme: WidgetTheme) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
-            putString(KEY_WIDGET_THEME, theme.name)
+    /** Applies persisted widget appearance and redraws only when it changed. */
+    suspend fun applySettings(context: Context, settings: AppSettings) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val themeChanged = prefs.getString(KEY_WIDGET_THEME, WidgetTheme.SYSTEM.name) !=
+            settings.widgetTheme.name
+        val colorChanged = prefs.getInt(KEY_WIDGET_BG_COLOR, 0) !=
+            (settings.widgetBackgroundColor ?: 0)
+        val opacityChanged = prefs.getInt(KEY_WIDGET_BG_OPACITY, 80) !=
+            settings.widgetBackgroundOpacity
+        if (!themeChanged && !colorChanged && !opacityChanged) return
+        prefs.edit {
+            putString(KEY_WIDGET_THEME, settings.widgetTheme.name)
+            putInt(KEY_WIDGET_BG_COLOR, settings.widgetBackgroundColor ?: 0)
+            putInt(KEY_WIDGET_BG_OPACITY, settings.widgetBackgroundOpacity)
         }
         render(context, full = true)
     }

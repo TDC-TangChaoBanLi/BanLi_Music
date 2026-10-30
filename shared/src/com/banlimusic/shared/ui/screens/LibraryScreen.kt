@@ -106,6 +106,8 @@ data class LibraryUiState(
     val downloadedBytes: Long = 0L,
     val categories: List<String> = emptyList(),
     val defaultCategory: String = DEFAULT_FAVORITE_CATEGORY,
+    /** Preselected quality for the batch download menu. */
+    val downloadQualityKbps: Int = 128,
     val favoriteFolders: Map<String, Set<String>> = emptyMap(),
     val favoriteIds: Set<String> = emptySet(),
     val downloadedIds: Set<String> = emptySet(),
@@ -622,6 +624,7 @@ private fun LibrarySearchContent(
         selectedIds = selection.selectedIds,
         tracks = results,
         defaultCategory = defaultCategory,
+        defaultQualityKbps = state.downloadQualityKbps,
         downloadQualities = actions::downloadQualities,
     )
     val selectedTracks = results.filter { it.id in selection.selectedIds }
@@ -821,6 +824,7 @@ private fun FavoritesTabContent(
         selectedIds = selection.selectedIds,
         tracks = tracks,
         defaultCategory = defaultCategory,
+        defaultQualityKbps = state.downloadQualityKbps,
         downloadQualities = actions::downloadQualities,
     )
     val selectedTracks = tracks.filter { it.id in selection.selectedIds }
@@ -947,6 +951,7 @@ private fun HistoryTabContent(
         selectedIds = selection.selectedIds,
         tracks = tracks,
         defaultCategory = defaultCategory,
+        defaultQualityKbps = state.downloadQualityKbps,
         downloadQualities = actions::downloadQualities,
     )
     val selectedTracks = tracks.filter { it.id in selection.selectedIds }
@@ -1075,6 +1080,7 @@ private fun LocalTabContent(
         selectedIds = selection.selectedIds,
         tracks = tracks,
         defaultCategory = defaultCategory,
+        defaultQualityKbps = state.downloadQualityKbps,
         downloadQualities = actions::downloadQualities,
     )
     val selectedTracks = tracks.filter { it.id in selection.selectedIds }
@@ -1184,6 +1190,7 @@ private fun LocalTabContent(
             showFavoriteState = false,
             onToggleFavorite = null,
             downloaded = track.id in state.downloadedIds,
+            showDownloadBadge = false,
             categoryLabel = state.favoriteFolders[track.id]?.joinToString(" · "),
             preferredProviderId = state.preferredSources[track.id],
             onSourceClick = if (state.supportsSourcePicker) {
@@ -1258,6 +1265,7 @@ private fun LibraryRow(
     onSourceClick: (() -> Unit)?,
     selected: Boolean?,
     showFavoriteState: Boolean = false,
+    showDownloadBadge: Boolean = true,
     infoAction: (() -> Unit)? = null,
 ) {
     BanLiTrackListRow(
@@ -1269,6 +1277,7 @@ private fun LibraryRow(
         showFavoriteState = showFavoriteState,
         onToggleFavorite = onToggleFavorite,
         downloaded = downloaded,
+        showDownloadBadge = showDownloadBadge,
         categoryLabel = categoryLabel,
         preferredProviderId = preferredProviderId,
         onSourceClick = onSourceClick,

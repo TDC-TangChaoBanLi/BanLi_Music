@@ -127,6 +127,7 @@ fun DesktopLibraryScreen(state: DesktopAppState) {
             downloadedBytes = completed.sumOf { it.totalBytes },
             categories = categories,
             defaultCategory = settings.defaultFavoriteCategory,
+            downloadQualityKbps = settings.downloadQualityKbps,
             favoriteFolders = folders,
             favoriteIds = favorites.mapTo(mutableSetOf()) { it.id },
             downloadedIds = completed.mapTo(mutableSetOf()) { it.track.id },

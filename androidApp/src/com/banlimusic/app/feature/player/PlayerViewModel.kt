@@ -10,9 +10,9 @@ import com.banlimusic.app.core.datastore.AppSettings
 import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.model.Lyrics
 import com.banlimusic.app.core.model.Track
-import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.MusicRepository
+import com.banlimusic.app.domain.download.DownloadRequestManager
 import com.banlimusic.app.player.PlaybackController
 import com.banlimusic.app.player.PlaybackUiState
 import kotlinx.coroutines.CancellationException
@@ -38,7 +38,7 @@ class PlayerViewModel(
     private val playback: PlaybackController,
     private val library: LibraryRepository,
     private val music: MusicRepository,
-    private val downloads: DownloadRepository,
+    private val downloadRequests: DownloadRequestManager,
     private val settings: SettingsRepository,
 ) : ViewModel() {
 
@@ -163,11 +163,8 @@ class PlayerViewModel(
 
     fun downloadCurrent(qualityKbps: Int? = null) {
         val track = playback.state.value.currentTrack ?: return
-        viewModelScope.launch {
-            _message.value = downloads.enqueue(track, qualityKbps = qualityKbps).fold(
-                onSuccess = { "已加入下载队列" },
-                onFailure = { it.userMessage() },
-            )
+        downloadRequests.download(listOf(track), qualityKbps) { outcome ->
+            _message.value = outcome.summary()
         }
     }
 

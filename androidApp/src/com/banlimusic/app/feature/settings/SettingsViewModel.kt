@@ -16,9 +16,11 @@ import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.app.core.datastore.ThemeMode
 import com.banlimusic.app.core.datastore.WidgetTheme
 import com.banlimusic.app.core.limiter.RateLimitStatus
+import com.banlimusic.app.core.model.DownloadRequestItem
 import com.banlimusic.app.core.model.ProviderInfo
 import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.MusicRepository
+import com.banlimusic.app.domain.download.DownloadRequestManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -33,6 +35,7 @@ class SettingsViewModel(
     private val music: MusicRepository,
     private val library: LibraryRepository,
     private val cacheRepository: CacheRepository,
+    private val downloadRequests: DownloadRequestManager,
 ) : ViewModel() {
 
     val appSettings: StateFlow<AppSettings> = settings.settings
@@ -167,6 +170,12 @@ class SettingsViewModel(
     fun setWidgetTheme(theme: WidgetTheme) =
         viewModelScope.launch { settings.setWidgetTheme(theme) }
 
+    fun setWidgetBackgroundColor(color: Int?) =
+        viewModelScope.launch { settings.setWidgetBackgroundColor(color) }
+
+    fun setWidgetBackgroundOpacity(opacity: Int) =
+        viewModelScope.launch { settings.setWidgetBackgroundOpacity(opacity) }
+
     fun setHighRefreshRateLists(enabled: Boolean) =
         viewModelScope.launch { settings.setHighRefreshRateLists(enabled) }
 
@@ -238,11 +247,20 @@ class SettingsViewModel(
     }
 
     fun convertCachedToDownloads(entries: Collection<CachedTrack>) {
-        viewModelScope.launch {
-            val count = runCatching { cacheRepository.convertToDownloads(entries) }
-                .getOrDefault(0)
-            _message.value = if (count > 0) "已加入 $count 首下载" else "没有可转换的缓存歌曲"
+        if (entries.isEmpty()) {
+            _message.value = "没有可转换的缓存歌曲"
+            return
+        }
+        val items = entries
+            .groupBy { it.track.id }
+            .values
+            .mapNotNull { versions -> versions.maxByOrNull { it.qualityKbps } }
+            .map { entry -> DownloadRequestItem(entry.track, entry.qualityKbps) }
+        downloadRequests.request(items, onOutcome = { outcome ->
+            _message.value = outcome.summary()
             refreshCacheUsage()
+        }) { decision ->
+            cacheRepository.convertToDownloads(entries, decision)
         }
     }
 }

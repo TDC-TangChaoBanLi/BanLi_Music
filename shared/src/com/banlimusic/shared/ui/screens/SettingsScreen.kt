@@ -110,8 +110,6 @@ import com.banlimusic.app.core.cache.CacheUsage
 import com.banlimusic.app.core.cache.CachedTrack
 import com.banlimusic.app.core.datastore.AppSettings
 import com.banlimusic.app.core.datastore.BOTTOM_NAV_OPTIONS
-import com.banlimusic.app.core.datastore.MAX_CACHE_MAX_BYTES
-import com.banlimusic.app.core.datastore.MIN_CACHE_MAX_BYTES
 import com.banlimusic.app.core.datastore.SUPPORTED_SOURCES
 import com.banlimusic.app.core.datastore.TabletMiniPlayerPosition
 import com.banlimusic.app.core.datastore.TabletNavPosition
@@ -145,6 +143,7 @@ import com.banlimusic.shared.ui.components.formatBytes
 import com.banlimusic.shared.ui.components.qualityShortLabel
 import com.banlimusic.shared.ui.theme.BANLI_DEFAULT_SEED
 import org.jetbrains.compose.resources.painterResource
+import kotlin.math.roundToInt
 
 private const val MIB = 1024L * 1024L
 
@@ -210,6 +209,8 @@ interface SettingsActions {
     fun setTabletNavPosition(position: TabletNavPosition) {}
     fun setTabletMiniPlayerPosition(position: TabletMiniPlayerPosition) {}
     fun setWidgetTheme(theme: WidgetTheme) {}
+    fun setWidgetBackgroundColor(color: Int?) {}
+    fun setWidgetBackgroundOpacity(opacity: Int) {}
     fun setDesktopFloatingLyrics(enabled: Boolean) {}
 
     fun setAllowMobileNetwork(enabled: Boolean) {}
@@ -316,6 +317,7 @@ private fun widgetThemeLabel(theme: WidgetTheme): String = when (theme) {
     WidgetTheme.SYSTEM -> "跟随系统"
     WidgetTheme.BLACK -> "深色"
     WidgetTheme.WHITE -> "浅色"
+    WidgetTheme.CUSTOM -> "自定义"
 }
 
 private fun rateStatusText(status: RateLimitStatus?): String = when {
@@ -626,9 +628,28 @@ private fun AppearanceSettings(state: SettingsUiState, actions: SettingsActions)
                         )
                     }
                 }
+                HorizontalDivider()
+                BanLiSettingsSlider(
+                    icon = Icons.Rounded.ColorLens,
+                    title = "透明度",
+                    valueText = "${settings.widgetBackgroundOpacity}%",
+                    value = settings.widgetBackgroundOpacity.toFloat(),
+                    valueRange = 20f..100f,
+                    steps = 7,
+                    onValueChangeFinished = {
+                        actions.setWidgetBackgroundOpacity(it.roundToInt())
+                    },
+                )
+                if (settings.widgetTheme == WidgetTheme.CUSTOM) {
+                    WidgetCustomColorSliders(
+                        current = settings.widgetBackgroundColor,
+                        fallback = MaterialTheme.colorScheme.surfaceContainerHigh.toArgb(),
+                        onPick = actions::setWidgetBackgroundColor,
+                    )
+                }
                 Text(
                     if (state.widgetSupported) {
-                        "3×1 显示歌名、歌手、播放控件与底部进度条；4×1 额外显示封面与收藏按钮。"
+                        "3×1 显示歌名、歌手、播放控件与底部进度条；4×1 额外显示封面与收藏按钮。自定义颜色会按亮度自动切换文字图标对比色。"
                     } else {
                         "当前平台不提供系统桌面小组件。"
                     },
@@ -638,6 +659,33 @@ private fun AppearanceSettings(state: SettingsUiState, actions: SettingsActions)
             }
         }
     }
+}
+
+@Composable
+private fun WidgetCustomColorSliders(
+    current: Int?,
+    fallback: Int,
+    onPick: (Int?) -> Unit,
+) {
+    val seedHsl = remember(current, fallback) { hslOf(Color(current ?: fallback)) }
+    var hue by remember(current, fallback) { mutableFloatStateOf(seedHsl[0]) }
+    var saturation by remember(current, fallback) { mutableFloatStateOf(seedHsl[1]) }
+    val preview = Color.hsl(hue, saturation.coerceIn(0.15f, 1f), 0.62f)
+
+    Text("色相", style = MaterialTheme.typography.labelMedium)
+    Slider(
+        value = hue,
+        onValueChange = { hue = it },
+        valueRange = 0f..360f,
+        onValueChangeFinished = { onPick(preview.toArgb()) },
+    )
+    Text("饱和度", style = MaterialTheme.typography.labelMedium)
+    Slider(
+        value = saturation,
+        onValueChange = { saturation = it },
+        valueRange = 0.15f..1f,
+        onValueChangeFinished = { onPick(preview.toArgb()) },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -952,9 +1000,6 @@ private fun DownloadCacheSettings(
     var cacheMbText by remember(settings.cacheMaxBytes) {
         mutableStateOf((settings.cacheMaxBytes / MIB).toString())
     }
-    var cacheMbValue by remember(settings.cacheMaxBytes) {
-        mutableFloatStateOf(settings.cacheMaxBytes.toFloat() / MIB)
-    }
     var pendingClear by remember { mutableStateOf<CacheClearTarget?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -1040,30 +1085,13 @@ private fun DownloadCacheSettings(
                 TextButton(
                     onClick = {
                         val mb = cacheMbText.toLongOrNull() ?: return@TextButton
-                        val bytes = (mb * MIB).coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES)
-                        cacheMbValue = bytes.toFloat() / MIB
+                        val safeMb = mb.coerceIn(0L, Long.MAX_VALUE / MIB)
+                        val bytes = safeMb * MIB
                         cacheMbText = (bytes / MIB).toString()
                         actions.setCacheMaxBytes(bytes)
                     },
                 ) { Text("应用") }
             }
-            Slider(
-                value = cacheMbValue.coerceIn(
-                    MIN_CACHE_MAX_BYTES.toFloat() / MIB,
-                    MAX_CACHE_MAX_BYTES.toFloat() / MIB,
-                ),
-                onValueChange = {
-                    cacheMbValue = it
-                    cacheMbText = it.toLong().toString()
-                },
-                valueRange = 50f..2048f,
-                steps = 38,
-                onValueChangeFinished = {
-                    val bytes = (cacheMbValue.toLong() * MIB)
-                        .coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES)
-                    actions.setCacheMaxBytes(bytes)
-                },
-            )
             BanLiSettingsValueRow(
                 icon = Icons.Rounded.MusicNote,
                 title = "歌曲缓存",

@@ -17,6 +17,7 @@ import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.LocalMusicRepository
 import com.banlimusic.app.data.repository.MusicRepository
+import com.banlimusic.app.domain.download.DownloadRequestManager
 import com.banlimusic.app.domain.download.DownloadStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +36,7 @@ class LibraryViewModel(
     private val library: LibraryRepository,
     private val localMusic: LocalMusicRepository,
     private val downloads: DownloadRepository,
+    private val downloadRequests: DownloadRequestManager,
     private val music: MusicRepository,
     private val settings: SettingsRepository,
     private val sourcePreferenceStore: SourcePreferenceStore,
@@ -92,6 +94,11 @@ class LibraryViewModel(
         .map { tasks ->
             tasks
                 .filter { it.status == DownloadStatus.COMPLETED && !it.filePath.isNullOrBlank() }
+                // Coexisting qualities are files on disk, but the local library
+                // shows one row per song: the highest downloaded quality.
+                .groupBy { it.track.id }
+                .values
+                .mapNotNull { versions -> versions.maxByOrNull { it.qualityKbps } }
                 .map { task ->
                     val uri = task.filePath.orEmpty()
                     // Keep the original provider sources so artwork and lyrics can still
@@ -131,6 +138,11 @@ class LibraryViewModel(
     val defaultCategory: StateFlow<String> = settings.settings
         .map { it.defaultFavoriteCategory }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "默认收藏")
+
+    /** Quality preselected by the batch selection download menu. */
+    val downloadQualityKbps: StateFlow<Int> = settings.settings
+        .map { it.downloadQualityKbps }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 128)
 
     private val _selectedIds = MutableStateFlow<Set<String>>(emptySet())
     val selectedIds: StateFlow<Set<String>> = _selectedIds.asStateFlow()
@@ -323,9 +335,8 @@ class LibraryViewModel(
 
     fun downloadSelected(tracks: List<Track>, qualityKbps: Int? = null) {
         if (tracks.isEmpty()) return
-        viewModelScope.launch {
-            val queued = downloads.enqueueAll(tracks, qualityKbps = qualityKbps)
-            _message.value = "已加入下载队列：$queued 首"
+        downloadRequests.download(tracks, qualityKbps) { outcome ->
+            _message.value = outcome.summary()
         }
     }
 

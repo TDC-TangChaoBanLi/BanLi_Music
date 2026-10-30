@@ -1,3 +1,6 @@
+/**
+ * 文件作用：维护桌面界面状态、搜索、收藏、播放与下载交互。
+ */
 package com.banlimusic.desktop.ui
 
 import androidx.compose.material.icons.Icons
@@ -10,7 +13,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.banlimusic.app.core.cache.CachedTrack
 import com.banlimusic.app.core.common.userMessage
+import com.banlimusic.app.core.model.DownloadQueueOutcome
+import com.banlimusic.app.core.model.DownloadQualityConflict
+import com.banlimusic.app.core.model.DownloadQualityDecision
+import com.banlimusic.app.core.model.DownloadRequestItem
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.desktop.DesktopContainer
 import kotlinx.coroutines.CancellationException
@@ -70,8 +79,11 @@ class DesktopAppState(
         private set
     var search by mutableStateOf(DesktopSearchState())
         private set
+    var downloadConflicts by mutableStateOf<List<DownloadQualityConflict>>(emptyList())
+        private set
 
     private var searchJob: Job? = null
+    private var pendingDownload: (suspend (DownloadQualityDecision) -> DownloadQueueOutcome)? = null
 
     fun selectTab(next: DesktopTab) {
         tab = next
@@ -162,7 +174,7 @@ class DesktopAppState(
     }
 
     fun download(track: Track, qualityKbps: Int = settings.value.downloadQualityKbps) {
-        container.downloads.download(track, qualityKbps)
+        requestDownloads(listOf(track), qualityKbps)
     }
 
     /** Imports a portable download manifest and queues missing songs. */
@@ -174,13 +186,14 @@ class DesktopAppState(
                     com.banlimusic.app.core.model.DownloadManifest.serializer(),
                     text,
                 )
-                manifest.entries.forEach { entry ->
-                    container.downloads.download(
+                val items = manifest.entries.map { entry ->
+                    DownloadRequestItem(
                         entry.track,
                         entry.qualityKbps.takeIf { it > 0 }
                             ?: settings.value.downloadQualityKbps,
                     )
                 }
+                container.downloads.enqueue(items, DownloadQualityDecision.COEXIST)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
@@ -190,7 +203,82 @@ class DesktopAppState(
     }
 
     fun downloadTracks(tracks: Collection<Track>, qualityKbps: Int) {
-        tracks.forEach { container.downloads.download(it, qualityKbps) }
+        requestDownloads(tracks, qualityKbps)
+    }
+
+    fun resolveDownloadConflict(decision: DownloadQualityDecision) {
+        val executor = pendingDownload ?: return
+        pendingDownload = null
+        downloadConflicts = emptyList()
+        scope.launch {
+            runCatching { executor(decision) }
+        }
+    }
+
+    /** Converts cached tracks, asking once when downloads already exist. */
+    fun convertCachedToDownloads(entries: Collection<CachedTrack>) {
+        val selected = entries
+            .groupBy { it.track.id }
+            .values
+            .mapNotNull { versions -> versions.maxByOrNull { it.qualityKbps } }
+        if (selected.isEmpty()) return
+        val items = selected.map { entry ->
+            DownloadRequestItem(
+                track = entry.track,
+                qualityKbps = QualityTiers.normalize(entry.qualityKbps),
+            )
+        }
+        val executor: suspend (DownloadQualityDecision) -> DownloadQueueOutcome = { decision ->
+            var queued = 0
+            var skipped = 0
+            var failed = 0
+            selected.forEach { entry ->
+                val file = container.playbackCache.fileFor(entry.cacheKey)
+                if (file == null) {
+                    failed++
+                } else if (
+                    container.downloads.adoptCached(
+                        track = entry.track,
+                        source = file,
+                        qualityKbps = entry.qualityKbps,
+                        decision = decision,
+                    )
+                ) {
+                    queued++
+                } else {
+                    skipped++
+                }
+            }
+            DownloadQueueOutcome(queued = queued, skipped = skipped, failed = failed)
+        }
+        scope.launch {
+            val conflicts = runCatching { container.downloads.findConflicts(items) }
+                .getOrDefault(emptyList())
+            if (conflicts.isEmpty()) {
+                runCatching { executor(DownloadQualityDecision.COEXIST) }
+            } else {
+                pendingDownload = executor
+                downloadConflicts = conflicts
+            }
+        }
+    }
+
+    private fun requestDownloads(tracks: Collection<Track>, qualityKbps: Int) {
+        val distinct = tracks.distinctBy { it.id }
+        if (distinct.isEmpty()) return
+        val items = distinct.map { DownloadRequestItem(it, qualityKbps) }
+        scope.launch {
+            val conflicts = runCatching { container.downloads.findConflicts(items) }
+                .getOrDefault(emptyList())
+            if (conflicts.isEmpty()) {
+                runCatching {
+                    container.downloads.enqueue(items, DownloadQualityDecision.COEXIST)
+                }
+            } else {
+                pendingDownload = { decision -> container.downloads.enqueue(items, decision) }
+                downloadConflicts = conflicts
+            }
+        }
     }
 
     fun addTracksToCategory(tracks: Collection<Track>, category: String) {
@@ -357,6 +445,8 @@ class DesktopAppState(
         .firstNotNullOfOrNull { source -> source.localUri }
         ?.let { uri -> runCatching { File(URI(uri)) }.getOrNull() }
         ?.takeIf { it.isFile }
+        // Downloaded qualities coexist; playback picks the highest one.
+        ?: container.downloads.completedFile(track.id)
 
     private fun recordPlay(track: Track) {
         scope.launch {

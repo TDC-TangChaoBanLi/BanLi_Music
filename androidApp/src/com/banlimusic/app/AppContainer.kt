@@ -38,10 +38,14 @@ import com.banlimusic.app.data.source.gd.GdMusicProvider
 import com.banlimusic.app.data.sync.OneDriveAuthManager
 import com.banlimusic.app.data.sync.OneDriveClient
 import com.banlimusic.app.data.sync.OneDriveSyncRepository
+import com.banlimusic.app.domain.download.DownloadRequestManager
 import com.banlimusic.app.domain.playback.StreamResolver
 import com.banlimusic.app.domain.search.TrackMerger
 import com.banlimusic.app.domain.sync.SyncScheduler
 import com.banlimusic.app.player.PlaybackController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -51,6 +55,8 @@ import java.io.File
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 class AppContainer(private val context: Context) {
+
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val json: Json = Json {
         ignoreUnknownKeys = true
@@ -153,6 +159,11 @@ class AppContainer(private val context: Context) {
             settings = settingsRepository,
             manifest = downloadManifestRepository,
         )
+    }
+
+    /** Shared entry point for download conflict prompts and batch policies. */
+    val downloadRequests: DownloadRequestManager by lazy {
+        DownloadRequestManager(downloadRepository, appScope)
     }
 
     /** ExoPlayer writes streamed audio here so downloads can reuse it. */

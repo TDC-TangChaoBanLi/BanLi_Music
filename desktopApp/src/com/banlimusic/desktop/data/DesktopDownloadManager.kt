@@ -1,8 +1,17 @@
+/**
+ * 文件作用：持久化桌面下载任务，并执行暂停、重试、缓存转存与音质冲突策略。
+ */
 package com.banlimusic.desktop.data
 
 import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.common.TextNormalizer
 import com.banlimusic.app.core.common.userMessage
+import com.banlimusic.app.core.model.DownloadQueueOutcome
+import com.banlimusic.app.core.model.DownloadQualityConflict
+import com.banlimusic.app.core.model.DownloadQualityDecision
+import com.banlimusic.app.core.model.DownloadQualityPolicy
+import com.banlimusic.app.core.model.DownloadRequestItem
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.network.JsonHttpClient
 import com.banlimusic.desktop.DesktopPaths
@@ -87,21 +96,75 @@ class DesktopDownloadManager(
         load()
     }
 
-    fun download(track: Track, qualityKbps: Int = settings.current().downloadQualityKbps) {
-        if (_tasks.value.any { it.id == track.id && it.isActive }) return
-        if (_tasks.value.any {
-                it.id == track.id &&
-                    it.status == DesktopDownloadStatus.COMPLETED &&
-                    it.file?.isFile == true
+    /** Completed versions whose quality differs from the requested quality. */
+    suspend fun findConflicts(
+        items: Collection<DownloadRequestItem>,
+    ): List<DownloadQualityConflict> = withContext(Dispatchers.Default) {
+        items.distinctBy { it.track.id }.mapNotNull { item ->
+            val quality = normalizeQuality(item.qualityKbps)
+            val qualities = completedVersions(item.track.id).map { it.qualityKbps }.distinct().sorted()
+            if (qualities.isNotEmpty() && quality !in qualities) {
+                DownloadQualityConflict(
+                    track = item.track,
+                    existingQualities = qualities,
+                    requestedQualityKbps = quality,
+                )
+            } else {
+                null
             }
-        ) {
-            return
         }
-        val quality = qualityKbps.coerceIn(128, 320)
+    }
+
+    /** Applies one batch decision and returns the same outcome shape as Android. */
+    suspend fun enqueue(
+        items: Collection<DownloadRequestItem>,
+        decision: DownloadQualityDecision = DownloadQualityDecision.COEXIST,
+    ): DownloadQueueOutcome = withContext(Dispatchers.Default) {
+        var queued = 0
+        var skipped = 0
+        var replaced = 0
+        var failed = 0
+        items.distinctBy { it.track.id }.forEach { item ->
+            try {
+                val quality = normalizeQuality(item.qualityKbps)
+                val existing = completedVersions(item.track.id)
+                val plan = DownloadQualityPolicy.plan(
+                    decision = decision,
+                    existingQualities = existing.map { it.qualityKbps },
+                    requestedQualityKbps = quality,
+                )
+                if (!plan.download) {
+                    skipped++
+                    return@forEach
+                }
+                if (plan.deleteExisting && existing.isNotEmpty()) {
+                    existing.forEach { remove(it.id, deleteFile = true) }
+                    replaced++
+                }
+                val created = enqueueNow(DownloadRequestItem(item.track, quality))
+                if (created) queued++ else skipped++
+            } catch (_: Throwable) {
+                failed++
+            }
+        }
+        DownloadQueueOutcome(
+            queued = queued,
+            skipped = skipped,
+            replaced = replaced,
+            failed = failed,
+        )
+    }
+
+    private fun enqueueNow(item: DownloadRequestItem): Boolean {
+        val quality = normalizeQuality(item.qualityKbps)
+        val id = taskId(item.track.id, quality)
+        if (_tasks.value.any { it.id == id && (it.isActive || it.status == DesktopDownloadStatus.COMPLETED) }) {
+            return false
+        }
         val now = System.currentTimeMillis()
         val task = DesktopDownloadTask(
-            id = track.id,
-            track = track,
+            id = id,
+            track = item.track,
             qualityKbps = quality,
             status = DesktopDownloadStatus.QUEUED,
             bytesDownloaded = 0L,
@@ -112,11 +175,35 @@ class DesktopDownloadManager(
             updatedAt = now,
         )
         _tasks.update { current ->
-            listOf(task) + current.filterNot { it.id == track.id }
+            listOf(task) + current.filterNot { it.id == id }
         }
         persist()
         start(task)
+        return true
     }
+
+    fun completedFile(trackId: String): File? = _tasks.value
+        .asSequence()
+        .filter {
+            it.track.id == trackId &&
+                it.status == DesktopDownloadStatus.COMPLETED &&
+                it.file?.isFile == true
+        }
+        .maxByOrNull { it.qualityKbps }
+        ?.file
+
+    private fun completedVersions(trackId: String): List<DesktopDownloadTask> =
+        _tasks.value.filter {
+            it.track.id == trackId &&
+                it.status == DesktopDownloadStatus.COMPLETED &&
+                it.file?.isFile == true
+        }
+
+    private fun normalizeQuality(qualityKbps: Int): Int =
+        QualityTiers.normalize(qualityKbps).coerceIn(128, 320)
+
+    private fun taskId(trackId: String, qualityKbps: Int): String =
+        "$trackId@$qualityKbps"
 
     fun cancel(id: String) {
         jobs.remove(id)?.cancel()
@@ -174,35 +261,51 @@ class DesktopDownloadManager(
     }
 
     /** Copies a completed playback-cache file into the download directory. */
-    suspend fun adoptCached(track: Track, source: File, qualityKbps: Int): Boolean =
-        withContext(Dispatchers.IO) {
-            if (!source.isFile || source.length() <= 0L) return@withContext false
-            val directory = downloadDirectory()
-            Files.createDirectories(directory)
-            val extension = source.extension.lowercase().takeIf { it in AUDIO_EXTENSIONS }
-                ?: "mp3"
-            val finalFile = directory.resolve("${fileName(track, track.id)}.$extension").toFile()
-            runCatching { source.copyTo(finalFile, overwrite = true) }.getOrElse {
-                return@withContext false
-            }
-            writeSidecars(track, finalFile)
-            val now = System.currentTimeMillis()
-            val task = DesktopDownloadTask(
-                id = track.id,
-                track = track,
-                qualityKbps = qualityKbps.coerceIn(128, 320),
-                status = DesktopDownloadStatus.COMPLETED,
-                bytesDownloaded = finalFile.length(),
-                totalBytes = finalFile.length(),
-                filePath = finalFile.absolutePath,
-                error = null,
-                createdAt = now,
-                updatedAt = now,
-            )
-            _tasks.update { list -> listOf(task) + list.filterNot { it.id == track.id } }
-            persist()
-            true
+    suspend fun adoptCached(
+        track: Track,
+        source: File,
+        qualityKbps: Int,
+        decision: DownloadQualityDecision = DownloadQualityDecision.COEXIST,
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!source.isFile || source.length() <= 0L) return@withContext false
+        val quality = normalizeQuality(qualityKbps)
+        val existing = completedVersions(track.id)
+        val plan = DownloadQualityPolicy.plan(
+            decision = decision,
+            existingQualities = existing.map { it.qualityKbps },
+            requestedQualityKbps = quality,
+        )
+        if (!plan.download) return@withContext false
+        if (plan.deleteExisting && existing.isNotEmpty()) {
+            existing.forEach { remove(it.id, deleteFile = true) }
         }
+        val id = taskId(track.id, quality)
+        val directory = downloadDirectory()
+        Files.createDirectories(directory)
+        val extension = source.extension.lowercase().takeIf { it in AUDIO_EXTENSIONS }
+            ?: "mp3"
+        val finalFile = directory.resolve("${fileName(track, id)}.$extension").toFile()
+        runCatching { source.copyTo(finalFile, overwrite = true) }.getOrElse {
+            return@withContext false
+        }
+        writeSidecars(track, finalFile)
+        val now = System.currentTimeMillis()
+        val task = DesktopDownloadTask(
+            id = id,
+            track = track,
+            qualityKbps = quality,
+            status = DesktopDownloadStatus.COMPLETED,
+            bytesDownloaded = finalFile.length(),
+            totalBytes = finalFile.length(),
+            filePath = finalFile.absolutePath,
+            error = null,
+            createdAt = now,
+            updatedAt = now,
+        )
+        _tasks.update { list -> listOf(task) + list.filterNot { it.id == id } }
+        persist()
+        true
+    }
 
     fun cancelAll() {
         jobs.keys.toList().forEach(::cancel)
@@ -414,7 +517,7 @@ class DesktopDownloadManager(
                 val interrupted = record.status == DesktopDownloadStatus.DOWNLOADING ||
                     record.status == DesktopDownloadStatus.QUEUED
                 DesktopDownloadTask(
-                    id = record.track.id,
+                    id = taskId(record.track.id, record.qualityKbps),
                     track = record.track,
                     qualityKbps = record.qualityKbps,
                     status = if (interrupted) DesktopDownloadStatus.FAILED

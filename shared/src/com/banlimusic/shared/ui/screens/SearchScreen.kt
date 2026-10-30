@@ -82,6 +82,8 @@ data class SearchUiState(
     val preferredSources: Map<String, String> = emptyMap(),
     val categories: List<String> = emptyList(),
     val defaultCategory: String = "默认收藏",
+    /** Preselected quality for the batch download menu. */
+    val downloadQualityKbps: Int = 128,
     /** False on platforms without a source picker. */
     val supportsSourcePicker: Boolean = true,
     /** Desktop uses mouse drag selection instead of long-press drag selection. */
@@ -128,6 +130,7 @@ fun BanLiSearchScreen(
         selectedIds = state.selectedIds,
         tracks = state.results,
         defaultCategory = state.defaultCategory,
+        defaultQualityKbps = state.downloadQualityKbps,
         downloadQualities = downloadQualities,
     )
     val selectedTracks = state.results.filter { it.id in state.selectedIds }

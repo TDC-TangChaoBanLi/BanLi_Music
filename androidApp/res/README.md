@@ -30,12 +30,12 @@
 - `ic_skip_next.xml` / `ic_skip_next_dark.xml`：小组件下一首按钮，分别用于深色和浅色背景。
 - `ic_skip_previous.xml` / `ic_skip_previous_dark.xml`：小组件上一首按钮，分别用于深色和浅色背景。
 - `widget_artwork_placeholder.xml`：小组件没有海报时的占位图形。
-- `widget_bg_dark.xml` / `widget_bg_light.xml`：小组件黑色/白色磨砂背景。
+- `widget_bg_dark.xml` / `widget_bg_light.xml`：小组件默认深/浅色背景，在动态背景位图生成失败时作为兜底。
 - `widget_progress.xml`：小组件底部播放进度条背景。
 
 ### layout/
 
-- `widget_player_small.xml`：3×1 桌面小组件布局，显示歌名、歌手、播放控件和进度条。
+- `widget_player_small.xml`：3×1 桌面小组件布局，显示歌名、歌手、播放控件和进度条；`widget_background` 图片层由 `WidgetRenderer` 绘制自定义颜色与透明度。
 - `widget_player_large.xml`：4×1 桌面小组件布局，在 3×1 基础上增加海报与收藏按钮。
 
 ### mipmap-anydpi-v26/

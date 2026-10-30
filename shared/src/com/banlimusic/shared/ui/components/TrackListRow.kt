@@ -49,6 +49,7 @@ fun BanLiTrackListRow(
     showFavoriteState: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
     downloaded: Boolean = false,
+    showDownloadBadge: Boolean = true,
     categoryLabel: String? = null,
     preferredProviderId: String? = null,
     onSourceClick: (() -> Unit)? = null,
@@ -76,6 +77,7 @@ fun BanLiTrackListRow(
             TrackSourceBadges(
                 track = track,
                 downloaded = downloaded,
+                showDownloadBadge = showDownloadBadge,
                 preferredProviderId = preferredProviderId,
                 onSourceClick = onSourceClick,
             )

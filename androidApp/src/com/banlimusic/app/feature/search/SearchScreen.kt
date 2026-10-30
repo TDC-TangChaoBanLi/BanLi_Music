@@ -41,6 +41,7 @@ fun SearchScreen(
     val enabledSources by viewModel.enabledSources.collectAsStateWithLifecycle()
     val favoriteCategories by viewModel.favoriteCategories.collectAsStateWithLifecycle()
     val defaultCategory by viewModel.defaultFavoriteCategory.collectAsStateWithLifecycle()
+    val downloadQualityKbps by viewModel.downloadQualityKbps.collectAsStateWithLifecycle()
     val downloadedIds by viewModel.downloadedIds.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val preferredSources by viewModel.preferredSources.collectAsStateWithLifecycle()
@@ -80,6 +81,7 @@ fun SearchScreen(
             preferredSources = preferredSources,
             categories = (favoriteCategories + defaultCategory).distinct(),
             defaultCategory = defaultCategory,
+            downloadQualityKbps = downloadQualityKbps,
         ),
         onQueryChange = viewModel::onQueryChange,
         onSubmit = viewModel::submit,

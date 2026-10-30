@@ -1,3 +1,6 @@
+/**
+ * 文件作用：桌面端应用入口，负责单实例检查、托盘常驻与主窗口生命周期。
+ */
 package com.banlimusic.desktop
 
 import androidx.compose.foundation.Image
@@ -65,6 +68,8 @@ import com.banlimusic.desktop.ui.DesktopSettingsScreen
 import com.banlimusic.desktop.ui.DesktopTab
 import com.banlimusic.shared.resources.Res
 import com.banlimusic.shared.resources.banli_logo
+import com.banlimusic.shared.ui.components.BanLiDownloadQualityDialog
+import com.banlimusic.shared.ui.components.downloadQualityPrompt
 import com.banlimusic.shared.ui.navigation.BanLiAppShell
 import com.banlimusic.shared.ui.navigation.BanLiBarPosition
 import com.banlimusic.shared.ui.navigation.BanLiDestination
@@ -73,6 +78,7 @@ import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.shared.ui.navigation.BanLiNavigationLayout
 import com.banlimusic.shared.ui.navigation.BanLiNavigationSide
 import java.awt.Dimension
+import java.awt.Frame
 import java.awt.SystemTray
 import javax.swing.SwingUtilities
 import org.jetbrains.compose.resources.painterResource
@@ -81,11 +87,25 @@ fun main() {
     // Let the JVM use the OS proxy settings; Microsoft endpoints are often
     // reachable only through the user's system proxy.
     System.setProperty("java.net.useSystemProxies", "true")
-    launchDesktop()
+    when (val instance = DesktopSingleInstance.acquire()) {
+        is DesktopSingleInstance.AcquireResult.Primary -> {
+            try {
+                launchDesktop(instance.instance)
+            } finally {
+                instance.instance.close()
+            }
+        }
+
+        is DesktopSingleInstance.AcquireResult.Secondary -> {
+            if (!DesktopSingleInstance.requestShow(instance.portFile)) {
+                System.err.println("BanLiMusic 已在运行，但无法唤出已有窗口。")
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
-private fun launchDesktop() = application {
+private fun launchDesktop(singleInstance: DesktopSingleInstance) = application {
     val container = remember { DesktopContainer() }
     DisposableEffect(container) {
         onDispose { container.close() }
@@ -99,6 +119,9 @@ private fun launchDesktop() = application {
         windowVisible = true
         SwingUtilities.invokeLater {
             windowRef?.apply {
+                if (extendedState and Frame.ICONIFIED != 0) {
+                    extendedState = extendedState and Frame.ICONIFIED.inv()
+                }
                 isVisible = true
                 toFront()
                 requestFocus()
@@ -108,6 +131,13 @@ private fun launchDesktop() = application {
 
     fun hideWindow() {
         if (traySupported) windowVisible = false else exitApplication()
+    }
+
+    // A second launch locks the same instance file, connects to this process and
+    // asks it to restore the window instead of starting another tray icon.
+    DisposableEffect(singleInstance) {
+        singleInstance.onShowRequest = { showWindow() }
+        onDispose { singleInstance.onShowRequest = null }
     }
 
     if (traySupported) {
@@ -349,4 +379,10 @@ private fun DesktopMain(container: DesktopContainer) {
             }
         },
     )
+    if (state.downloadConflicts.isNotEmpty()) {
+        BanLiDownloadQualityDialog(
+            prompt = downloadQualityPrompt(state.downloadConflicts),
+            onDecision = state::resolveDownloadConflict,
+        )
+    }
 }

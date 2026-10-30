@@ -1,3 +1,6 @@
+/**
+ * 文件作用：桌面下载页适配层，映射下载任务状态并提供清单导入动作。
+ */
 package com.banlimusic.desktop.ui
 
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,7 +27,11 @@ fun DesktopDownloadsScreen(state: DesktopAppState) {
     val settings by state.settings.collectAsState()
     val favoriteFolders by state.favoriteFolders.collectAsState()
     val completed = remember(tasks) {
-        tasks.filter { it.status == DesktopDownloadStatus.COMPLETED }
+        tasks
+            .filter { it.status == DesktopDownloadStatus.COMPLETED }
+            .groupBy { it.track.id }
+            .values
+            .mapNotNull { versions -> versions.maxByOrNull { it.qualityKbps } }
     }
     val actions = remember(state, tasks) {
         object : DownloadsActions {

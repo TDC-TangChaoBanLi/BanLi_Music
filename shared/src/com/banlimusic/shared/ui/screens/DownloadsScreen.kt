@@ -173,7 +173,15 @@ fun BanLiDownloadsScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    val completed = remember(state.items) { state.items.filter { it.isCompleted } }
+    val completed = remember(state.items) {
+        state.items
+            .filter { it.isCompleted }
+            // The downloaded tab shows one row per song. When two qualities
+            // coexist, only the highest quality is listed.
+            .groupBy { it.track.id }
+            .values
+            .mapNotNull { versions -> versions.maxByOrNull { it.qualityKbps } }
+    }
     val active = remember(state.items) { state.items.filterNot { it.isCompleted } }
     val normalizedQuery = remember(searchQuery) { TextNormalizer.normalize(searchQuery) }
     val visible = remember(completed, normalizedQuery) {
@@ -398,6 +406,7 @@ fun BanLiDownloadsScreen(
                             else actions.play(item)
                         },
                         selected = if (selection.mode) item.id in selection.selectedIds else null,
+                        showDownloadBadge = false,
                         categoryLabel = state.favoriteFolders[item.track.id]?.joinToString(" · "),
                         trailing = {
                             TrackQualitySizeLabel(

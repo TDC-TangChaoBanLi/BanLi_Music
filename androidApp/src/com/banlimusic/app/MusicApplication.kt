@@ -9,6 +9,7 @@ import com.banlimusic.app.widget.PlayerWidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 class MusicApplication : Application() {
@@ -26,7 +27,6 @@ class MusicApplication : Application() {
             runCatching {
                 val settings = container.settingsRepository.current()
                 container.cacheRepository.trimTo(settings.cacheMaxBytes)
-                PlayerWidgetUpdater.setTheme(this@MusicApplication, settings.widgetTheme)
                 container.syncScheduler.apply(settings.sync)
             }
             // Pick up files copied back into an app-readable download directory.
@@ -35,6 +35,12 @@ class MusicApplication : Application() {
                 container.downloadManifestRepository.syncFromTarget(target)
             }
             runCatching { container.oneDriveSyncRepository.maybeSyncOnStart() }
+        }
+        // Keep the widget background colour/opacity in sync with DataStore.
+        appScope.launch {
+            container.settingsRepository.settings.collect { settings ->
+                runCatching { PlayerWidgetUpdater.applySettings(this@MusicApplication, settings) }
+            }
         }
     }
 }

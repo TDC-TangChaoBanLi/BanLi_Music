@@ -146,6 +146,12 @@ fun SettingsScreen(
                 viewModel.setTabletMiniPlayerPosition(position)
             }
             override fun setWidgetTheme(theme: WidgetTheme) { viewModel.setWidgetTheme(theme) }
+            override fun setWidgetBackgroundColor(color: Int?) {
+                viewModel.setWidgetBackgroundColor(color)
+            }
+            override fun setWidgetBackgroundOpacity(opacity: Int) {
+                viewModel.setWidgetBackgroundOpacity(opacity)
+            }
             override fun setAllowMobileNetwork(enabled: Boolean) {
                 viewModel.setAllowMobileNetwork(enabled)
             }

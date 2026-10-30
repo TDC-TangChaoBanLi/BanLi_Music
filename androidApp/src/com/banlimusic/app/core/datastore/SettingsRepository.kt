@@ -59,6 +59,8 @@ class SettingsRepository(private val context: Context) {
         val favoriteCategoryOrder = stringPreferencesKey("favorite_category_order")
         val autoImportLocalMusic = booleanPreferencesKey("auto_import_local_music")
         val widgetTheme = stringPreferencesKey("widget_theme")
+        val widgetBackgroundColor = longPreferencesKey("widget_background_color")
+        val widgetBackgroundOpacity = intPreferencesKey("widget_background_opacity")
         val highRefreshRateLists = booleanPreferencesKey("high_refresh_rate_lists")
         val openPlayerOnTrackClick = booleanPreferencesKey("open_player_on_track_click")
 
@@ -134,7 +136,7 @@ class SettingsRepository(private val context: Context) {
                 requestListArtwork = preferences[Keys.requestListArtwork] ?: false,
                 autoLoadArtwork = preferences[Keys.autoLoadArtwork] ?: true,
                 cacheMaxBytes = (preferences[Keys.cacheMaxBytes] ?: DEFAULT_CACHE_MAX_BYTES)
-                    .coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES),
+                    .coerceAtLeast(0L),
                 bottomNavItems = navItems,
                 tabletNavPosition = preferences[Keys.tabletNavPosition]
                     ?.let { runCatching { TabletNavPosition.valueOf(it) }.getOrNull() }
@@ -153,6 +155,11 @@ class SettingsRepository(private val context: Context) {
                 widgetTheme = preferences[Keys.widgetTheme]
                     ?.let { runCatching { WidgetTheme.valueOf(it) }.getOrNull() }
                     ?: WidgetTheme.SYSTEM,
+                widgetBackgroundColor = preferences[Keys.widgetBackgroundColor]
+                    ?.takeIf { it != 0L }
+                    ?.toInt(),
+                widgetBackgroundOpacity = (preferences[Keys.widgetBackgroundOpacity] ?: 80)
+                    .coerceIn(20, 100),
                 highRefreshRateLists = preferences[Keys.highRefreshRateLists] ?: true,
                 openPlayerOnTrackClick = preferences[Keys.openPlayerOnTrackClick] ?: true,
                 defaultNavItem = sanitizeDefaultNavItem(preferences[Keys.defaultNavItem], navItems),
@@ -253,7 +260,7 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setCacheMaxBytes(bytes: Long) = context.settingsDataStore.edit {
-        it[Keys.cacheMaxBytes] = bytes.coerceIn(MIN_CACHE_MAX_BYTES, MAX_CACHE_MAX_BYTES)
+        it[Keys.cacheMaxBytes] = bytes.coerceAtLeast(0L)
     }
 
     suspend fun setBottomNavItems(items: List<String>) = context.settingsDataStore.edit {
@@ -306,6 +313,17 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setWidgetTheme(theme: WidgetTheme) = context.settingsDataStore.edit {
         it[Keys.widgetTheme] = theme.name
+    }
+
+    suspend fun setWidgetBackgroundColor(color: Int?) = context.settingsDataStore.edit { preferences ->
+        if (color == null) {
+            preferences.remove(Keys.widgetBackgroundColor)
+        } else {
+            preferences[Keys.widgetBackgroundColor] = color.toLong() and 0xFFFFFFFFL
+        }
+    }
+    suspend fun setWidgetBackgroundOpacity(opacity: Int) = context.settingsDataStore.edit {
+        it[Keys.widgetBackgroundOpacity] = opacity.coerceIn(20, 100)
     }
 
     suspend fun setHighRefreshRateLists(enabled: Boolean) = context.settingsDataStore.edit {

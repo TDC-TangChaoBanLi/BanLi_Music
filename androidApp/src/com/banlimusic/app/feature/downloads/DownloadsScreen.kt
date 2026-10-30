@@ -81,15 +81,21 @@ fun DownloadsScreen(
     }
 
     val completedTasks = remember(tasks) {
-        tasks.filter { it.status == DownloadStatus.COMPLETED }
+        tasks
+            .filter { it.status == DownloadStatus.COMPLETED }
+            // Coexisting qualities stay on disk, but the local list shows the
+            // highest-quality copy of each song.
+            .groupBy { it.track.id }
+            .values
+            .mapNotNull { versions -> versions.maxByOrNull { it.qualityKbps } }
+            .sortedByDescending { it.createdAt }
     }
-    val actions = remember(viewModel, tasks, onOpenPlayer) {
+    val actions = remember(viewModel, tasks, completedTasks, onOpenPlayer) {
         object : DownloadsActions {
             override fun play(item: DownloadItemUi) {
-                val list = tasks.filter { it.status == DownloadStatus.COMPLETED }
-                val index = list.indexOfFirst { it.id == item.id }
+                val index = completedTasks.indexOfFirst { it.track.id == item.track.id }
                 if (index >= 0) {
-                    viewModel.play(list, index)
+                    viewModel.play(completedTasks, index)
                     onOpenPlayer()
                 }
             }

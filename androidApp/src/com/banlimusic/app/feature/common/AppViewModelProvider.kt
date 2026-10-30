@@ -30,6 +30,7 @@ object AppViewModelProvider {
                 music = app().container.musicRepository,
                 library = app().container.libraryRepository,
                 downloads = app().container.downloadRepository,
+                downloadRequests = app().container.downloadRequests,
                 settings = app().container.settingsRepository,
                 sourcePreferences = app().container.sourcePreferenceStore,
             )
@@ -39,6 +40,7 @@ object AppViewModelProvider {
                 library = app().container.libraryRepository,
                 localMusic = app().container.localMusicRepository,
                 downloads = app().container.downloadRepository,
+                downloadRequests = app().container.downloadRequests,
                 music = app().container.musicRepository,
                 settings = app().container.settingsRepository,
                 sourcePreferenceStore = app().container.sourcePreferenceStore,
@@ -58,6 +60,7 @@ object AppViewModelProvider {
                 music = app().container.musicRepository,
                 library = app().container.libraryRepository,
                 cacheRepository = app().container.cacheRepository,
+                downloadRequests = app().container.downloadRequests,
             )
         }
         initializer {
@@ -74,7 +77,7 @@ object AppViewModelProvider {
                 playback = app().container.playbackController,
                 library = app().container.libraryRepository,
                 music = app().container.musicRepository,
-                downloads = app().container.downloadRepository,
+                downloadRequests = app().container.downloadRequests,
                 settings = app().container.settingsRepository,
             )
         }

@@ -1,3 +1,6 @@
+/**
+ * 文件作用：管理桌面播放音频缓存、LRU 索引与按音质读取缓存文件。
+ */
 package com.banlimusic.desktop.data
 
 import com.banlimusic.app.core.cache.CacheUsage
@@ -41,19 +44,39 @@ class DesktopPlaybackCache(
 
     /** Returns a completed cache file, updating its LRU timestamp. */
     suspend fun cachedFile(trackId: String, qualityKbps: Int): File? = withContext(Dispatchers.IO) {
-        val key = cacheKey(trackId, qualityKbps)
-        val entry = _entries.value.firstOrNull { it.cacheKey == key } ?: return@withContext null
+        cachedFileFor(_entries.value.firstOrNull {
+            it.cacheKey == cacheKey(trackId, qualityKbps)
+        })
+    }
+
+    /**
+     * Highest cached quality at or above [minQualityKbps]. A high-quality cache
+     * therefore wins over a lower playback preference.
+     */
+    suspend fun cachedFileAtLeast(trackId: String, minQualityKbps: Int): File? =
+        withContext(Dispatchers.IO) {
+            val candidates = _entries.value
+                .filter { it.track.id == trackId && it.qualityKbps >= minQualityKbps }
+                .sortedByDescending { it.qualityKbps }
+            candidates.firstNotNullOfOrNull { entry -> cachedFileFor(entry) }
+        }
+
+    private fun cachedFileFor(entry: CachedTrack?): File? {
+        if (entry == null) return null
+        val key = entry.cacheKey
         val file = File(directory, entry.fileExtension.let { "${keyFile(key)}.$it" })
         if (!file.isFile || file.length() <= 0L) {
-            remove(key)
-            return@withContext null
+            runCatching { file.delete() }
+            _entries.value = _entries.value.filterNot { it.cacheKey == key }
+            persist()
+            return null
         }
         val now = System.currentTimeMillis()
         _entries.value = _entries.value.map {
             if (it.cacheKey == key) it.copy(cachedBytes = file.length(), lastAccessAt = now) else it
         }
         persist()
-        file
+        return file
     }
 
     fun begin(

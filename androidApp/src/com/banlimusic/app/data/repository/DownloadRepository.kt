@@ -21,6 +21,12 @@ import com.banlimusic.app.core.database.dao.CacheDao
 import com.banlimusic.app.core.database.dao.DownloadDao
 import com.banlimusic.app.core.database.entity.DownloadTaskEntity
 import com.banlimusic.app.core.datastore.SettingsRepository
+import com.banlimusic.app.core.model.DownloadQueueOutcome
+import com.banlimusic.app.core.model.DownloadQualityConflict
+import com.banlimusic.app.core.model.DownloadQualityDecision
+import com.banlimusic.app.core.model.DownloadQualityPolicy
+import com.banlimusic.app.core.model.DownloadRequestItem
+import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.model.TrackAction
 import com.banlimusic.app.domain.download.DownloadStatus
@@ -53,7 +59,47 @@ class DownloadRepository(
     suspend fun hasCompleted(trackId: String): Boolean =
         dao.getCompletedForTrack(trackId).any { locationExists(it.filePath) }
 
+    /** Resolves the quality used by UI dialog copy and enqueue calls. */
+    suspend fun resolveRequestedQuality(qualityKbps: Int? = null): Int {
+        val current = settings.current()
+        val requested = qualityKbps
+            ?: current.downloadQualityKbps.takeIf { it > 0 }
+            ?: current.qualityKbps
+        return QualityTiers.normalize(requested)
+    }
+
+    /** Completed versions whose quality differs from the requested quality. */
+    suspend fun findConflicts(
+        items: Collection<DownloadRequestItem>,
+    ): List<DownloadQualityConflict> = items
+        .distinctBy { it.track.id }
+        .mapNotNull { item ->
+            val quality = QualityTiers.normalize(item.qualityKbps)
+            val qualities = qualitiesOf(completedEntities(item.track.id))
+            if (qualities.isNotEmpty() && quality !in qualities) {
+                DownloadQualityConflict(
+                    track = item.track,
+                    existingQualities = qualities,
+                    requestedQualityKbps = quality,
+                )
+            } else {
+                null
+            }
+        }
+
     suspend fun enqueue(
+        track: Track,
+        qualityKbps: Int? = null,
+        downloadLyrics: Boolean? = null,
+        downloadArtwork: Boolean? = null,
+    ): Result<Unit> = enqueueInternal(
+        track = track,
+        qualityKbps = qualityKbps,
+        downloadLyrics = downloadLyrics,
+        downloadArtwork = downloadArtwork,
+    )
+
+    private suspend fun enqueueInternal(
         track: Track,
         qualityKbps: Int? = null,
         downloadLyrics: Boolean? = null,
@@ -63,9 +109,11 @@ class DownloadRepository(
         val source = track.sources.firstOrNull { TrackAction.DOWNLOAD in it.availableActions }
             ?: track.sources.firstOrNull { TrackAction.STREAM in it.availableActions }
             ?: throw IllegalStateException("没有可下载的来源")
-        val quality = qualityKbps
-            ?: current.downloadQualityKbps.takeIf { it > 0 }
-            ?: current.qualityKbps
+        val quality = QualityTiers.normalize(
+            qualityKbps
+                ?: current.downloadQualityKbps.takeIf { it > 0 }
+                ?: current.qualityKbps,
+        )
         val lyrics = downloadLyrics ?: current.downloadLyrics
         val artwork = downloadArtwork ?: current.downloadArtwork
         val taskId = taskId(track.id, source.providerId, quality, lyrics, artwork)
@@ -77,34 +125,12 @@ class DownloadRepository(
             }
         }
 
-        // A finished copy of the same track exists (maybe at another quality).
-        // Reuse that file instead of downloading the audio a second time.
-        val reusable = dao.getCompletedForTrack(track.id)
-            .firstOrNull { it.id != taskId && locationExists(it.filePath) }
-        if (reusable != null) {
-            val now = System.currentTimeMillis()
-            dao.upsert(
-                DownloadTaskEntity(
-                    id = taskId,
-                    trackJson = json.encodeToString(Track.serializer(), track),
-                    title = track.title,
-                    artist = track.artistLine,
-                    providerId = source.providerId,
-                    providerTrackId = source.providerTrackId,
-                    status = DownloadStatus.COMPLETED.name,
-                    bytesDownloaded = reusable.bytesDownloaded,
-                    totalBytes = reusable.totalBytes,
-                    filePath = reusable.filePath,
-                    error = null,
-                    retryCount = 0,
-                    createdAt = now,
-                    updatedAt = now,
-                    trackId = track.id,
-                    qualityKbps = quality,
-                    downloadLyrics = lyrics,
-                    downloadArtwork = artwork,
-                ),
-            )
+        // A finished copy at the same quality already satisfies this request;
+        // other qualities are handled by the explicit conflict policy before
+        // reaching this point.
+        val sameQuality = dao.getCompletedForTrack(track.id)
+            .firstOrNull { it.qualityKbps == quality && locationExists(it.filePath) }
+        if (sameQuality != null) {
             clearCachedCopy(track.id)
             return@runCatching
         }
@@ -138,21 +164,73 @@ class DownloadRepository(
     /**
      * Queues multiple downloads through the same WorkManager pipeline. API calls
      * are still serialized by the shared rate limiter, so batch operations cannot
-     * exceed the configured GD Music request budget.
+     * exceed the configured GD Music request budget. [decision] is only applied
+     * to tracks that already have a completed version at another quality.
      */
+    suspend fun enqueueAll(
+        items: Collection<DownloadRequestItem>,
+        decision: DownloadQualityDecision = DownloadQualityDecision.COEXIST,
+        downloadLyrics: Boolean? = null,
+        downloadArtwork: Boolean? = null,
+    ): DownloadQueueOutcome {
+        var queued = 0
+        var skipped = 0
+        var replaced = 0
+        var failed = 0
+        items.distinctBy { it.track.id }.forEach { item ->
+            try {
+                val quality = QualityTiers.normalize(
+                    item.qualityKbps.takeIf { it > 0 }
+                        ?: resolveRequestedQuality(),
+                )
+                val existing = completedEntities(item.track.id)
+                val plan = DownloadQualityPolicy.plan(
+                    decision = decision,
+                    existingQualities = qualitiesOf(existing),
+                    requestedQualityKbps = quality,
+                )
+                if (!plan.download) {
+                    skipped++
+                    return@forEach
+                }
+                if (plan.deleteExisting && existing.isNotEmpty()) {
+                    deleteCompletedVersions(existing)
+                    replaced++
+                }
+                val result = enqueue(
+                    track = item.track,
+                    qualityKbps = quality,
+                    downloadLyrics = downloadLyrics,
+                    downloadArtwork = downloadArtwork,
+                )
+                if (result.isSuccess) queued++ else failed++
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                failed++
+            }
+        }
+        return DownloadQueueOutcome(
+            queued = queued,
+            skipped = skipped,
+            replaced = replaced,
+            failed = failed,
+        )
+    }
+
+    /** Convenience overload for callers that already resolved one quality. */
     suspend fun enqueueAll(
         tracks: Collection<Track>,
         qualityKbps: Int? = null,
         downloadLyrics: Boolean? = null,
         downloadArtwork: Boolean? = null,
-    ): Int {
-        var queued = 0
-        tracks.distinctBy { it.id }.forEach { track ->
-            if (enqueue(track, qualityKbps, downloadLyrics, downloadArtwork).isSuccess) {
-                queued++
-            }
-        }
-        return queued
+    ): DownloadQueueOutcome {
+        val quality = resolveRequestedQuality(qualityKbps)
+        return enqueueAll(
+            items = tracks.map { DownloadRequestItem(it, quality) },
+            downloadLyrics = downloadLyrics,
+            downloadArtwork = downloadArtwork,
+        )
     }
 
     suspend fun pause(id: String) {
@@ -258,18 +336,51 @@ class DownloadRepository(
     suspend fun completedUris(trackIds: Collection<String>): Map<String, Uri> {
         val wanted = trackIds.toSet()
         if (wanted.isEmpty()) return emptyMap()
+        // Coexisting qualities are allowed, but playback always prefers the
+        // highest downloaded quality regardless of the playback setting.
         return dao.getCompleted()
             .asSequence()
-            .filter { entity ->
-                val id = entity.trackId.ifBlank { entity.id.substringBeforeLast('@') }
-                id in wanted
-            }
+            .filter { entity -> locationExists(entity.filePath) }
             .mapNotNull { entity ->
                 val path = entity.filePath ?: return@mapNotNull null
                 val id = entity.trackId.ifBlank { entity.id.substringBeforeLast('@') }
-                id to path.toUri()
+                if (id !in wanted) return@mapNotNull null
+                id to entity
             }
-            .toMap()
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, versions) ->
+                versions.maxByOrNull { it.qualityKbps }!!.filePath!!.toUri()
+            }
+    }
+
+    private suspend fun completedEntities(trackId: String): List<DownloadTaskEntity> =
+        dao.getCompletedForTrack(trackId).filter { locationExists(it.filePath) }
+
+    private fun qualitiesOf(entities: Collection<DownloadTaskEntity>): List<Int> =
+        entities.mapNotNull { it.qualityKbps.takeIf { quality -> quality > 0 } }
+            .map(QualityTiers::normalize)
+            .distinct()
+            .sorted()
+
+    /**
+     * Deletes the selected versions and their manifest entries. A legacy row may
+     * share its file with another quality, so the file itself is only removed
+     * when no surviving row points at it.
+     */
+    private suspend fun deleteCompletedVersions(entities: List<DownloadTaskEntity>) {
+        if (entities.isEmpty()) return
+        val ids = entities.map { it.id }.toSet()
+        val protectedPaths = dao.getCompleted()
+            .asSequence()
+            .filter { it.id !in ids }
+            .mapNotNull { it.filePath }
+            .toSet()
+        entities.forEach { entity ->
+            if (entity.filePath !in protectedPaths) deleteLocation(entity.filePath)
+            deleteTemp(entity.id)
+        }
+        removeManifestEntries(entities)
+        entities.forEach { entity -> dao.delete(entity.id) }
     }
 
     /**

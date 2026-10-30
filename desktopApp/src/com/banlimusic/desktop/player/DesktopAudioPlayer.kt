@@ -1,3 +1,6 @@
+/**
+ * 文件作用：使用 JLayer 与 Java Sound 播放桌面音频并维护播放队列。
+ */
 package com.banlimusic.desktop.player
 
 import com.banlimusic.app.core.common.MusicException
@@ -283,7 +286,7 @@ class DesktopAudioPlayer(
         val qualityKbps = settings.current().qualityKbps
         var cacheSink: DesktopPlaybackCache.CacheSink? = null
         try {
-            val cachedFile = localFile ?: cache.cachedFile(track.id, qualityKbps)
+            val cachedFile = localFile ?: cache.cachedFileAtLeast(track.id, qualityKbps)
             if (cachedFile != null) {
                 updateDuration(localMp3DurationMs(cachedFile))
                 val completed = FileInputStream(cachedFile).use { stream ->

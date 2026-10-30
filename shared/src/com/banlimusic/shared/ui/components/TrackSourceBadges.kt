@@ -86,13 +86,15 @@ fun SourceBadge(providerId: String) {
 fun TrackSourceBadges(
     track: Track,
     downloaded: Boolean = false,
+    showDownloadBadge: Boolean = true,
     preferredProviderId: String? = null,
     onSourceClick: (() -> Unit)? = null,
 ) {
     val orderedSources = SourceOrdering.reorderSources(track.sources, preferredProviderId)
     val providerSources = orderedSources.filterNot { it.providerId in NON_PROVIDER_SOURCE_IDS }
     val hasLocalImport = orderedSources.any { it.providerId == "local" }
-    val hasDownload = downloaded || orderedSources.any { it.providerId == "download" }
+    val hasDownload = showDownloadBadge &&
+        (downloaded || orderedSources.any { it.providerId == "download" })
     Row {
         if (hasLocalImport) {
             SourceBadge("local")

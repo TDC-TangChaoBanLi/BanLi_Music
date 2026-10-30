@@ -50,6 +50,8 @@ import com.banlimusic.app.feature.search.SearchScreen
 import com.banlimusic.app.feature.settings.SettingsScreen
 import com.banlimusic.app.ui.components.LocalRequestListArtwork
 import com.banlimusic.app.ui.components.MiniPlayer
+import com.banlimusic.shared.ui.components.BanLiDownloadQualityDialog
+import com.banlimusic.shared.ui.components.downloadQualityPrompt
 import com.banlimusic.shared.ui.navigation.BanLiAppShell
 import com.banlimusic.shared.ui.navigation.BanLiBarPosition
 import com.banlimusic.shared.ui.navigation.BanLiDestination
@@ -113,6 +115,8 @@ fun AppRoot(
         .collectAsStateWithLifecycle(initialValue = emptySet())
     val settings by container.settingsRepository.settings
         .collectAsStateWithLifecycle(initialValue = initialSettings)
+    val downloadPrompt by container.downloadRequests.prompt
+        .collectAsStateWithLifecycle()
     val destinations = remember(settings.bottomNavItems) {
         destinationsFor(settings.bottomNavItems)
     }
@@ -235,6 +239,12 @@ fun AppRoot(
                 )
             },
         )
+        downloadPrompt?.let { pending ->
+            BanLiDownloadQualityDialog(
+                prompt = downloadQualityPrompt(pending.conflicts),
+                onDecision = container.downloadRequests::resolve,
+            )
+        }
     }
 }
 

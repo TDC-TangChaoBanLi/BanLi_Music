@@ -51,6 +51,7 @@ fun LibraryScreen(
     val downloadedBytes by viewModel.downloadedBytes.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val defaultCategory by viewModel.defaultCategory.collectAsStateWithLifecycle()
+    val downloadQualityKbps by viewModel.downloadQualityKbps.collectAsStateWithLifecycle()
     val favoriteFolders by viewModel.favoriteFolders.collectAsStateWithLifecycle()
     val favoriteIds by viewModel.favoriteIds.collectAsStateWithLifecycle()
     val downloadedIds by viewModel.downloadedIds.collectAsStateWithLifecycle()
@@ -188,6 +189,7 @@ fun LibraryScreen(
             downloadedBytes = downloadedBytes,
             categories = categories,
             defaultCategory = defaultCategory,
+            downloadQualityKbps = downloadQualityKbps,
             favoriteFolders = favoriteFolders,
             favoriteIds = favoriteIds,
             downloadedIds = downloadedIds,

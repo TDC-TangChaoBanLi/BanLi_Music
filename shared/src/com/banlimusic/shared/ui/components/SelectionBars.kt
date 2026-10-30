@@ -69,12 +69,21 @@ fun rememberSelectionActionsState(
     selectedIds: Set<String>,
     tracks: List<Track>,
     defaultCategory: String,
+    defaultQualityKbps: Int = 128,
     downloadQualities: suspend (List<Track>) -> List<Int>,
 ): SelectionActionsState {
     val state = remember(defaultCategory) { SelectionActionsState(defaultCategory) }
-    LaunchedEffect(selectionMode, selectedIds, tracks, defaultCategory) {
+    LaunchedEffect(
+        selectionMode,
+        selectedIds,
+        tracks,
+        defaultCategory,
+        defaultQualityKbps,
+    ) {
         if (!selectionMode) {
             state.qualities = emptyList()
+            // Re-entering selection starts from the configured default again.
+            state.chosenQuality = null
             return@LaunchedEffect
         }
         val source = if (selectedIds.isEmpty()) {
@@ -84,7 +93,10 @@ fun rememberSelectionActionsState(
         }
         val available = downloadQualities(source)
         state.qualities = available
-        if (state.chosenQuality !in available) state.chosenQuality = available.firstOrNull()
+        if (state.chosenQuality !in available) {
+            state.chosenQuality = defaultQualityKbps.takeIf { it in available }
+                ?: available.firstOrNull()
+        }
     }
     return state
 }

@@ -8,9 +8,15 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.widget.RemoteViews
 import com.banlimusic.app.MainActivity
 import com.banlimusic.app.R
+import kotlin.math.roundToInt
 
 /**
  * RemoteViews renderer. Frequent player ticks use [AppWidgetManager
@@ -99,11 +105,22 @@ object WidgetRenderer {
             if (full) {
                 val views = RemoteViews(context.packageName, layoutRes).apply {
                     applyCommon()
-                    setInt(
-                        R.id.widget_root,
-                        "setBackgroundResource",
-                        if (state.dark) R.drawable.widget_bg_dark else R.drawable.widget_bg_light,
-                    )
+                    val background = runCatching {
+                        backgroundBitmap(manager, appWidgetId, state)
+                    }.getOrNull()
+                    if (background != null) {
+                        setImageViewBitmap(R.id.widget_background, background)
+                    } else {
+                        setInt(
+                            R.id.widget_root,
+                            "setBackgroundResource",
+                            if (state.dark) {
+                                R.drawable.widget_bg_dark
+                            } else {
+                                R.drawable.widget_bg_light
+                            },
+                        )
+                    }
                     setImageViewResource(R.id.widget_previous, previousIcon)
                     setImageViewResource(R.id.widget_next, nextIcon)
                     setOnClickPendingIntent(
@@ -159,6 +176,42 @@ object WidgetRenderer {
         }
     }
 
+    /**
+     * A rounded bitmap is the only way RemoteViews can show a runtime colour
+     * with transparency while keeping the widget's rounded outline.
+     */
+    private fun backgroundBitmap(
+        manager: AppWidgetManager,
+        appWidgetId: Int,
+        state: WidgetState,
+    ): Bitmap? {
+        val options = runCatching { manager.getAppWidgetOptions(appWidgetId) }.getOrNull()
+        val widthDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250)
+            ?.coerceIn(60, 800) ?: 250
+        val heightDp = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 60)
+            ?.coerceIn(40, 400) ?: 60
+        // Keep the bitmap small: RemoteViews bitmaps travel through Binder and
+        // must stay far below its transaction limit. ImageView stretches it.
+        val scale = MAX_BITMAP_SIDE / maxOf(widthDp, heightDp).toFloat()
+        val width = (widthDp * scale).roundToInt().coerceAtLeast(1)
+        val height = (heightDp * scale).roundToInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val base = state.backgroundColor
+            ?: if (state.dark) 0xFF111111.toInt() else 0xFFF7F7F7.toInt()
+        val alpha = (state.opacityPercent.coerceIn(0, 100) * 255 / 100)
+        val color = Color.argb(
+            alpha,
+            Color.red(base),
+            Color.green(base),
+            Color.blue(base),
+        )
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+        val radius = minOf(width, height) * 0.2f
+        canvas.drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), radius, radius, paint)
+        return bitmap
+    }
+
     private fun actionPending(context: Context, requestCode: Int, action: String): PendingIntent =
         pendingIntent(
             context,
@@ -186,4 +239,5 @@ object WidgetRenderer {
     private const val REQUEST_PLAY = 12
     private const val REQUEST_NEXT = 13
     private const val REQUEST_FAVORITE = 14
+    private const val MAX_BITMAP_SIDE = 320f
 }

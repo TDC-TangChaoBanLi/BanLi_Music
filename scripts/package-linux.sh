@@ -324,7 +324,16 @@ write_nojre_launcher() {
     cat > "$path" <<'EOF'
 #!/usr/bin/env sh
 set -eu
-APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# deb/rpm install the launcher under /usr/bin as a symlink to /opt/banlimusic-nojre.
+# Resolve it first, otherwise APP_HOME becomes /usr and the jars cannot be found.
+SELF="$0"
+if command -v readlink >/dev/null 2>&1; then
+  RESOLVED=$(readlink -f -- "$SELF" 2>/dev/null || true)
+  if [ -n "$RESOLVED" ]; then
+    SELF="$RESOLVED"
+  fi
+fi
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$SELF")/.." && pwd)
 JAVA_BIN="${JAVA_HOME:+$JAVA_HOME/bin/}java"
 
 if ! command -v "$JAVA_BIN" >/dev/null 2>&1; then

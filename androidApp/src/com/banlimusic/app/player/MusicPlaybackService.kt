@@ -62,6 +62,8 @@ class MusicPlaybackService : MediaSessionService() {
     private var artworkJob: Job? = null
     private var recoveryJob: Job? = null
     private val attemptByMediaId = ConcurrentHashMap<String, Int>()
+    /** Highest cached quality chosen for each media id during this session. */
+    private val qualityByMediaId = ConcurrentHashMap<String, Int>()
     private var consecutiveFailures = 0
     private var skippingAfterFailure = false
     private var lastReadyMediaId: String? = null
@@ -132,11 +134,12 @@ class MusicPlaybackService : MediaSessionService() {
                 // Retry attempts rotate the candidate list so a broken source
                 // cannot trap playback in a loop with the same URL.
                 val rotate = mediaId?.let { attemptByMediaId[it] ?: 0 } ?: 0
+                val quality = playbackQualityFor(container, mediaId)
                 val resolved = container.streamResolver.resolveBlockingInfo(
                     candidates = candidates,
+                    qualityKbps = quality,
                     rotate = rotate,
                 )
-                val quality = playbackQuality(container)
                 val cacheKey = mediaId?.let { StreamUriCodec.cacheKey(it, quality) }
                 if (mediaId != null && cacheKey != null) {
                     trackById[mediaId]?.let { track ->
@@ -190,6 +193,10 @@ class MusicPlaybackService : MediaSessionService() {
                     .build(),
                 true,
             )
+            // Keep the CPU and network wake locks while streaming: without this
+            // ExoPlayer can lose its source when the screen turns off and the
+            // device enters Doze, so the retry policy never gets a chance to run.
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .setHandleAudioBecomingNoisy(true)
             .build()
         player = exoPlayer
@@ -235,6 +242,9 @@ class MusicPlaybackService : MediaSessionService() {
                     consecutiveFailures = 0
                 }
                 lastReadyMediaId = null
+                // Re-evaluate the best cached quality for the new track; a
+                // high-quality download may have appeared since last playback.
+                mediaItem?.mediaId?.let(qualityByMediaId::remove)
                 rememberTrack(mediaItem)
                 maybeRecordPlayback(exoPlayer)
                 refreshMediaButtons()
@@ -439,7 +449,7 @@ class MusicPlaybackService : MediaSessionService() {
             val attempt = attemptByMediaId[mediaId] ?: 0
             if (attempt < settings.playbackRetryCount) {
                 attemptByMediaId[mediaId] = attempt + 1
-                invalidateStreamCache(container, player, settings.qualityKbps)
+                invalidateStreamCache(container, player)
                 if (rateLimited != null) {
                     // Retrying inside the same rate limit window can never succeed.
                     delay(rateLimited.retryAfterMs.coerceIn(1_000L, MAX_RATE_LIMIT_WAIT_MS))
@@ -489,13 +499,13 @@ class MusicPlaybackService : MediaSessionService() {
     private fun invalidateStreamCache(
         container: AppContainer,
         player: ExoPlayer,
-        qualityKbps: Int,
     ) {
         val uri = player.currentMediaItem?.localConfiguration?.uri?.toString() ?: return
         val encoded = StreamUriCodec.encodedOf(uri) ?: return
         val candidates = StreamUriCodec.decode(encoded)
         if (candidates.isEmpty()) return
-        runCatching { container.streamResolver.invalidate(candidates, qualityKbps) }
+        val quality = playbackQualityFor(container, player.currentMediaItem?.mediaId)
+        runCatching { container.streamResolver.invalidate(candidates, quality) }
     }
 
     private fun Throwable.causeChain(): Sequence<Throwable> =
@@ -655,9 +665,7 @@ class MusicPlaybackService : MediaSessionService() {
         val container = (application as MusicApplication).container
         scope.launch(Dispatchers.IO) {
             runCatching {
-                val quality = QualityTiers.normalize(
-                    container.settingsRepository.current().qualityKbps,
-                )
+                val quality = playbackQualityFor(container, track.id)
                 container.cacheRepository.record(
                     track = track,
                     cacheKey = StreamUriCodec.cacheKey(track.id, quality),
@@ -674,13 +682,28 @@ class MusicPlaybackService : MediaSessionService() {
         val uri = dataSpec.uri
         if (uri.scheme != StreamUriCodec.SCHEME) return uri.toString()
         val mediaId = StreamUriCodec.mediaIdOf(uri.toString()) ?: return uri.toString()
-        return StreamUriCodec.cacheKey(mediaId, playbackQuality(container))
+        return StreamUriCodec.cacheKey(mediaId, playbackQualityFor(container, mediaId))
     }
 
-    /** App-level tier used for cache keys and the cache index. */
-    private fun playbackQuality(container: AppContainer): Int = QualityTiers.normalize(
-        runBlocking { container.settingsRepository.current().qualityKbps },
-    )
+    /**
+     * App-level tier for cache keys and stream resolution. A complete cache at a
+     * higher quality than the playback setting wins, so users who downloaded or
+     * cached a high-quality copy keep hearing it until they remove it.
+     */
+    private fun playbackQualityFor(container: AppContainer, mediaId: String?): Int {
+        val settingQuality = QualityTiers.normalize(
+            runBlocking { container.settingsRepository.current().qualityKbps },
+        )
+        val id = mediaId ?: return settingQuality
+        return qualityByMediaId.getOrPut(id) {
+            val trackId = trackById[id]?.id ?: id
+            runCatching {
+                runBlocking {
+                    container.cacheRepository.bestQualityAtOrAbove(trackId, settingQuality)
+                }
+            }.getOrNull() ?: settingQuality
+        }
+    }
 
     private fun refreshMediaButtons() {
         val current = player ?: return

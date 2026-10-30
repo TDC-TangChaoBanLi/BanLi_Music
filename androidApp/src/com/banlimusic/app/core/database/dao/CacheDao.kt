@@ -24,6 +24,9 @@ interface CacheDao {
     )
     suspend fun getForTrackAndQuality(trackId: String, qualityKbps: Int): CachedTrackEntity?
 
+    @Query("SELECT * FROM cached_tracks WHERE trackId = :trackId ORDER BY qualityKbps DESC")
+    suspend fun getForTrack(trackId: String): List<CachedTrackEntity>
+
     @Query("SELECT * FROM cached_tracks WHERE cacheKey = :cacheKey")
     suspend fun getByKey(cacheKey: String): CachedTrackEntity?
 

@@ -13,6 +13,7 @@ import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.data.repository.DownloadRepository
 import com.banlimusic.app.data.repository.LibraryRepository
 import com.banlimusic.app.data.repository.MusicRepository
+import com.banlimusic.app.domain.download.DownloadRequestManager
 import com.banlimusic.app.domain.download.DownloadStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -45,6 +46,7 @@ class SearchViewModel(
     private val music: MusicRepository,
     private val library: LibraryRepository,
     private val downloads: DownloadRepository,
+    private val downloadRequests: DownloadRequestManager,
     private val settings: SettingsRepository,
     private val sourcePreferences: SourcePreferenceStore,
 ) : ViewModel() {
@@ -69,6 +71,11 @@ class SearchViewModel(
     val defaultFavoriteCategory: StateFlow<String> = settings.settings
         .map { it.defaultFavoriteCategory }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "默认收藏")
+
+    /** Quality preselected by the batch selection download menu. */
+    val downloadQualityKbps: StateFlow<Int> = settings.settings
+        .map { it.downloadQualityKbps }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 128)
 
     val favoriteCategories: StateFlow<List<String>> = combine(
         library.observeFavoriteCategories(),
@@ -211,11 +218,8 @@ class SearchViewModel(
         val state = _uiState.value
         val tracks = state.results.filter { it.id in state.selectedIds }
         if (tracks.isEmpty()) return
-        viewModelScope.launch {
-            val queued = downloads.enqueueAll(tracks, qualityKbps = qualityKbps)
-            _message.value = "已加入下载队列：$queued 首"
-            clearSelection()
-        }
+        requestDownloads(tracks, qualityKbps)
+        clearSelection()
     }
 
     /** Batch favourite for callers that already know the selected tracks. */
@@ -231,10 +235,13 @@ class SearchViewModel(
     /** Batch download for callers that already know the selected tracks. */
     fun downloadTracks(tracks: List<Track>, qualityKbps: Int?) {
         if (tracks.isEmpty()) return
-        viewModelScope.launch {
-            val queued = downloads.enqueueAll(tracks, qualityKbps = qualityKbps)
-            _message.value = "已加入下载队列：$queued 首"
-            clearSelection()
+        requestDownloads(tracks, qualityKbps)
+        clearSelection()
+    }
+
+    private fun requestDownloads(tracks: Collection<Track>, qualityKbps: Int?) {
+        downloadRequests.download(tracks, qualityKbps) { outcome ->
+            _message.value = outcome.summary()
         }
     }
 
