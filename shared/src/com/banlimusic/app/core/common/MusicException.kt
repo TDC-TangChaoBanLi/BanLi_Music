@@ -32,6 +32,20 @@ fun Throwable.userMessage(): String = when (this) {
     else -> message ?: "发生未知错误"
 }
 
+/**
+ * True when a lyrics request failed for a reason that may succeed later.
+ * A "no lyrics" answer is represented by a null result, not by these errors.
+ */
+fun Throwable.isTransientLyricsError(): Boolean = when (this) {
+    is MusicException.Network,
+    is MusicException.Timeout,
+    is MusicException.Server,
+    is MusicException.Parse,
+    -> true
+
+    else -> false
+}
+
 fun formatDuration(seconds: Long): String {
     if (seconds < 60) return "${seconds}秒"
     val minutes = seconds / 60

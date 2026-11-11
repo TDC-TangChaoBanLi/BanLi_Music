@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.network.JsonHttpClient
+import com.banlimusic.app.core.network.retryTransient
 import com.banlimusic.desktop.data.DesktopMetadataCache
 import com.banlimusic.desktop.data.DesktopMusicRepository
 import kotlinx.coroutines.CancellationException
@@ -64,14 +65,25 @@ class DesktopArtworkLoader(
         memory.clear()
     }
 
-    private fun fetch(url: String): ByteArray? {
+    private suspend fun fetch(url: String): ByteArray? {
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", JsonHttpClient.USER_AGENT)
             .build()
-        return httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return@use null
-            response.body.bytes()
+        return retryTransient(
+            maxAttempts = 3,
+            shouldRetry = { it is java.io.IOException },
+        ) {
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val code = response.code
+                    if (code >= 500 || code == 429) {
+                        throw java.io.IOException("HTTP $code")
+                    }
+                    return@retryTransient null
+                }
+                response.body.bytes()
+            }
         }
     }
 }

@@ -111,8 +111,20 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
             override fun setWidgetTheme(theme: WidgetTheme) =
                 state.container.settingsRepository.setWidgetTheme(theme)
 
-            override fun setDesktopFloatingLyrics(enabled: Boolean) =
-                state.container.settingsRepository.setDesktopFloatingLyrics(enabled)
+            override fun setFloatingLyrics(enabled: Boolean) =
+                state.container.settingsRepository.setFloatingLyrics(enabled)
+
+            override fun setFloatingLyricsPlayedColor(color: Int?) =
+                state.container.settingsRepository.setFloatingLyricsPlayedColor(color)
+
+            override fun setFloatingLyricsUnplayedColor(color: Int?) =
+                state.container.settingsRepository.setFloatingLyricsUnplayedColor(color)
+
+            override fun setFloatingLyricsFontSize(sizeSp: Int) =
+                state.container.settingsRepository.setFloatingLyricsFontSize(sizeSp)
+
+            override fun setFloatingLyricsLines(count: Int) =
+                state.container.settingsRepository.setFloatingLyricsLines(count)
 
             override fun setAllowMobileNetwork(enabled: Boolean) =
                 state.container.settingsRepository.setAllowMobileNetwork(enabled)

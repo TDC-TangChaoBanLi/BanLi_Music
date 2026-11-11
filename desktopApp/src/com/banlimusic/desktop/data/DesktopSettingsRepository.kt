@@ -157,8 +157,38 @@ class DesktopSettingsRepository {
         prefs.put(KEY_WIDGET_THEME, theme.name)
     }
 
-    fun setDesktopFloatingLyrics(enabled: Boolean) = update {
+    fun setFloatingLyrics(enabled: Boolean) = update {
         prefs.putBoolean(KEY_FLOATING_LYRICS, enabled)
+    }
+
+    fun setFloatingLyricsPlayedColor(color: Int?) = update {
+        if (color == null) {
+            prefs.remove(KEY_FLOATING_PLAYED_COLOR)
+        } else {
+            prefs.putInt(KEY_FLOATING_PLAYED_COLOR, color)
+        }
+    }
+
+    fun setFloatingLyricsUnplayedColor(color: Int?) = update {
+        if (color == null) {
+            prefs.remove(KEY_FLOATING_UNPLAYED_COLOR)
+        } else {
+            prefs.putInt(KEY_FLOATING_UNPLAYED_COLOR, color)
+        }
+    }
+
+    fun setFloatingLyricsFontSize(sizeSp: Int) = update {
+        prefs.putInt(
+            KEY_FLOATING_FONT_SIZE,
+            sizeSp.coerceIn(
+                com.banlimusic.app.core.datastore.MIN_FLOATING_LYRICS_FONT_SIZE,
+                com.banlimusic.app.core.datastore.MAX_FLOATING_LYRICS_FONT_SIZE,
+            ),
+        )
+    }
+
+    fun setFloatingLyricsLines(count: Int) = update {
+        prefs.putInt(KEY_FLOATING_LINES, count.coerceIn(1, 2))
     }
 
     fun setSyncAutoSync(enabled: Boolean) = update {
@@ -244,7 +274,22 @@ class DesktopSettingsRepository {
             widgetTheme = runCatching {
                 WidgetTheme.valueOf(prefs.get(KEY_WIDGET_THEME, WidgetTheme.SYSTEM.name))
             }.getOrDefault(WidgetTheme.SYSTEM),
-            desktopFloatingLyrics = prefs.getBoolean(KEY_FLOATING_LYRICS, false),
+            floatingLyrics = prefs.getBoolean(KEY_FLOATING_LYRICS, false),
+            floatingLyricsPlayedColor = prefs.get(KEY_FLOATING_PLAYED_COLOR, null)
+                ?.toIntOrNull(),
+            floatingLyricsUnplayedColor = prefs.get(KEY_FLOATING_UNPLAYED_COLOR, null)
+                ?.toIntOrNull(),
+            floatingLyricsFontSize = prefs.getInt(
+                KEY_FLOATING_FONT_SIZE,
+                com.banlimusic.app.core.datastore.DEFAULT_FLOATING_LYRICS_FONT_SIZE,
+            ).coerceIn(
+                com.banlimusic.app.core.datastore.MIN_FLOATING_LYRICS_FONT_SIZE,
+                com.banlimusic.app.core.datastore.MAX_FLOATING_LYRICS_FONT_SIZE,
+            ),
+            floatingLyricsLines = prefs.getInt(
+                KEY_FLOATING_LINES,
+                com.banlimusic.app.core.datastore.DEFAULT_FLOATING_LYRICS_LINES,
+            ).coerceIn(1, 2),
             sync = SyncSettings(
                 autoSync = prefs.getBoolean(KEY_SYNC_AUTO, false),
                 intervalHours = prefs.getInt(KEY_SYNC_INTERVAL, 6).coerceIn(
@@ -299,6 +344,10 @@ class DesktopSettingsRepository {
         private const val KEY_WIDGET_THEME = "widget_theme"
         private const val KEY_HIGH_REFRESH = "high_refresh_lists"
         private const val KEY_FLOATING_LYRICS = "desktop_floating_lyrics"
+        private const val KEY_FLOATING_PLAYED_COLOR = "floating_lyrics_played_color"
+        private const val KEY_FLOATING_UNPLAYED_COLOR = "floating_lyrics_unplayed_color"
+        private const val KEY_FLOATING_FONT_SIZE = "floating_lyrics_font_size"
+        private const val KEY_FLOATING_LINES = "floating_lyrics_lines"
         private const val KEY_SYNC_AUTO = "sync_auto"
         private const val KEY_SYNC_INTERVAL = "sync_interval_hours"
     }

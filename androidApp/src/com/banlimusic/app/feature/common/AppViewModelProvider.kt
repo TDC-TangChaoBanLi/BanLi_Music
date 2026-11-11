@@ -56,6 +56,7 @@ object AppViewModelProvider {
         }
         initializer {
             SettingsViewModel(
+                context = app(),
                 settings = app().container.settingsRepository,
                 music = app().container.musicRepository,
                 library = app().container.libraryRepository,

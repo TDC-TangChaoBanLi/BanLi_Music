@@ -4,6 +4,7 @@
 package com.banlimusic.app
 
 import android.app.Application
+import com.banlimusic.app.player.AndroidFloatingLyricsController
 import com.banlimusic.app.system.notification.Notifications
 import com.banlimusic.app.widget.PlayerWidgetUpdater
 import kotlinx.coroutines.CoroutineScope
@@ -18,11 +19,13 @@ class MusicApplication : Application() {
         private set
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private lateinit var floatingLyrics: AndroidFloatingLyricsController
 
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
         Notifications.createChannels(this)
+        floatingLyrics = AndroidFloatingLyricsController(this, container).also { it.start() }
         appScope.launch {
             runCatching {
                 val settings = container.settingsRepository.current()

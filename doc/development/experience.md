@@ -51,6 +51,8 @@
 - 图标优先使用 `material-icons-extended` 中已有图标；桌面打包时按源码实际引用裁剪该 jar，避免整包进入产物。
 - 本地音乐扫描使用 `MediaStore`，不要引入文件选择或媒体扫描第三方库。
 - 桌面小组件使用平台 `AppWidgetProvider` + `RemoteViews`，状态持久化在 `PlayerWidgetUpdater`；播放中使用 `partiallyUpdateAppWidget` 局部刷新，避免整层替换造成延迟。自定义颜色/透明度需要运行时绘制圆角位图，位图边长必须限制在约 320px，避免 Binder 传输超限。
+- 全局媒体键没有 JVM 标准 API：当前用 JNA 直接调用 Win32 低层键盘钩子与 X11 `XGrabKey`。JNA 核心 jar 约 2 MB，替代方案是各平台原生扩展或 Linux MPRIS（Wayland 更可靠），但后者会引入 D-Bus 依赖；新增平台支持时优先复用 `DesktopMediaKeys` 的抽象。
+- 托盘右键菜单不要依赖 AWT/Compose `Tray` 的默认菜单文本，否则 Linux 上可能因字体回退出现中文乱码；使用 AWT `TrayIcon` 接收点击，再用无边框 Compose `Window` 自绘菜单。
 
 ## UI 与交互
 

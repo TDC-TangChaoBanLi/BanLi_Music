@@ -30,7 +30,7 @@ shared/                       KMP 共享核心（android + jvm）
       ui/agreement            两端共用的用户协议界面
 desktopApp/                   Compose Desktop 桌面端
   module.yaml
-  src/main.kt                 无边框窗口、自绘标题栏、系统托盘与共享应用外壳
+  src/main.kt                 无边框窗口、自绘标题栏、自绘托盘菜单与共享应用外壳
   src/com/banlimusic/desktop/
     data/                     设置、收藏夹/历史/本地音乐、下载、播放缓存、元数据缓存、仓库
     data/sync/                OneDrive 登录、令牌存储与云同步协调

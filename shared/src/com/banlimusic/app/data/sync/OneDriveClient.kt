@@ -5,6 +5,7 @@ import com.banlimusic.app.core.limiter.SlidingWindowRateLimiter
 import com.banlimusic.app.core.model.FavoriteSyncDocument
 import com.banlimusic.app.core.model.SYNC_FILE_NAME
 import com.banlimusic.app.core.network.awaitResponse
+import com.banlimusic.app.core.network.retryTransient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -161,11 +162,11 @@ class OneDriveClient(
 
     private suspend fun executeRaw(request: Request): okhttp3.Response = withContext(Dispatchers.IO) {
         var token = tokenProvider.accessToken(forceRefresh = false)
-        var response = send(request, token)
+        var response = sendWithRetry(request, token)
         if (response.code == 401) {
             response.close()
             token = tokenProvider.accessToken(forceRefresh = true)
-            response = send(request, token)
+            response = sendWithRetry(request, token)
         }
         if (response.code == 429) {
             val retryAfterMs = response.header("Retry-After")
@@ -178,6 +179,24 @@ class OneDriveClient(
         }
         response
     }
+
+    /** Retries transient transport and 5xx failures; 4xx responses stay final. */
+    private suspend fun sendWithRetry(request: Request, token: String): okhttp3.Response =
+        retryTransient(
+            maxAttempts = 3,
+            shouldRetry = { error ->
+                error is SyncException.Network ||
+                    error is SyncException.Timeout ||
+                    (error is SyncException.Server && error.code >= 500)
+            },
+        ) {
+            val response = send(request, token)
+            if (response.code in 500..599) {
+                response.close()
+                throw SyncException.Server(response.code)
+            }
+            response
+        }
 
     private suspend fun send(request: Request, token: String): okhttp3.Response =
         try {

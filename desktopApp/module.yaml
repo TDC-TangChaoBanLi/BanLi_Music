@@ -19,6 +19,8 @@ dependencies:
   - $libs.kotlinx.serialization.json
   - $libs.okhttp
   - $libs.jlayer
+  # Global media-key capture on Windows (low-level hook) and Linux (X11 grab).
+  - $libs.jna
 
 settings:
   compose: enabled

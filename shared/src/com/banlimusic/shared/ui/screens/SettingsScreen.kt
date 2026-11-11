@@ -157,6 +157,17 @@ private val CUSTOM_THEME_SWATCHES = listOf(
     0xFFCA8A04.toInt(),
 )
 
+private val FLOATING_LYRICS_SWATCHES = listOf(
+    0xFFFFFFFF.toInt(),
+    0xFFFDE047.toInt(),
+    0xFF7DD3FC.toInt(),
+    0xFF86EFAC.toInt(),
+    0xFFF9A8D4.toInt(),
+    0xFFC4B5FD.toInt(),
+    0xFFFDBA74.toInt(),
+    0xFF111827.toInt(),
+)
+
 /** Platform-specific switches inside the shared settings page. */
 enum class SettingsPlatform { ANDROID, DESKTOP }
 
@@ -211,7 +222,11 @@ interface SettingsActions {
     fun setWidgetTheme(theme: WidgetTheme) {}
     fun setWidgetBackgroundColor(color: Int?) {}
     fun setWidgetBackgroundOpacity(opacity: Int) {}
-    fun setDesktopFloatingLyrics(enabled: Boolean) {}
+    fun setFloatingLyrics(enabled: Boolean) {}
+    fun setFloatingLyricsPlayedColor(color: Int?) {}
+    fun setFloatingLyricsUnplayedColor(color: Int?) {}
+    fun setFloatingLyricsFontSize(sizeSp: Int) {}
+    fun setFloatingLyricsLines(count: Int) {}
 
     fun setAllowMobileNetwork(enabled: Boolean) {}
     fun setDefaultShowLyrics(enabled: Boolean) {}
@@ -600,23 +615,7 @@ private fun AppearanceSettings(state: SettingsUiState, actions: SettingsActions)
         }
 
         if (state.platform == SettingsPlatform.DESKTOP) {
-            BanLiSettingsCard(
-                title = "桌面悬浮歌词",
-                leading = { SettingsIcon(Icons.Rounded.Lyrics) },
-            ) {
-                BanLiSettingsSwitchRow(
-                    icon = Icons.Rounded.Lyrics,
-                    title = "启用桌面悬浮歌词",
-                    description = "功能开发中；当前仅保存开关状态，不会创建悬浮窗口",
-                    checked = settings.desktopFloatingLyrics,
-                    onCheckedChange = actions::setDesktopFloatingLyrics,
-                )
-                Text(
-                    text = "后续版本将支持在桌面显示当前歌词，并提供置顶、透明度和锁定选项。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            FloatingLyricsSettings(state, actions)
         } else {
             BanLiSettingsCard(title = "桌面小组件", leading = { SettingsIcon(Icons.Rounded.Widgets) }) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -657,6 +656,128 @@ private fun AppearanceSettings(state: SettingsUiState, actions: SettingsActions)
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            FloatingLyricsSettings(state, actions)
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FloatingLyricsSettings(state: SettingsUiState, actions: SettingsActions) {
+    val settings = state.settings
+    BanLiSettingsCard(
+        title = "桌面歌词",
+        leading = { SettingsIcon(Icons.Rounded.Lyrics) },
+    ) {
+        BanLiSettingsSwitchRow(
+            icon = Icons.Rounded.Lyrics,
+            title = "启用桌面歌词",
+            description = if (state.platform == SettingsPlatform.ANDROID) {
+                "在其他应用上方显示当前歌词，需要悬浮窗权限"
+            } else {
+                "在桌面上显示当前歌词，可拖动、锁定或关闭"
+            },
+            checked = settings.floatingLyrics,
+            onCheckedChange = actions::setFloatingLyrics,
+        )
+        if (settings.floatingLyrics) {
+            HorizontalDivider()
+            Text(
+                text = "播放中的歌词使用“已播放”颜色，即将播放的一行使用“未播放”颜色。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FloatingLyricsColorRow(
+                title = "已播放颜色",
+                current = settings.floatingLyricsPlayedColor,
+                fallback = MaterialTheme.colorScheme.primary.toArgb(),
+                onPick = actions::setFloatingLyricsPlayedColor,
+            )
+            FloatingLyricsColorRow(
+                title = "未播放颜色",
+                current = settings.floatingLyricsUnplayedColor,
+                fallback = MaterialTheme.colorScheme.onSurfaceVariant.toArgb(),
+                onPick = actions::setFloatingLyricsUnplayedColor,
+            )
+            BanLiSettingsSlider(
+                icon = Icons.Rounded.FormatListNumbered,
+                title = "歌词字号",
+                valueText = "${settings.floatingLyricsFontSize} sp",
+                value = settings.floatingLyricsFontSize.toFloat(),
+                valueRange = 14f..40f,
+                steps = 25,
+                onValueChangeFinished = {
+                    actions.setFloatingLyricsFontSize(it.roundToInt())
+                },
+            )
+            Text("显示行数", style = MaterialTheme.typography.titleSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1, 2).forEach { count ->
+                    FilterChip(
+                        selected = settings.floatingLyricsLines == count,
+                        onClick = { actions.setFloatingLyricsLines(count) },
+                        label = { Text(if (count == 1) "单行" else "双行") },
+                    )
+                }
+            }
+            Text(
+                text = "悬浮歌词右上角提供锁定/解锁与关闭按钮；锁定后无法拖动。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FloatingLyricsColorRow(
+    title: String,
+    current: Int?,
+    fallback: Int,
+    onPick: (Int?) -> Unit,
+) {
+    Text(title, style = MaterialTheme.typography.titleSmall)
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(Color(fallback))
+                .border(
+                    width = if (current == null) 3.dp else 1.dp,
+                    color = if (current == null) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    },
+                    shape = CircleShape,
+                )
+                .clickable { onPick(null) }
+                .semantics { contentDescription = "默认颜色" },
+        )
+        FLOATING_LYRICS_SWATCHES.forEach { argb ->
+            val selected = current == argb
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(Color(argb))
+                    .border(
+                        width = if (selected) 3.dp else 1.dp,
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant
+                        },
+                        shape = CircleShape,
+                    )
+                    .clickable { onPick(argb) }
+                    .semantics { contentDescription = "歌词颜色" },
+            )
         }
     }
 }

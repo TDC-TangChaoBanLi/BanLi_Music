@@ -3,6 +3,10 @@
  */
 package com.banlimusic.app.feature.settings
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.banlimusic.app.core.cache.CacheRepository
@@ -31,6 +35,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class SettingsViewModel(
+    private val context: Context,
     private val settings: SettingsRepository,
     private val music: MusicRepository,
     private val library: LibraryRepository,
@@ -175,6 +180,33 @@ class SettingsViewModel(
 
     fun setWidgetBackgroundOpacity(opacity: Int) =
         viewModelScope.launch { settings.setWidgetBackgroundOpacity(opacity) }
+
+    fun setFloatingLyrics(enabled: Boolean) {
+        if (enabled && !Settings.canDrawOverlays(context)) {
+            _message.value = "请授予悬浮窗权限，返回后即可显示桌面歌词"
+            runCatching {
+                context.startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:${context.packageName}"),
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
+        viewModelScope.launch { settings.setFloatingLyrics(enabled) }
+    }
+
+    fun setFloatingLyricsPlayedColor(color: Int?) =
+        viewModelScope.launch { settings.setFloatingLyricsPlayedColor(color) }
+
+    fun setFloatingLyricsUnplayedColor(color: Int?) =
+        viewModelScope.launch { settings.setFloatingLyricsUnplayedColor(color) }
+
+    fun setFloatingLyricsFontSize(sizeSp: Int) =
+        viewModelScope.launch { settings.setFloatingLyricsFontSize(sizeSp) }
+
+    fun setFloatingLyricsLines(count: Int) =
+        viewModelScope.launch { settings.setFloatingLyricsLines(count) }
 
     fun setHighRefreshRateLists(enabled: Boolean) =
         viewModelScope.launch { settings.setHighRefreshRateLists(enabled) }

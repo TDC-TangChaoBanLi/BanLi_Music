@@ -5,6 +5,7 @@ package com.banlimusic.app.data.repository
 
 import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.common.TtlCache
+import com.banlimusic.app.core.common.isTransientLyricsError
 import com.banlimusic.app.core.cache.MediaMetadataCache
 import com.banlimusic.app.core.datastore.SettingsRepository
 import com.banlimusic.app.core.limiter.RateLimitStatus
@@ -102,6 +103,7 @@ class DefaultMusicRepository(
             lyricsCache.put(track.id, cached)
             return cached
         }
+        var transientError: Throwable? = null
         for (source in track.sources) {
             val provider = providersById[source.providerId] ?: continue
             if (!provider.capabilities.lyrics) continue
@@ -116,9 +118,14 @@ class DefaultMusicRepository(
                 throw cancelled
             } catch (rateLimited: MusicException.RateLimited) {
                 throw rateLimited
-            } catch (_: Throwable) {
-                // Try the next source.
+            } catch (error: Throwable) {
+                // A network failure must not be reported as "this track has no
+                // lyrics": the user needs a retry button instead of an empty state.
+                if (error.isTransientLyricsError()) transientError = error
             }
+        }
+        transientError?.let { error ->
+            throw (error as? MusicException) ?: MusicException.Network(error)
         }
         return null
     }

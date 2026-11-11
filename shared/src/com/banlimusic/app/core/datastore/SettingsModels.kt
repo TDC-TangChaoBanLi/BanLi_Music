@@ -23,6 +23,10 @@ const val MAX_API_LIMIT_PER_WINDOW = 50
 const val MIN_GD_REQUEST_INTERVAL_MS = 1_000L
 const val MIN_SYNC_INTERVAL_HOURS = 1
 const val MAX_SYNC_INTERVAL_HOURS = 168
+const val MIN_FLOATING_LYRICS_FONT_SIZE = 14
+const val MAX_FLOATING_LYRICS_FONT_SIZE = 40
+const val DEFAULT_FLOATING_LYRICS_FONT_SIZE = 22
+const val DEFAULT_FLOATING_LYRICS_LINES = 2
 
 /** User-facing cloud sync preferences; transient state lives in SyncStateStore. */
 data class SyncSettings(
@@ -134,8 +138,16 @@ data class AppSettings(
     val widgetBackgroundColor: Int? = null,
     /** Widget background opacity percentage, 20..100. */
     val widgetBackgroundOpacity: Int = 80,
-    /** Desktop-only placeholder for the floating lyrics window. */
-    val desktopFloatingLyrics: Boolean = false,
+    /** Floating desktop lyrics overlay, available on Android and desktop. */
+    val floatingLyrics: Boolean = false,
+    /** ARGB colour of the currently played line; null follows the platform default. */
+    val floatingLyricsPlayedColor: Int? = null,
+    /** ARGB colour of the upcoming line; null follows the platform default. */
+    val floatingLyricsUnplayedColor: Int? = null,
+    /** Floating lyrics text size in sp. */
+    val floatingLyricsFontSize: Int = DEFAULT_FLOATING_LYRICS_FONT_SIZE,
+    /** Number of lyric lines shown by the overlay (1 or 2). */
+    val floatingLyricsLines: Int = DEFAULT_FLOATING_LYRICS_LINES,
     /** Requests a ~90Hz display mode while browsing track lists. */
     val highRefreshRateLists: Boolean = true,
     /** Opens the full player when a track row is tapped; disable to stay on the list. */

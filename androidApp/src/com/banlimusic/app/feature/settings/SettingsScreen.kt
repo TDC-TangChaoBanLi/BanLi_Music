@@ -152,6 +152,21 @@ fun SettingsScreen(
             override fun setWidgetBackgroundOpacity(opacity: Int) {
                 viewModel.setWidgetBackgroundOpacity(opacity)
             }
+            override fun setFloatingLyrics(enabled: Boolean) {
+                viewModel.setFloatingLyrics(enabled)
+            }
+            override fun setFloatingLyricsPlayedColor(color: Int?) {
+                viewModel.setFloatingLyricsPlayedColor(color)
+            }
+            override fun setFloatingLyricsUnplayedColor(color: Int?) {
+                viewModel.setFloatingLyricsUnplayedColor(color)
+            }
+            override fun setFloatingLyricsFontSize(sizeSp: Int) {
+                viewModel.setFloatingLyricsFontSize(sizeSp)
+            }
+            override fun setFloatingLyricsLines(count: Int) {
+                viewModel.setFloatingLyricsLines(count)
+            }
             override fun setAllowMobileNetwork(enabled: Boolean) {
                 viewModel.setAllowMobileNetwork(enabled)
             }

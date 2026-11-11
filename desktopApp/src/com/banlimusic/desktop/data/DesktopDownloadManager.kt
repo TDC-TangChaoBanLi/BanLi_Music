@@ -14,6 +14,7 @@ import com.banlimusic.app.core.model.DownloadRequestItem
 import com.banlimusic.app.core.model.QualityTiers
 import com.banlimusic.app.core.model.Track
 import com.banlimusic.app.core.network.JsonHttpClient
+import com.banlimusic.app.core.network.retryTransient
 import com.banlimusic.desktop.DesktopPaths
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -331,7 +332,13 @@ class DesktopDownloadManager(
             }
             persist()
 
-            val info = musicRepository.downloadInfo(task.track, task.qualityKbps)
+            val info = retryTransient(
+                maxAttempts = 3,
+                initialDelayMs = 1_500L,
+                shouldRetry = { it.isRetryableDownloadError() },
+            ) {
+                musicRepository.downloadInfo(task.track, task.qualityKbps)
+            }
             val extension = extensionFor(info.url)
             val directory = downloadDirectory()
             Files.createDirectories(directory)
@@ -344,47 +351,53 @@ class DesktopDownloadManager(
                 .url(info.url)
                 .header("User-Agent", JsonHttpClient.USER_AGENT)
                 .build()
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw MusicException.Server(response.code)
-                val total = response.body.contentLength()
-                    .takeIf { it > 0L }
-                    ?: info.sizeBytes
-                    ?: 0L
-                updateTask(id) {
-                    it.copy(
-                        totalBytes = total,
-                        bytesDownloaded = 0L,
-                        updatedAt = System.currentTimeMillis(),
-                    )
-                }
-                partFile.outputStream().use { output ->
-                    response.body.byteStream().use { input ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        var downloaded = 0L
-                        var lastUpdate = 0L
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            output.write(buffer, 0, read)
-                            downloaded += read
-                            val now = System.currentTimeMillis()
-                            if (now - lastUpdate >= 250L) {
-                                lastUpdate = now
-                                updateTask(id) {
-                                    it.copy(
-                                        bytesDownloaded = downloaded,
-                                        totalBytes = if (total > 0L) total else downloaded,
-                                        updatedAt = now,
-                                    )
+            retryTransient(
+                maxAttempts = 3,
+                initialDelayMs = 1_500L,
+                shouldRetry = { it.isRetryableDownloadError() },
+            ) {
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw MusicException.Server(response.code)
+                    val total = response.body.contentLength()
+                        .takeIf { it > 0L }
+                        ?: info.sizeBytes
+                        ?: 0L
+                    updateTask(id) {
+                        it.copy(
+                            totalBytes = total,
+                            bytesDownloaded = 0L,
+                            updatedAt = System.currentTimeMillis(),
+                        )
+                    }
+                    partFile.outputStream().use { output ->
+                        response.body.byteStream().use { input ->
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            var downloaded = 0L
+                            var lastUpdate = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                output.write(buffer, 0, read)
+                                downloaded += read
+                                val now = System.currentTimeMillis()
+                                if (now - lastUpdate >= 250L) {
+                                    lastUpdate = now
+                                    updateTask(id) {
+                                        it.copy(
+                                            bytesDownloaded = downloaded,
+                                            totalBytes = if (total > 0L) total else downloaded,
+                                            updatedAt = now,
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        updateTask(id) {
-                            it.copy(
-                                bytesDownloaded = downloaded,
-                                totalBytes = if (total > 0L) total else downloaded,
-                                updatedAt = System.currentTimeMillis(),
-                            )
+                            updateTask(id) {
+                                it.copy(
+                                    bytesDownloaded = downloaded,
+                                    totalBytes = if (total > 0L) total else downloaded,
+                                    updatedAt = System.currentTimeMillis(),
+                                )
+                            }
                         }
                     }
                 }
@@ -435,6 +448,13 @@ class DesktopDownloadManager(
                 target?.let { runCatching { File(it.parentFile, "${it.name}.part").delete() } }
             }
         }
+    }
+
+    private fun Throwable.isRetryableDownloadError(): Boolean = when (this) {
+        is java.io.IOException -> true
+        is MusicException.Network, is MusicException.Timeout -> true
+        is MusicException.Server -> code >= 500
+        else -> false
     }
 
     private suspend fun writeSidecars(track: Track, audio: File) {

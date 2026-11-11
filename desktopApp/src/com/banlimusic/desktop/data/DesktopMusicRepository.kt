@@ -2,6 +2,7 @@ package com.banlimusic.desktop.data
 
 import com.banlimusic.app.core.common.MusicException
 import com.banlimusic.app.core.common.TtlCache
+import com.banlimusic.app.core.common.isTransientLyricsError
 import com.banlimusic.app.core.limiter.RateLimitStatus
 import com.banlimusic.app.core.model.DownloadInfo
 import com.banlimusic.app.core.model.Lyrics
@@ -86,11 +87,26 @@ class DesktopMusicRepository(
         return result
     }
 
-    override suspend fun resolveStream(track: Track, qualityKbps: Int?): StreamInfo {
+    override suspend fun resolveStream(track: Track, qualityKbps: Int?): StreamInfo =
+        resolveStream(track, qualityKbps, rotate = 0)
+
+    /** Retry entry point: rotates the preferred source after each failed attempt. */
+    suspend fun resolveStream(
+        track: Track,
+        qualityKbps: Int?,
+        rotate: Int,
+    ): StreamInfo {
         val candidates = track.sources
             .filter { TrackAction.STREAM in it.availableActions }
             .map { StreamCandidate(it.providerId, it.providerTrackId) }
-        return streamResolver.resolve(candidates, qualityKbps)
+        return streamResolver.resolve(candidates, qualityKbps, rotate)
+    }
+
+    fun invalidateStream(track: Track, qualityKbps: Int? = null) {
+        val candidates = track.sources
+            .filter { TrackAction.STREAM in it.availableActions }
+            .map { StreamCandidate(it.providerId, it.providerTrackId) }
+        streamResolver.invalidate(candidates, qualityKbps)
     }
 
     override suspend fun lyrics(track: Track): Lyrics? {
@@ -99,6 +115,7 @@ class DesktopMusicRepository(
             lyricsCache.put(track.id, cached)
             return cached
         }
+        var transientError: Throwable? = null
         for (source in track.sources) {
             val provider = providersById[source.providerId] ?: continue
             if (!provider.capabilities.lyrics) continue
@@ -113,9 +130,13 @@ class DesktopMusicRepository(
                 throw cancelled
             } catch (rateLimited: MusicException.RateLimited) {
                 throw rateLimited
-            } catch (_: Throwable) {
-                // Try the next source.
+            } catch (error: Throwable) {
+                // Keep the retry path separate from a confirmed empty result.
+                if (error.isTransientLyricsError()) transientError = error
             }
+        }
+        transientError?.let { error ->
+            throw (error as? MusicException) ?: MusicException.Network(error)
         }
         return null
     }

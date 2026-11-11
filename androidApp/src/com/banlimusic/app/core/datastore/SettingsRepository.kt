@@ -61,6 +61,11 @@ class SettingsRepository(private val context: Context) {
         val widgetTheme = stringPreferencesKey("widget_theme")
         val widgetBackgroundColor = longPreferencesKey("widget_background_color")
         val widgetBackgroundOpacity = intPreferencesKey("widget_background_opacity")
+        val floatingLyrics = booleanPreferencesKey("floating_lyrics_enabled")
+        val floatingLyricsPlayedColor = longPreferencesKey("floating_lyrics_played_color")
+        val floatingLyricsUnplayedColor = longPreferencesKey("floating_lyrics_unplayed_color")
+        val floatingLyricsFontSize = intPreferencesKey("floating_lyrics_font_size")
+        val floatingLyricsLines = intPreferencesKey("floating_lyrics_lines")
         val highRefreshRateLists = booleanPreferencesKey("high_refresh_rate_lists")
         val openPlayerOnTrackClick = booleanPreferencesKey("open_player_on_track_click")
 
@@ -160,6 +165,19 @@ class SettingsRepository(private val context: Context) {
                     ?.toInt(),
                 widgetBackgroundOpacity = (preferences[Keys.widgetBackgroundOpacity] ?: 80)
                     .coerceIn(20, 100),
+                floatingLyrics = preferences[Keys.floatingLyrics] ?: false,
+                floatingLyricsPlayedColor = preferences[Keys.floatingLyricsPlayedColor]
+                    ?.takeIf { it != 0L }
+                    ?.toInt(),
+                floatingLyricsUnplayedColor = preferences[Keys.floatingLyricsUnplayedColor]
+                    ?.takeIf { it != 0L }
+                    ?.toInt(),
+                floatingLyricsFontSize = (preferences[Keys.floatingLyricsFontSize]
+                    ?: DEFAULT_FLOATING_LYRICS_FONT_SIZE)
+                    .coerceIn(MIN_FLOATING_LYRICS_FONT_SIZE, MAX_FLOATING_LYRICS_FONT_SIZE),
+                floatingLyricsLines = (preferences[Keys.floatingLyricsLines]
+                    ?: DEFAULT_FLOATING_LYRICS_LINES)
+                    .coerceIn(1, 2),
                 highRefreshRateLists = preferences[Keys.highRefreshRateLists] ?: true,
                 openPlayerOnTrackClick = preferences[Keys.openPlayerOnTrackClick] ?: true,
                 defaultNavItem = sanitizeDefaultNavItem(preferences[Keys.defaultNavItem], navItems),
@@ -324,6 +342,37 @@ class SettingsRepository(private val context: Context) {
     }
     suspend fun setWidgetBackgroundOpacity(opacity: Int) = context.settingsDataStore.edit {
         it[Keys.widgetBackgroundOpacity] = opacity.coerceIn(20, 100)
+    }
+
+    suspend fun setFloatingLyrics(enabled: Boolean) = context.settingsDataStore.edit {
+        it[Keys.floatingLyrics] = enabled
+    }
+
+    suspend fun setFloatingLyricsPlayedColor(color: Int?) = context.settingsDataStore.edit {
+        if (color == null) {
+            it.remove(Keys.floatingLyricsPlayedColor)
+        } else {
+            it[Keys.floatingLyricsPlayedColor] = color.toLong() and 0xFFFFFFFFL
+        }
+    }
+
+    suspend fun setFloatingLyricsUnplayedColor(color: Int?) = context.settingsDataStore.edit {
+        if (color == null) {
+            it.remove(Keys.floatingLyricsUnplayedColor)
+        } else {
+            it[Keys.floatingLyricsUnplayedColor] = color.toLong() and 0xFFFFFFFFL
+        }
+    }
+
+    suspend fun setFloatingLyricsFontSize(sizeSp: Int) = context.settingsDataStore.edit {
+        it[Keys.floatingLyricsFontSize] = sizeSp.coerceIn(
+            MIN_FLOATING_LYRICS_FONT_SIZE,
+            MAX_FLOATING_LYRICS_FONT_SIZE,
+        )
+    }
+
+    suspend fun setFloatingLyricsLines(count: Int) = context.settingsDataStore.edit {
+        it[Keys.floatingLyricsLines] = count.coerceIn(1, 2)
     }
 
     suspend fun setHighRefreshRateLists(enabled: Boolean) = context.settingsDataStore.edit {

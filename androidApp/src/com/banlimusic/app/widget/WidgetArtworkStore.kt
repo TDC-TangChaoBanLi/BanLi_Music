@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import com.banlimusic.app.MusicApplication
 import com.banlimusic.app.core.network.JsonHttpClient
+import com.banlimusic.app.core.network.retryTransient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -93,19 +94,32 @@ object WidgetArtworkStore {
                         .url(artworkUrl)
                         .header("User-Agent", JsonHttpClient.USER_AGENT)
                         .build()
-                    val response = runCatching {
-                        app.container.downloadHttpClient.newCall(request).execute()
-                    }.getOrNull() ?: return@withContext false
-                    if (!response.isSuccessful) {
-                        response.close()
-                        return@withContext false
-                    }
-                    return@withContext response.use { body ->
-                        body.body.byteStream().use { source ->
-                            target.outputStream().use { output -> source.copyTo(output) }
+                    return@withContext runCatching {
+                        retryTransient(
+                            maxAttempts = 3,
+                            shouldRetry = { it is java.io.IOException },
+                        ) {
+                            val response = app.container.downloadHttpClient
+                                .newCall(request)
+                                .execute()
+                            if (!response.isSuccessful) {
+                                val code = response.code
+                                response.close()
+                                if (code >= 500 || code == 429) {
+                                    throw java.io.IOException("HTTP $code")
+                                }
+                                return@retryTransient false
+                            }
+                            response.use { body ->
+                                body.body.byteStream().use { source ->
+                                    target.outputStream().use { output ->
+                                        source.copyTo(output)
+                                    }
+                                }
+                            }
+                            true
                         }
-                        true
-                    }
+                    }.getOrDefault(false)
                 }
             }
             input ?: return@withContext false

@@ -18,6 +18,7 @@ class JsonHttpClient(
     private val json: Json,
     private val scheduler: RequestScheduler,
     private val defaultRetryAfterMs: Long = TimeUnit.MINUTES.toMillis(5),
+    private val maxAttempts: Int = 3,
 ) {
 
     suspend fun getJson(url: HttpUrl): JsonElement = withContext(Dispatchers.IO) {
@@ -27,31 +28,11 @@ class JsonHttpClient(
             .header("User-Agent", USER_AGENT)
             .build()
 
-        val body = scheduler.execute {
-            try {
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        response.body.string()
-                    } else {
-                        when (response.code) {
-                            401, 403 -> throw MusicException.Unauthorized()
-                            404, 410 -> throw MusicException.NotFound()
-                            429 -> {
-                                val retryAfterMs = parseRetryAfter(response.header("Retry-After"))
-                                scheduler.penalize(retryAfterMs)
-                                throw MusicException.RateLimited(retryAfterMs)
-                            }
-
-                            in 500..599 -> throw MusicException.Server(response.code)
-                            else -> throw MusicException.Server(response.code)
-                        }
-                    }
-                }
-            } catch (timeout: SocketTimeoutException) {
-                throw MusicException.Timeout(timeout)
-            } catch (io: IOException) {
-                throw MusicException.Network(io)
-            }
+        val body = retryTransient(
+            maxAttempts = maxAttempts,
+            shouldRetry = { error -> (error as? MusicException)?.isTransientRequest() == true },
+        ) {
+            execute(request)
         }
 
         try {
@@ -59,6 +40,39 @@ class JsonHttpClient(
         } catch (error: Exception) {
             throw MusicException.Parse(error)
         }
+    }
+
+    private suspend fun execute(request: Request): String = scheduler.execute {
+        try {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    response.body.string()
+                } else {
+                    when (response.code) {
+                        401, 403 -> throw MusicException.Unauthorized()
+                        404, 410 -> throw MusicException.NotFound()
+                        429 -> {
+                            val retryAfterMs = parseRetryAfter(response.header("Retry-After"))
+                            scheduler.penalize(retryAfterMs)
+                            throw MusicException.RateLimited(retryAfterMs)
+                        }
+
+                        in 500..599 -> throw MusicException.Server(response.code)
+                        else -> throw MusicException.Server(response.code)
+                    }
+                }
+            }
+        } catch (timeout: SocketTimeoutException) {
+            throw MusicException.Timeout(timeout)
+        } catch (io: IOException) {
+            throw MusicException.Network(io)
+        }
+    }
+
+    private fun MusicException.isTransientRequest(): Boolean = when (this) {
+        is MusicException.Network, is MusicException.Timeout -> true
+        is MusicException.Server -> code >= 500
+        else -> false
     }
 
     private fun parseRetryAfter(header: String?): Long {

@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyOrientationPolicy()
         enableEdgeToEdge()
         handleWidgetIntent(intent)
         handleOAuthIntent(intent)
@@ -108,6 +109,18 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Phones stay in portrait to keep the player/list layouts stable. Tablets
+     * (smallest width >= 600dp) keep free rotation and use the rail layout.
+     */
+    private fun applyOrientationPolicy() {
+        if (resources.configuration.smallestScreenWidthDp >= TABLET_MIN_WIDTH_DP) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        } else {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
     }
 
@@ -248,6 +261,8 @@ class MainActivity : ComponentActivity() {
         const val TARGET_REFRESH_HZ = 90f
         const val MIN_HIGH_REFRESH_HZ = 80f
         const val MAX_HIGH_REFRESH_HZ = 100f
+        /** Android/Compose treat 600dp as the tablet breakpoint. */
+        const val TABLET_MIN_WIDTH_DP = 600
         const val EXTRA_FROM_WIDGET = "com.banlimusic.app.extra.FROM_WIDGET"
         const val EXTRA_WIDGET_OPEN_PLAYER = "com.banlimusic.app.extra.WIDGET_OPEN_PLAYER"
     }

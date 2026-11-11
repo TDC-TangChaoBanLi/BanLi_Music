@@ -1,6 +1,7 @@
 package com.banlimusic.app.data.sync
 
 import com.banlimusic.app.core.network.awaitResponse
+import com.banlimusic.app.core.network.retryTransient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -96,30 +97,43 @@ class OneDriveAuthApi(
             .post(form)
             .header("Accept", "application/json")
             .build()
-        val response = try {
-            client.newCall(request).awaitResponse()
-        } catch (e: SocketTimeoutException) {
-            throw SyncException.Timeout(e)
-        } catch (e: IOException) {
-            throw SyncException.Network(e)
-        }
-        response.use {
-            val body = it.body?.string().orEmpty()
-            if (!it.isSuccessful) {
-                val error = runCatching {
-                    json.decodeFromString(TokenError.serializer(), body)
-                }.getOrNull()
-                if (it.code == 400 && error?.error == "invalid_grant") {
-                    throw SyncException.AuthRequired()
-                }
-                if (it.code == 401 || it.code == 403) throw SyncException.AuthRequired()
-                throw SyncException.Unavailable(
-                    error?.errorDescription?.takeIf { text -> text.isNotBlank() }
-                        ?: "登录失败（${it.code}）",
-                )
+        // Transient failures and 5xx responses are retried with backoff below.
+        retryTransient(
+            maxAttempts = 3,
+            shouldRetry = { error ->
+                error is SyncException.Network ||
+                    error is SyncException.Timeout ||
+                    (error is SyncException.Server && error.code >= 500)
+            },
+        ) {
+            val response = try {
+                client.newCall(request).awaitResponse()
+            } catch (e: SocketTimeoutException) {
+                throw SyncException.Timeout(e)
+            } catch (e: IOException) {
+                throw SyncException.Network(e)
             }
-            runCatching { json.decodeFromString(TokenResponse.serializer(), body) }
-                .getOrElse { throw SyncException.Parse(it) }
+            response.use {
+                val body = it.body?.string().orEmpty()
+                if (it.code in 500..599) {
+                    throw SyncException.Server(it.code)
+                }
+                if (!it.isSuccessful) {
+                    val error = runCatching {
+                        json.decodeFromString(TokenError.serializer(), body)
+                    }.getOrNull()
+                    if (it.code == 400 && error?.error == "invalid_grant") {
+                        throw SyncException.AuthRequired()
+                    }
+                    if (it.code == 401 || it.code == 403) throw SyncException.AuthRequired()
+                    throw SyncException.Unavailable(
+                        error?.errorDescription?.takeIf { text -> text.isNotBlank() }
+                            ?: "登录失败（${it.code}）",
+                    )
+                }
+                runCatching { json.decodeFromString(TokenResponse.serializer(), body) }
+                    .getOrElse { throw SyncException.Parse(it) }
+            }
         }
     }
 

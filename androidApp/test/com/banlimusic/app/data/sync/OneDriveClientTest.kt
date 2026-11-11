@@ -174,11 +174,12 @@ class OneDriveClientTest {
 
     @Test
     fun serverErrorIsReported() = runTest {
-        server.enqueue(MockResponse().setResponseCode(503))
+        repeat(3) { server.enqueue(MockResponse().setResponseCode(503)) }
 
         val error = runCatching { client().downloadLibrary() }.exceptionOrNull()
 
         assertTrue(error is SyncException.Server)
         assertEquals(503, (error as SyncException.Server).code)
+        assertEquals(3, server.requestCount)
     }
 }

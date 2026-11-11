@@ -37,7 +37,9 @@ class GdMusicProviderIntegrationTest {
             .readTimeout(5, TimeUnit.SECONDS)
             .build()
         val api = GdApiClient(
-            http = JsonHttpClient(httpClient, json, scheduler),
+            // Error mapping tests enqueue a single response; retry behaviour is
+            // covered by NetworkRetryTest and the OneDrive client tests.
+            http = JsonHttpClient(httpClient, json, scheduler, maxAttempts = 1),
             scheduler = scheduler,
             baseUrl = server.url("/api.php"),
         )

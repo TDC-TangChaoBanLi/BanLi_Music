@@ -3,6 +3,7 @@ package com.banlimusic.desktop.data
 import com.banlimusic.app.core.cache.CacheUsage
 import com.banlimusic.app.core.model.Lyrics
 import com.banlimusic.app.core.network.JsonHttpClient
+import com.banlimusic.app.core.network.retryTransient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -58,13 +59,24 @@ class DesktopMetadataCache(
             .header("User-Agent", JsonHttpClient.USER_AGENT)
             .build()
         runCatching {
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@use null
-                val file = File(artworkDir, "${key(trackId)}.img")
-                response.body.byteStream().use { input ->
-                    file.outputStream().use { output -> input.copyTo(output) }
+            retryTransient(
+                maxAttempts = 3,
+                shouldRetry = { it is java.io.IOException },
+            ) {
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val code = response.code
+                        if (code >= 500 || code == 429) {
+                            throw java.io.IOException("HTTP $code")
+                        }
+                        return@retryTransient null
+                    }
+                    val file = File(artworkDir, "${key(trackId)}.img")
+                    response.body.byteStream().use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    if (file.length() > 0L) file.toURI().toString() else null
                 }
-                if (file.length() > 0L) file.toURI().toString() else null
             }
         }.getOrNull()
     }

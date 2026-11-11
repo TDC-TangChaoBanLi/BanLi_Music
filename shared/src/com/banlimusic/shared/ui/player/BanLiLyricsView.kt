@@ -220,10 +220,16 @@ fun BanLiLyricsView(
                 }
 
                 lyrics == null -> {
-                    BanLiEmptyState(
-                        title = emptyTitle,
-                        description = emptyDescription,
-                    )
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        BanLiEmptyState(
+                            title = emptyTitle,
+                            description = emptyDescription,
+                        )
+                        TextButton(onClick = onReload) { Text("重新加载") }
+                    }
                 }
 
                 lines.isEmpty() -> {

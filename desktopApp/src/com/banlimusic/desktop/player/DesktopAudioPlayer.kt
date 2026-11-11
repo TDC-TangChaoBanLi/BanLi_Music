@@ -283,89 +283,123 @@ class DesktopAudioPlayer(
         startPositionMs: Long,
         localFile: File?,
     ) {
-        val qualityKbps = settings.current().qualityKbps
-        var cacheSink: DesktopPlaybackCache.CacheSink? = null
+        val currentSettings = settings.current()
+        val qualityKbps = currentSettings.qualityKbps
+        val maxAttempts = currentSettings.playbackRetryCount.coerceIn(0, 10) + 1
+        var seekMs = startPositionMs
+        var attempt = 0
+        var lastError: Throwable? = null
+
         try {
-            val cachedFile = localFile ?: cache.cachedFileAtLeast(track.id, qualityKbps)
-            if (cachedFile != null) {
-                updateDuration(localMp3DurationMs(cachedFile))
-                val completed = FileInputStream(cachedFile).use { stream ->
-                    input = stream
-                    playStream(currentGeneration, track, stream, startPositionMs)
-                }
-                if (completed) handleTrackEnd(currentGeneration)
-            } else {
-                val stream = repository.resolveStream(track)
-                updateDuration(estimateDurationMs(stream.sizeBytes, stream.bitrateKbps))
-                val request = Request.Builder()
-                    .url(stream.url)
-                    .header("User-Agent", JsonHttpClient.USER_AGENT)
-                    .build()
-                val completed = httpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        throw MusicException.Server(response.code)
+            while (attempt < maxAttempts) {
+                if (stopped || currentGeneration != generation) return
+                var cacheSink: DesktopPlaybackCache.CacheSink? = null
+                try {
+                    val cachedFile = localFile ?: cache.cachedFileAtLeast(track.id, qualityKbps)
+                    if (cachedFile != null) {
+                        updateDuration(localMp3DurationMs(cachedFile))
+                        val completed = FileInputStream(cachedFile).use { stream ->
+                            input = stream
+                            playStream(currentGeneration, track, stream, seekMs)
+                        }
+                        if (completed) handleTrackEnd(currentGeneration)
+                        return
                     }
-                    if (_state.value.durationMs <= 0L) {
-                        updateDuration(
-                            estimateDurationMs(
-                                response.body.contentLength().takeIf { it > 0L },
-                                stream.bitrateKbps,
-                            ),
+
+                    val stream = repository.resolveStream(track, qualityKbps, attempt)
+                    updateDuration(estimateDurationMs(stream.sizeBytes, stream.bitrateKbps))
+                    val request = Request.Builder()
+                        .url(stream.url)
+                        .header("User-Agent", JsonHttpClient.USER_AGENT)
+                        .build()
+                    val completed = httpClient.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) throw playbackHttpError(response)
+                        if (_state.value.durationMs <= 0L) {
+                            updateDuration(
+                                estimateDurationMs(
+                                    response.body.contentLength().takeIf { it > 0L },
+                                    stream.bitrateKbps,
+                                ),
+                            )
+                        }
+                        val body = response.body.byteStream()
+                        val sink = if (seekMs == 0L) {
+                            runCatching {
+                                cache.begin(
+                                    track = track,
+                                    qualityKbps = qualityKbps,
+                                    extension = extensionFor(stream.url),
+                                    expectedBytes = stream.sizeBytes ?: response.body.contentLength(),
+                                )
+                            }.getOrNull()
+                        } else {
+                            null
+                        }
+                        cacheSink = sink
+                        val playbackStream = if (sink != null) {
+                            TeeInputStream(body, sink)
+                        } else {
+                            body
+                        }
+                        input = playbackStream
+                        val done = playStream(
+                            currentGeneration,
+                            track,
+                            playbackStream,
+                            seekMs,
+                        )
+                        cacheSink?.let { active ->
+                            if (done && !active.failed) {
+                                // Commit before starting the next track: start() cancels
+                                // this job, and a suspended commit would be cancelled and
+                                // the completed cache file deleted.
+                                cache.commit(active)
+                            } else {
+                                cache.abort(active)
+                            }
+                            cacheSink = null
+                        }
+                        done
+                    }
+                    if (completed) handleTrackEnd(currentGeneration)
+                    return
+                } catch (cancelled: CancellationException) {
+                    cacheSink?.let(cache::abort)
+                    throw cancelled
+                } catch (error: Throwable) {
+                    cacheSink?.let(cache::abort)
+                    if (stopped || currentGeneration != generation) return
+                    lastError = error
+                    runCatching { input?.close() }
+                    input = null
+                    if (!error.isRetryablePlaybackError() || attempt >= maxAttempts - 1) break
+
+                    val waitMs = when (error) {
+                        is MusicException.RateLimited -> error.retryAfterMs
+                        else -> RETRY_BASE_DELAY_MS shl attempt
+                    }
+                    if (waitMs > MAX_RETRY_WAIT_MS) break
+                    _state.update {
+                        it.copy(
+                            loading = true,
+                            playing = false,
+                            paused = false,
+                            error = null,
                         )
                     }
-                    val body = response.body.byteStream()
-                    val sink = if (startPositionMs == 0L) {
-                        runCatching {
-                            cache.begin(
-                                track = track,
-                                qualityKbps = qualityKbps,
-                                extension = extensionFor(stream.url),
-                                expectedBytes = stream.sizeBytes ?: response.body.contentLength(),
-                            )
-                        }.getOrNull()
-                    } else {
-                        null
-                    }
-                    cacheSink = sink
-                    val playbackStream = if (sink != null) {
-                        TeeInputStream(body, sink)
-                    } else {
-                        body
-                    }
-                    input = playbackStream
-                    val done = playStream(
-                        currentGeneration,
-                        track,
-                        playbackStream,
-                        startPositionMs,
-                    )
-                    cacheSink?.let { active ->
-                        if (done && !active.failed) {
-                            // Commit before starting the next track: start() cancels
-                            // this job, and a suspended commit would be cancelled and
-                            // the completed cache file deleted.
-                            cache.commit(active)
-                        } else {
-                            cache.abort(active)
-                        }
-                        cacheSink = null
-                    }
-                    done
+                    delay(waitMs.coerceAtLeast(500L))
+                    repository.invalidateStream(track, qualityKbps)
+                    seekMs = _state.value.positionMs.takeIf { it > 0L } ?: seekMs
+                    attempt++
                 }
-                if (completed) handleTrackEnd(currentGeneration)
             }
-        } catch (cancelled: CancellationException) {
-            cacheSink?.let(cache::abort)
-            throw cancelled
-        } catch (error: Throwable) {
-            cacheSink?.let(cache::abort)
             if (stopped || currentGeneration != generation) return
             _state.update {
                 it.copy(
                     loading = false,
                     playing = false,
                     paused = false,
-                    error = error.userMessage(),
+                    error = (lastError ?: MusicException.NoPlayableSource()).userMessage(),
                 )
             }
         } finally {
@@ -375,6 +409,29 @@ class DesktopAudioPlayer(
                 input = null
             }
         }
+    }
+
+    /** Maps a failed stream response to a retry-aware domain error. */
+    private fun playbackHttpError(response: okhttp3.Response): Throwable = when {
+        response.code == 401 || response.code == 403 -> MusicException.Unauthorized()
+        response.code == 404 || response.code == 410 -> MusicException.NotFound()
+        response.code == 429 -> {
+            val retryAfterMs = response.header("Retry-After")
+                ?.trim()
+                ?.toLongOrNull()
+                ?.takeIf { it > 0L }
+                ?.let { it * 1_000L }
+                ?: DEFAULT_RATE_LIMIT_WAIT_MS
+            MusicException.RateLimited(retryAfterMs)
+        }
+
+        else -> MusicException.Server(response.code)
+    }
+
+    private fun Throwable.isRetryablePlaybackError(): Boolean = when (this) {
+        is MusicException.Unauthorized -> false
+        is MusicException -> true
+        else -> this is java.io.IOException
     }
 
     private suspend fun playStream(
@@ -579,6 +636,9 @@ class DesktopAudioPlayer(
 
     private companion object {
         const val MAX_ESTIMATED_DURATION_MS = 24L * 60L * 60L * 1_000L
+        const val RETRY_BASE_DELAY_MS = 2_000L
+        const val MAX_RETRY_WAIT_MS = 30_000L
+        const val DEFAULT_RATE_LIMIT_WAIT_MS = 5_000L
         val AUDIO_EXTENSIONS = setOf("mp3", "flac", "m4a", "aac", "ogg", "opus", "wav")
     }
 }
