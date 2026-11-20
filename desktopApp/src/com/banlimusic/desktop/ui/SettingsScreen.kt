@@ -126,6 +126,9 @@ fun DesktopSettingsScreen(state: DesktopAppState) {
             override fun setFloatingLyricsLines(count: Int) =
                 state.container.settingsRepository.setFloatingLyricsLines(count)
 
+            override fun setFloatingLyricsLocked(locked: Boolean) =
+                state.container.settingsRepository.setFloatingLyricsLocked(locked)
+
             override fun setAllowMobileNetwork(enabled: Boolean) =
                 state.container.settingsRepository.setAllowMobileNetwork(enabled)
 

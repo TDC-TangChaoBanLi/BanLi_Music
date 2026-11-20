@@ -148,6 +148,8 @@ data class AppSettings(
     val floatingLyricsFontSize: Int = DEFAULT_FLOATING_LYRICS_FONT_SIZE,
     /** Number of lyric lines shown by the overlay (1 or 2). */
     val floatingLyricsLines: Int = DEFAULT_FLOATING_LYRICS_LINES,
+    /** Hides overlay buttons and lets pointer events reach the app underneath. */
+    val floatingLyricsLocked: Boolean = false,
     /** Requests a ~90Hz display mode while browsing track lists. */
     val highRefreshRateLists: Boolean = true,
     /** Opens the full player when a track row is tapped; disable to stay on the list. */

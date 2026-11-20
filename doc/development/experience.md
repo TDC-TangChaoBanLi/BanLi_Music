@@ -52,7 +52,9 @@
 - 本地音乐扫描使用 `MediaStore`，不要引入文件选择或媒体扫描第三方库。
 - 桌面小组件使用平台 `AppWidgetProvider` + `RemoteViews`，状态持久化在 `PlayerWidgetUpdater`；播放中使用 `partiallyUpdateAppWidget` 局部刷新，避免整层替换造成延迟。自定义颜色/透明度需要运行时绘制圆角位图，位图边长必须限制在约 320px，避免 Binder 传输超限。
 - 全局媒体键没有 JVM 标准 API：当前用 JNA 直接调用 Win32 低层键盘钩子与 X11 `XGrabKey`。JNA 核心 jar 约 2 MB，替代方案是各平台原生扩展或 Linux MPRIS（Wayland 更可靠），但后者会引入 D-Bus 依赖；新增平台支持时优先复用 `DesktopMediaKeys` 的抽象。
-- 托盘右键菜单不要依赖 AWT/Compose `Tray` 的默认菜单文本，否则 Linux 上可能因字体回退出现中文乱码；使用 AWT `TrayIcon` 接收点击，再用无边框 Compose `Window` 自绘菜单。
+- 托盘右键菜单不要依赖 AWT/Compose `Tray` 的默认菜单文本，否则 Linux 上可能因字体回退出现中文乱码；使用 AWT `TrayIcon` 接收点击，再用无边框 Compose `DialogWindow` 自绘菜单。`DialogWindow` 有隐藏 owner，不会在 Windows 任务栏新增项目；普通 `Window`（JFrame）会。
+- 桌面悬浮歌词同样使用 `DialogWindow`（不占任务栏）。锁定后需要鼠标穿透：`ComposeDialog.windowHandle` 是 Skia 子画布，必须先 `GetAncestor(..., GA_ROOT)` 找到顶层对话框。Compose 的透明窗口本身已经是 `WS_EX_LAYERED` 并依赖 DirectComposition 逐像素透明，因此**只添加 `WS_EX_TRANSPARENT`**；千万不要调用 `SetLayeredWindowAttributes`（`LWA_ALPHA`/`LWA_COLORKEY` 都会把 DComp 表面变成不透明黑框）。若窗口尚未出现 `WS_EX_LAYERED`，下一轮 80ms 轮询再试，不要自行补 LAYERED。整窗穿透时解锁按钮应放在独立的 28dp `DialogWindow` 中，由 `MouseInfo` 轮询悬停歌词触发；这个小窗必须在主歌词窗口内容的**父级组合**中创建，不能嵌套在主 `DialogWindow` 内容里，否则悬停时外层窗口会重建并跳回初始位置。主歌词窗口和解锁小窗在 `window.setLocation` 后都要同步 `DialogState.position`，否则重排时小窗会回到屏幕中心，看起来离歌词很远。X11 用 XShape 清空顶层窗口的 `ShapeInput`。不要在 HiDPI 下混用 Compose 像素坐标与 AWT 屏幕坐标，热区用 `Window.bounds` 比例计算。
+- Android 桌面歌词锁定后加 `FLAG_NOT_TOUCHABLE` 实现点击穿透，视图只绘制文字；锁定/解锁时必须保留顶部控制行高度，只隐藏按钮，否则歌词会向上平移。锁定状态必须持久化到设置并在设置页提供解锁入口。
 
 ## UI 与交互
 

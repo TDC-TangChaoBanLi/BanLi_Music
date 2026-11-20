@@ -208,6 +208,9 @@ class SettingsViewModel(
     fun setFloatingLyricsLines(count: Int) =
         viewModelScope.launch { settings.setFloatingLyricsLines(count) }
 
+    fun setFloatingLyricsLocked(locked: Boolean) =
+        viewModelScope.launch { settings.setFloatingLyricsLocked(locked) }
+
     fun setHighRefreshRateLists(enabled: Boolean) =
         viewModelScope.launch { settings.setHighRefreshRateLists(enabled) }
 

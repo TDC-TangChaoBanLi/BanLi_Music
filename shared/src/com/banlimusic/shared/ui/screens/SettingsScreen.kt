@@ -51,6 +51,7 @@ import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.ImportExport
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
@@ -227,6 +228,7 @@ interface SettingsActions {
     fun setFloatingLyricsUnplayedColor(color: Int?) {}
     fun setFloatingLyricsFontSize(sizeSp: Int) {}
     fun setFloatingLyricsLines(count: Int) {}
+    fun setFloatingLyricsLocked(locked: Boolean) {}
 
     fun setAllowMobileNetwork(enabled: Boolean) {}
     fun setDefaultShowLyrics(enabled: Boolean) {}
@@ -682,6 +684,18 @@ private fun FloatingLyricsSettings(state: SettingsUiState, actions: SettingsActi
         )
         if (settings.floatingLyrics) {
             HorizontalDivider()
+            BanLiSettingsSwitchRow(
+                icon = Icons.Rounded.Lock,
+                title = "锁定桌面歌词",
+                description = if (state.platform == SettingsPlatform.ANDROID) {
+                    "锁定后隐藏按钮，触摸可穿透到下方应用；可在此处解锁"
+                } else {
+                    "锁定后隐藏边框与按钮，鼠标可穿透；悬停歌词显示解锁按钮"
+                },
+                checked = settings.floatingLyricsLocked,
+                onCheckedChange = actions::setFloatingLyricsLocked,
+            )
+            HorizontalDivider()
             Text(
                 text = "播放中的歌词使用“已播放”颜色，即将播放的一行使用“未播放”颜色。",
                 style = MaterialTheme.typography.bodySmall,
@@ -721,7 +735,11 @@ private fun FloatingLyricsSettings(state: SettingsUiState, actions: SettingsActi
                 }
             }
             Text(
-                text = "悬浮歌词右上角提供锁定/解锁与关闭按钮；锁定后无法拖动。",
+                text = if (state.platform == SettingsPlatform.ANDROID) {
+                    "未锁定时顶部显示锁定/关闭按钮并可拖动；锁定后只显示歌词，触摸事件交给下方应用。"
+                } else {
+                    "未锁定时显示半透明框与拖动区域；锁定后只显示歌词，边框消失并允许点击穿透。"
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

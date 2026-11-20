@@ -159,6 +159,7 @@ class DesktopSettingsRepository {
 
     fun setFloatingLyrics(enabled: Boolean) = update {
         prefs.putBoolean(KEY_FLOATING_LYRICS, enabled)
+        if (!enabled) prefs.putBoolean(KEY_FLOATING_LOCKED, false)
     }
 
     fun setFloatingLyricsPlayedColor(color: Int?) = update {
@@ -189,6 +190,10 @@ class DesktopSettingsRepository {
 
     fun setFloatingLyricsLines(count: Int) = update {
         prefs.putInt(KEY_FLOATING_LINES, count.coerceIn(1, 2))
+    }
+
+    fun setFloatingLyricsLocked(locked: Boolean) = update {
+        prefs.putBoolean(KEY_FLOATING_LOCKED, locked)
     }
 
     fun setSyncAutoSync(enabled: Boolean) = update {
@@ -290,6 +295,7 @@ class DesktopSettingsRepository {
                 KEY_FLOATING_LINES,
                 com.banlimusic.app.core.datastore.DEFAULT_FLOATING_LYRICS_LINES,
             ).coerceIn(1, 2),
+            floatingLyricsLocked = prefs.getBoolean(KEY_FLOATING_LOCKED, false),
             sync = SyncSettings(
                 autoSync = prefs.getBoolean(KEY_SYNC_AUTO, false),
                 intervalHours = prefs.getInt(KEY_SYNC_INTERVAL, 6).coerceIn(
@@ -348,6 +354,7 @@ class DesktopSettingsRepository {
         private const val KEY_FLOATING_UNPLAYED_COLOR = "floating_lyrics_unplayed_color"
         private const val KEY_FLOATING_FONT_SIZE = "floating_lyrics_font_size"
         private const val KEY_FLOATING_LINES = "floating_lyrics_lines"
+        private const val KEY_FLOATING_LOCKED = "floating_lyrics_locked"
         private const val KEY_SYNC_AUTO = "sync_auto"
         private const val KEY_SYNC_INTERVAL = "sync_interval_hours"
     }

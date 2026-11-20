@@ -22,9 +22,6 @@ import kotlin.math.max
 class FloatingLyricsView(context: Context) : View(context) {
 
     private val density = resources.displayMetrics.density
-    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(214, 16, 20, 24)
-    }
     private val playedPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
@@ -41,8 +38,8 @@ class FloatingLyricsView(context: Context) : View(context) {
         style = Paint.Style.STROKE
         strokeWidth = 1.8f * density
         strokeCap = Paint.Cap.ROUND
+        setShadowLayer(5f * density, 0f, 0f, Color.BLACK)
     }
-    private val backgroundRect = RectF()
     private val lockRect = RectF()
     private val closeRect = RectF()
     private val dragSlop = 4f * density
@@ -110,14 +107,15 @@ class FloatingLyricsView(context: Context) : View(context) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
         val lineHeight = playedPaint.textSize * 1.35f
         val lines = if (lineCount == 2) 2 else 1
+        // Keep reserving the (invisible) control row when locked so hiding the
+        // buttons never shifts the lyric text upwards.
         val desired = (controlTop + controlSize + 6f * density + lineHeight * lines +
-            12f * density).toInt()
+            16f * density).toInt()
         setMeasuredDimension(width, desired)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        backgroundRect.set(outerMargin, 0f, w - outerMargin, h.toFloat())
         closeRect.set(
             w - outerMargin - controlSize - 4f * density,
             controlTop,
@@ -134,13 +132,13 @@ class FloatingLyricsView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val radius = 16f * density
-        canvas.drawRoundRect(backgroundRect, radius, radius, backgroundPaint)
-
-        val textLeft = backgroundRect.left + 18f * density
-        val textRight = lockRect.left - 10f * density
+        val textLeft = outerMargin + 6f * density
+        val textRight = width - outerMargin - 6f * density
         val available = max(1f, textRight - textLeft)
         val centerX = (textLeft + textRight) / 2f
+        val lineHeight = playedPaint.textSize * 1.35f
+        val hasSecond = lineCount == 2 && secondaryText.isNotBlank()
+        // Unchanged between locked/unlocked states; only the icons disappear.
         val firstBaseline = controlTop + controlSize + 8f * density + playedPaint.textSize
         val current = TextUtils.ellipsize(
             primaryText,
@@ -149,7 +147,7 @@ class FloatingLyricsView(context: Context) : View(context) {
             TextUtils.TruncateAt.END,
         ).toString()
         canvas.drawText(current, centerX, firstBaseline, playedPaint)
-        if (lineCount == 2 && secondaryText.isNotBlank()) {
+        if (hasSecond) {
             val second = TextUtils.ellipsize(
                 secondaryText,
                 unplayedPaint,
@@ -159,13 +157,15 @@ class FloatingLyricsView(context: Context) : View(context) {
             canvas.drawText(
                 second,
                 centerX,
-                firstBaseline + playedPaint.textSize * 1.35f,
+                firstBaseline + lineHeight,
                 unplayedPaint,
             )
         }
 
-        drawLockIcon(canvas, lockRect)
-        drawCloseIcon(canvas, closeRect)
+        if (!locked) {
+            drawLockIcon(canvas, lockRect)
+            drawCloseIcon(canvas, closeRect)
+        }
     }
 
     private fun drawLockIcon(canvas: Canvas, rect: RectF) {

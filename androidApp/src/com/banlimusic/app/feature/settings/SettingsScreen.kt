@@ -167,6 +167,9 @@ fun SettingsScreen(
             override fun setFloatingLyricsLines(count: Int) {
                 viewModel.setFloatingLyricsLines(count)
             }
+            override fun setFloatingLyricsLocked(locked: Boolean) {
+                viewModel.setFloatingLyricsLocked(locked)
+            }
             override fun setAllowMobileNetwork(enabled: Boolean) {
                 viewModel.setAllowMobileNetwork(enabled)
             }

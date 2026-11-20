@@ -66,6 +66,7 @@ class SettingsRepository(private val context: Context) {
         val floatingLyricsUnplayedColor = longPreferencesKey("floating_lyrics_unplayed_color")
         val floatingLyricsFontSize = intPreferencesKey("floating_lyrics_font_size")
         val floatingLyricsLines = intPreferencesKey("floating_lyrics_lines")
+        val floatingLyricsLocked = booleanPreferencesKey("floating_lyrics_locked")
         val highRefreshRateLists = booleanPreferencesKey("high_refresh_rate_lists")
         val openPlayerOnTrackClick = booleanPreferencesKey("open_player_on_track_click")
 
@@ -178,6 +179,7 @@ class SettingsRepository(private val context: Context) {
                 floatingLyricsLines = (preferences[Keys.floatingLyricsLines]
                     ?: DEFAULT_FLOATING_LYRICS_LINES)
                     .coerceIn(1, 2),
+                floatingLyricsLocked = preferences[Keys.floatingLyricsLocked] ?: false,
                 highRefreshRateLists = preferences[Keys.highRefreshRateLists] ?: true,
                 openPlayerOnTrackClick = preferences[Keys.openPlayerOnTrackClick] ?: true,
                 defaultNavItem = sanitizeDefaultNavItem(preferences[Keys.defaultNavItem], navItems),
@@ -346,6 +348,7 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setFloatingLyrics(enabled: Boolean) = context.settingsDataStore.edit {
         it[Keys.floatingLyrics] = enabled
+        if (!enabled) it[Keys.floatingLyricsLocked] = false
     }
 
     suspend fun setFloatingLyricsPlayedColor(color: Int?) = context.settingsDataStore.edit {
@@ -373,6 +376,10 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setFloatingLyricsLines(count: Int) = context.settingsDataStore.edit {
         it[Keys.floatingLyricsLines] = count.coerceIn(1, 2)
+    }
+
+    suspend fun setFloatingLyricsLocked(locked: Boolean) = context.settingsDataStore.edit {
+        it[Keys.floatingLyricsLocked] = locked
     }
 
     suspend fun setHighRefreshRateLists(enabled: Boolean) = context.settingsDataStore.edit {

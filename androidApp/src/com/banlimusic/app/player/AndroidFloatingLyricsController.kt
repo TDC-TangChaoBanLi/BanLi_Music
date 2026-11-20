@@ -44,6 +44,9 @@ class AndroidFloatingLyricsController(
     private var positionMs = 0L
     private var lyricsJob: Job? = null
     private var started = false
+    private val baseFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
 
     fun start() {
         if (started) return
@@ -112,9 +115,24 @@ class AndroidFloatingLyricsController(
         val overlay = ensureOverlay() ?: return
         val desiredWidth = (app.resources.displayMetrics.widthPixels -
             (24 * density).toInt()).coerceAtLeast((240 * density).toInt())
+        val locked = currentSettings.floatingLyricsLocked
+        overlay.setLocked(locked)
         layoutParams?.let { params ->
+            var changed = false
             if (params.width != desiredWidth) {
                 params.width = desiredWidth
+                changed = true
+            }
+            val desiredFlags = if (locked) {
+                baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            } else {
+                baseFlags
+            }
+            if (params.flags != desiredFlags) {
+                params.flags = desiredFlags
+                changed = true
+            }
+            if (changed) {
                 runCatching { windowManager.updateViewLayout(overlay, params) }
             }
         }
@@ -149,6 +167,11 @@ class AndroidFloatingLyricsController(
                 }
                 removeOverlay()
             }
+            onLockChanged = { locked ->
+                scope.launch {
+                    container.settingsRepository.setFloatingLyricsLocked(locked)
+                }
+            }
         }
         val metrics = app.resources.displayMetrics
         val layoutParams = WindowManager.LayoutParams(
@@ -160,9 +183,7 @@ class AndroidFloatingLyricsController(
                 @Suppress("DEPRECATION")
                 WindowManager.LayoutParams.TYPE_PHONE
             },
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            baseFlags,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
@@ -188,6 +209,11 @@ class AndroidFloatingLyricsController(
                 (screenHeight - created.height).coerceAtLeast(0),
             )
             runCatching { windowManager.updateViewLayout(created, layoutParams) }
+        }
+        val locked = currentSettings.floatingLyricsLocked
+        created.setLocked(locked)
+        if (locked) {
+            layoutParams.flags = baseFlags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         }
         val added = runCatching { windowManager.addView(created, layoutParams) }.isSuccess
         if (!added) return null

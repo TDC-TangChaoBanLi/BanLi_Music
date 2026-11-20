@@ -5,6 +5,8 @@ package com.banlimusic.desktop
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,22 +18,34 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CropSquare
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.FilterNone
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,12 +68,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowDecoration
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberDialogState
 import androidx.compose.ui.window.rememberWindowState
 import com.banlimusic.desktop.ui.BanLiDesktopTheme
 import com.banlimusic.desktop.ui.DesktopAgreementScreen
@@ -76,6 +92,7 @@ import com.banlimusic.desktop.ui.DesktopTab
 import com.banlimusic.shared.resources.Res
 import com.banlimusic.shared.resources.banli_logo
 import com.banlimusic.shared.ui.components.BanLiDownloadQualityDialog
+import com.banlimusic.shared.ui.components.BanLiProgressSection
 import com.banlimusic.shared.ui.components.downloadQualityPrompt
 import com.banlimusic.shared.ui.navigation.BanLiAppShell
 import com.banlimusic.shared.ui.navigation.BanLiBarPosition
@@ -83,6 +100,7 @@ import com.banlimusic.shared.ui.navigation.BanLiDestination
 import com.banlimusic.app.core.datastore.TabletMiniPlayerPosition
 import com.banlimusic.app.core.datastore.TabletNavPosition
 import com.banlimusic.desktop.player.DesktopMediaKeys
+import com.banlimusic.desktop.player.DesktopPlayMode
 import com.banlimusic.shared.ui.navigation.BanLiNavigationLayout
 import com.banlimusic.shared.ui.navigation.BanLiNavigationSide
 import java.awt.Dimension
@@ -95,6 +113,9 @@ import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
 import javax.swing.SwingUtilities
+import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 
 fun main() {
@@ -134,6 +155,8 @@ private fun launchDesktop(singleInstance: DesktopSingleInstance) = application {
     var trayIconRef by remember { mutableStateOf<TrayIcon?>(null) }
     val appSettings by container.settingsRepository.settings.collectAsState()
     val playback by container.player.state.collectAsState()
+    val favorites by container.libraryRepository.favorites.collectAsState()
+    val scope = rememberCoroutineScope()
 
     fun showWindow() {
         trayPopupVisible = false
@@ -163,7 +186,7 @@ private fun launchDesktop(singleInstance: DesktopSingleInstance) = application {
     }
 
     // AWT keeps the native tray behaviour, while the menu itself is a Compose
-    // window so Chinese text is rendered by Skia instead of the system font.
+    // dialog so Chinese text is rendered by Skia and no taskbar button appears.
     DisposableEffect(traySupported) {
         if (!traySupported) return@DisposableEffect onDispose { }
         val tray = SystemTray.getSystemTray()
@@ -176,8 +199,8 @@ private fun launchDesktop(singleInstance: DesktopSingleInstance) = application {
             lastPopupAt = now
             val point = event.locationOnScreen
             val bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
-            val popupWidth = 340
-            val popupHeight = 250
+            val popupWidth = 268
+            val popupHeight = 400
             val rawX = if (point.x <= 2 || point.y <= 2) {
                 bounds.x + bounds.width - popupWidth
             } else {
@@ -236,8 +259,10 @@ private fun launchDesktop(singleInstance: DesktopSingleInstance) = application {
     }
 
     if (trayPopupVisible) {
-        val popupState = rememberWindowState(width = 340.dp, height = 250.dp)
-        Window(
+        val popupState = rememberDialogState(width = 268.dp, height = 400.dp)
+        val track = playback.track
+        val isFavorite = track != null && favorites.any { it.id == track.id }
+        DialogWindow(
             onCloseRequest = { trayPopupVisible = false },
             state = popupState,
             title = "BanLiMusic",
@@ -285,6 +310,20 @@ private fun launchDesktop(singleInstance: DesktopSingleInstance) = application {
                 DesktopTrayPopup(
                     container = container,
                     playback = playback,
+                    isFavorite = isFavorite,
+                    onToggleFavorite = {
+                        if (track != null) {
+                            scope.launch {
+                                try {
+                                    container.libraryRepository.toggleFavorite(track)
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Throwable) {
+                                    // The next tap retries; a failed write must not crash the tray.
+                                }
+                            }
+                        }
+                    },
                     onShowWindow = ::showWindow,
                     onExit = ::exitApplication,
                 )
@@ -325,13 +364,17 @@ private fun launchDesktop(singleInstance: DesktopSingleInstance) = application {
 private fun DesktopTrayPopup(
     container: DesktopContainer,
     playback: com.banlimusic.desktop.player.DesktopPlaybackState,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
     onShowWindow: () -> Unit,
     onExit: () -> Unit,
 ) {
     val track = playback.track
+    val player = container.player
+    val volume = playback.volume.coerceIn(0f, 1f)
     Surface(
         modifier = Modifier.fillMaxSize(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 10.dp,
         shadowElevation = 12.dp,
@@ -339,37 +382,42 @@ private fun DesktopTrayPopup(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(
-                text = track?.title ?: "还没有播放歌曲",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            )
-            Text(
-                text = track?.artistLine ?: "BanLiMusic",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = track?.title ?: "还没有播放歌曲",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = track?.artistLine ?: "BanLiMusic",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(
+                CompactTrayIconButton(
+                    icon = Icons.Rounded.SkipPrevious,
+                    contentDescription = "上一曲",
                     enabled = playback.hasQueue,
-                    onClick = { container.player.previous() },
-                ) {
-                    Icon(Icons.Rounded.SkipPrevious, contentDescription = "上一曲")
-                }
-                IconButton(
+                    onClick = player::previous,
+                )
+                Spacer(Modifier.width(14.dp))
+                FilledIconButton(
+                    onClick = player::togglePause,
                     enabled = track != null,
-                    onClick = { container.player.togglePause() },
+                    modifier = Modifier.size(38.dp),
+                    shape = CircleShape,
                 ) {
                     Icon(
                         imageVector = if (playback.playing) {
@@ -378,30 +426,142 @@ private fun DesktopTrayPopup(
                             Icons.Rounded.PlayArrow
                         },
                         contentDescription = if (playback.playing) "暂停" else "播放",
+                        modifier = Modifier.size(22.dp),
                     )
                 }
-                IconButton(
+                Spacer(Modifier.width(14.dp))
+                CompactTrayIconButton(
+                    icon = Icons.Rounded.SkipNext,
+                    contentDescription = "下一曲",
                     enabled = playback.hasQueue,
-                    onClick = { container.player.next() },
-                ) {
-                    Icon(Icons.Rounded.SkipNext, contentDescription = "下一曲")
-                }
+                    onClick = { player.next() },
+                )
             }
-            HorizontalDivider()
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                androidx.compose.material3.TextButton(onClick = onShowWindow) {
-                    Text("显示主窗口")
-                }
-                androidx.compose.material3.TextButton(onClick = onExit) {
-                    Text("退出")
-                }
+                CompactTrayIconButton(
+                    icon = playback.playMode.trayIcon(),
+                    contentDescription = playback.playMode.label,
+                    enabled = true,
+                    onClick = player::cyclePlayMode,
+                )
+                CompactTrayIconButton(
+                    icon = if (isFavorite) {
+                        Icons.Rounded.Favorite
+                    } else {
+                        Icons.Rounded.FavoriteBorder
+                    },
+                    contentDescription = if (isFavorite) "取消收藏" else "收藏",
+                    enabled = track != null,
+                    onClick = onToggleFavorite,
+                    tint = if (isFavorite) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
             }
+            BanLiProgressSection(
+                positionMs = playback.positionMs,
+                durationMs = playback.durationMs,
+                onSeek = player::seekTo,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = if (volume <= 0.01f) {
+                        Icons.AutoMirrored.Rounded.VolumeOff
+                    } else {
+                        Icons.AutoMirrored.Rounded.VolumeUp
+                    },
+                    contentDescription = "音量",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Slider(
+                    value = volume,
+                    onValueChange = player::setVolume,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 8.dp),
+                )
+                Text(
+                    text = "${(volume * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HorizontalDivider()
+            TrayMenuAction(
+                icon = Icons.AutoMirrored.Rounded.OpenInNew,
+                label = "显示窗口",
+                onClick = onShowWindow,
+            )
+            TrayMenuAction(
+                icon = Icons.Rounded.PowerSettingsNew,
+                label = "退出",
+                onClick = onExit,
+            )
         }
     }
+}
+
+@Composable
+private fun CompactTrayIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(32.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(18.dp),
+            tint = tint,
+        )
+    }
+}
+
+@Composable
+private fun TrayMenuAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(text = label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+private fun DesktopPlayMode.trayIcon(): ImageVector = when (this) {
+    DesktopPlayMode.REPEAT_ONE -> Icons.Rounded.RepeatOne
+    DesktopPlayMode.SHUFFLE -> Icons.Rounded.Shuffle
+    else -> Icons.Rounded.Repeat
 }
 
 /** Loads the shared logo from the composeResources jar for the AWT tray icon. */
